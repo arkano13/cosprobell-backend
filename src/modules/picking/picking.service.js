@@ -1,4 +1,5 @@
 import { pickingRepository } from "./picking.repository.js";
+import { conSesionBloqueada } from "./picking.transaction.js";
 import { AppError } from "../../shared/errors/AppError.js";
 
 function sesionNoEncontrada() {
@@ -7,6 +8,20 @@ function sesionNoEncontrada() {
     message: "Sesion de picking no encontrada",
     statusCode: 404,
   });
+}
+
+function comprobarSesionActiva(sesion) {
+  if (!sesion) {
+    throw sesionNoEncontrada();
+  }
+
+  if (sesion.estado !== "en_proceso") {
+    throw new AppError({
+      code: "PICKING_NO_ACTIVO",
+      message: `El picking ya esta en estado '${sesion.estado}'`,
+      statusCode: 400,
+    });
+  }
 }
 
 export async function iniciarPicking({
@@ -55,68 +70,60 @@ export async function consultarPicking(id) {
 }
 
 export async function escanearPicking(id, codigo) {
-  const picking =
-    await pickingRepository.buscarEstadoSesion(id);
+  return conSesionBloqueada(id, async ({ tx, sesion }) => {
+    comprobarSesionActiva(sesion);
 
-  if (!picking) {
-    throw sesionNoEncontrada();
-  }
+    const filas =
+      await pickingRepository.incrementarLinea(id, codigo, tx);
 
-  if (picking.estado !== "en_proceso") {
+    if (filas.length > 0) {
+      return filas[0];
+    }
+
+    const linea =
+      await pickingRepository.buscarLineaProducto(id, codigo, tx);
+
+    if (!linea) {
+      throw new AppError({
+        code: "PRODUCTO_FUERA_DEL_PEDIDO",
+        message: "Ese producto no pertenece a este pedido",
+        statusCode: 409,
+      });
+    }
+
     throw new AppError({
-      code: "PICKING_NO_ACTIVO",
-      message: `El picking ya esta en estado '${picking.estado}'`,
-      statusCode: 400,
-    });
-  }
-
-  const filas =
-    await pickingRepository.incrementarLinea(id, codigo);
-
-  if (filas.length > 0) {
-    return filas[0];
-  }
-
-  const linea =
-    await pickingRepository.buscarLineaProducto(id, codigo);
-
-  if (!linea) {
-    throw new AppError({
-      code: "PRODUCTO_FUERA_DEL_PEDIDO",
-      message: "Ese producto no pertenece a este pedido",
+      code: "CANTIDAD_COMPLETADA",
+      message: "Ese producto ya completo su cantidad pedida",
       statusCode: 409,
     });
-  }
-
-  // Conserva la interpretación actual.
-  // Revisaremos este caso junto con los bloqueos y la concurrencia.
-  throw new AppError({
-    code: "CANTIDAD_COMPLETADA",
-    message: "Ese producto ya completo su cantidad pedida",
-    statusCode: 409,
   });
 }
 
 export async function finalizarPicking(id) {
-  const picking =
-    await pickingRepository.buscarSesionConLineas(id);
+  return conSesionBloqueada(id, async ({ tx, sesion }) => {
+    comprobarSesionActiva(sesion);
 
-  if (!picking) {
-    throw sesionNoEncontrada();
-  }
+    const picking =
+      await pickingRepository.buscarSesionConLineas(id, tx);
 
-  const hayDiferencias = picking.lineas.some(
-    (linea) =>
-      linea.cantidadEscaneada !== linea.cantidadPedida
-  );
+    if (!picking) {
+      throw sesionNoEncontrada();
+    }
 
-  const estado = hayDiferencias
-    ? "con_diferencias"
-    : "completo";
+    const hayDiferencias = picking.lineas.some(
+      (linea) =>
+        linea.cantidadEscaneada !== linea.cantidadPedida
+    );
 
-  return pickingRepository.guardarFinalizacion(
-    id,
-    estado,
-    new Date()
-  );
+    const estado = hayDiferencias
+      ? "con_diferencias"
+      : "completo";
+
+    return pickingRepository.guardarFinalizacion(
+      id,
+      estado,
+      new Date(),
+      tx
+    );
+  });
 }

@@ -3,8 +3,12 @@ import { prisma } from "../../infrastructure/database/prisma.js";
 export const pickingRepository = {
   buscarPedidoConLineas(pedidoDocEntry) {
     return prisma.pedido.findUnique({
-      where: { docEntry: pedidoDocEntry },
-      include: { lineas: true },
+      where: {
+        docEntry: pedidoDocEntry,
+      },
+      include: {
+        lineas: true,
+      },
     });
   },
 
@@ -22,26 +26,36 @@ export const pickingRepository = {
           })),
         },
       },
-      include: { lineas: true },
+      include: {
+        lineas: true,
+      },
     });
   },
 
-  buscarSesionConLineas(id) {
-    return prisma.pickingPedido.findUnique({
-      where: { id },
-      include: { lineas: true },
+  buscarSesionConLineas(id, db = prisma) {
+    return db.pickingPedido.findUnique({
+      where: {
+        id,
+      },
+      include: {
+        lineas: true,
+      },
     });
   },
 
-  buscarEstadoSesion(id) {
-    return prisma.pickingPedido.findUnique({
-      where: { id },
-      select: { estado: true },
+  buscarEstadoSesion(id, db = prisma) {
+    return db.pickingPedido.findUnique({
+      where: {
+        id,
+      },
+      select: {
+        estado: true,
+      },
     });
   },
 
-  incrementarLinea(pickingId, codigo) {
-    return prisma.$queryRaw`
+  incrementarLinea(pickingId, codigo, db = prisma) {
+    return db.$queryRaw`
       UPDATE picking_pedidos_lineas
       SET "cantidadEscaneada" = "cantidadEscaneada" + 1,
           "codigoBarrasEscaneado" = ${codigo},
@@ -54,14 +68,14 @@ export const pickingRepository = {
           AND "cantidadEscaneada" < "cantidadPedida"
         ORDER BY id
         LIMIT 1
-        FOR UPDATE SKIP LOCKED
+        FOR UPDATE
       )
       RETURNING *;
     `;
   },
 
-  buscarLineaProducto(pickingId, itemCode) {
-    return prisma.pickingPedidoLinea.findFirst({
+  buscarLineaProducto(pickingId, itemCode, db = prisma) {
+    return db.pickingPedidoLinea.findFirst({
       where: {
         pickingId,
         itemCode,
@@ -69,14 +83,18 @@ export const pickingRepository = {
     });
   },
 
-  guardarFinalizacion(id, estado, fechaFin) {
-    return prisma.pickingPedido.update({
-      where: { id },
+  guardarFinalizacion(id, estado, fechaFin, db = prisma) {
+    return db.pickingPedido.update({
+      where: {
+        id,
+      },
       data: {
         estado,
         fechaFin,
       },
-      include: { lineas: true },
+      include: {
+        lineas: true,
+      },
     });
   },
 };

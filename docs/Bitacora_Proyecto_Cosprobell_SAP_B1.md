@@ -1,6 +1,6 @@
 # Bitácora del proyecto — Cosprobell · SAP Business One
 
-Última actualización: 27 de septiembre de 2026.
+Última actualización: 28 de septiembre de 2026.
 
 ## Procedencia
 
@@ -24,6 +24,7 @@ Documentos de referencia:
 | Organización del código | Redistribución autorizada y aplicada; productos separado por capas |
 | Pruebas automatizadas | 61 de 61 aprobadas mediante ejecución de `npm test` por el asistente al cerrar la reorganización de picking; persistencia simulada |
 | Picking por capas | Completada la separación en rutas, schemas, controlador, servicio y repositorio; conservado el comportamiento anterior |
+| Concurrencia de picking | Transacción con bloqueo de sesión y retirada de `SKIP LOCKED`; seis escenarios contra PostgreSQL aprobados según resultados compartidos y confirmación del usuario; detalle en sección 11 |
 | Búsqueda por código de barras | Código principal, adicional, inexistente y ambiguo comprobados manualmente por el usuario contra su base configurada |
 | Conexión de búsqueda con escaneo | Pendiente; picking todavía compara el código recibido con `itemCode` y suma uno |
 | Errores con `AppError` | Clase y manejador central implementados y probados; falta migrar las respuestas directas de las rutas |
@@ -181,14 +182,14 @@ Principios de trabajo:
 
 ## 9. Próxima acción
 
-**Punto de pausa acordado:** reorganización de picking terminada y verificada. El usuario pidió cerrar este bloque y descansar. No iniciar más implementación en este punto.
+**Punto actual:** reorganización de picking terminada y ronda de concurrencia completada por el usuario. La sección 11 registra los resultados posteriores al cierre de estructura.
 
 Al retomar:
 
 1. Revisar los contratos y riesgos pendientes del escaneo antes de cambiar su comportamiento. La separación por responsabilidades ya quedó terminada.
 2. Definir el contrato del escaneo: código, producto resuelto, presentación, cantidad e identificador de operación para controlar reintentos. Para un piloto de unidades, exigir una configuración explícita y rechazar presentaciones no resueltas.
 3. Confirmar con Cosprobell unidades/cajas, equivalencias, documento operativo y parciales; integrar después las reglas correspondientes.
-4. Conectar búsqueda y escaneo con errores coherentes; comprobar cierre simultáneo, cantidades excedidas y duplicados antes de dar el flujo por validado.
+4. Conectar búsqueda y escaneo con errores coherentes. Los casos de cierre simultáneo y límite descritos en la sección 11 ya fueron comprobados; quedan reintentos duplicados, presentaciones y cobertura HTTP de escanear/finalizar.
 5. Mantener pendientes la prueba manual del script sin argumento, cierre por señal y rotación de credencial; no marcarlos como completados sin evidencia.
 6. Retomar la reunión sobre acceso a SAP y muestras conectadas a partir de las dudas documentadas. La preparación de esa reunión no depende de terminar toda la aplicación.
 
@@ -214,7 +215,7 @@ Durante el aprendizaje, se corrigió un repositorio vacío en disco y se retirar
 
 La reorganización conserva las URLs y respuestas anteriores. No se modificaron el esquema Prisma ni las migraciones en este cierre y no se ejecutaron escrituras sobre una base real. La suite utiliza persistencia simulada: no valida el SQL bajo concurrencia ni el circuito real de SAP.
 
-Limitaciones que siguen abiertas:
+Limitaciones identificadas al cerrar la reorganización (estado histórico; la sección 11 actualiza las corregidas):
 
 1. Escaneo por `itemCode` con incremento fijo de uno; búsqueda por etiquetas y presentaciones aún sin conectar.
 2. Cantidades originales al iniciar, sin reglas completas de pendientes, elegibilidad o sesiones duplicadas.
@@ -225,3 +226,37 @@ Limitaciones que siguen abiertas:
 7. Falta identidad personal fiable, reglas de cambios/cancelaciones de SAP y pruebas de PostgreSQL de desarrollo para concurrencia.
 
 **Conclusión:** bloque de estructura terminado; picking todavía no está certificado para operación real. El siguiente trabajo será definir unidades y contrato de escaneo y corregir la consistencia transaccional con pruebas apropiadas.
+
+## 11. Consistencia transaccional y pruebas en PostgreSQL
+
+### Cambios incorporados
+
+- Se retiró `SKIP LOCKED` del incremento de líneas.
+- `picking.transaction.js` ejecuta la operación en una transacción `ReadCommitted` y bloquea la sesión mediante `SELECT ... FOR UPDATE`.
+- Escanear y finalizar comprueban el estado dentro de esa transacción y utilizan la misma conexión para sus consultas y escrituras.
+- Una operación que encuentra la sesión cerrada se rechaza con `PICKING_NO_ACTIVO`; también se impide volver a finalizarla.
+
+Esto corrige las limitaciones históricas 3 y 4 de la sección 10 y la repetición del cierre descrita en la 6. Finalizar con diferencias sigue permitido por el código; no equivale a una autorización operativa de despacho parcial.
+
+### Evidencia reportada por el usuario
+
+Las pruebas se ejecutaron en la base PostgreSQL que el usuario identificó y autorizó como base de pruebas. Los scripts crean sesiones temporales con códigos únicos y eliminan sus propios datos al terminar.
+
+| Script | Caso y resultado |
+|---|---|
+| `scripts/comprobar-concurrencia-picking.js` | Dos escaneos aceptados; cantidad final 2 de 5. Salida compartida: sesión 6 eliminada. |
+| `scripts/comprobar-limite-picking.js` | Dos escaneos para una unidad: uno aceptado y otro rechazado con `CANTIDAD_COMPLETADA`; final 1 de 1. Salida compartida: sesión 7 eliminada. |
+| `scripts/comprobar-bloqueo-picking.js` | PostgreSQL confirmó mediante `pg_blocking_pids` que el escaneo esperaba; después de liberar el bloqueo se registró una unidad. Salida compartida: sesión 8 eliminada. |
+| `scripts/comprobar-cierre-picking.js`, caso 1 | El cierre espera al escaneo y conserva la unidad registrada; sesión completa. |
+| `scripts/comprobar-cierre-picking.js`, caso 2 | El escaneo espera al cierre y se rechaza con `PICKING_NO_ACTIVO`; cantidad y fecha de cierre permanecen sin cambios. |
+| `scripts/comprobar-cierre-picking.js`, caso 3 | Cuatro escaneos para el mismo producto en dos líneas de cantidades 1 y 2: tres aceptados, uno rechazado y cantidades finales 1 y 2. |
+
+El usuario confirmó «aprobó los 3» para el último script. Los dos primeros casos de ese script controlan el orden y comprueban la espera en PostgreSQL. Lanzar varias promesas en los otros casos no demuestra por sí solo que todas hayan coincidido en el bloqueo.
+
+Estos resultados se registran como ejecuciones del usuario; el asistente no volvió a ejecutar los scripts contra la base al actualizar esta sección. Son seis escenarios de base real separados de `npm test`: no se suman al contador de esa suite. La fila de 61 pruebas conserva la última ejecución del asistente documentada al cierre de estructura; no representa un recuento actualizado de la suite tras estos cambios.
+
+### Próximo bloque y límites pendientes
+
+La ronda acordada de concurrencia queda cerrada. El siguiente bloque es definir y conectar el contrato del escaneo con la búsqueda por código de barras: conservar el código leído, resolver el producto y determinar explícitamente la cantidad correspondiente a su presentación.
+
+Siguen pendientes las equivalencias unidad/caja, idempotencia para reintentos, trazabilidad individual de escaneos, elegibilidad y duplicidad de sesiones, cobertura HTTP de escanear/finalizar, uniformización de errores, identidad de operadores y reglas de sincronización con SAP. Las pruebas actuales trabajan con `itemCode` e incremento de uno; no validan etiquetas reales, carga sostenida ni todo el flujo de despacho.
