@@ -2,19 +2,19 @@
 
 ## Qué incluye
 
-Programa Node.js separado en puente/. Requiere Node 24 y las dependencias del proyecto. No importa la conexión PostgreSQL ni necesita DATABASE_URL; comparte únicamente el contrato Zod del receptor. La entrega no instala un servicio de Windows ni ejecuta conexiones reales a SAP.
+Programa Node.js separado en puente/. Requiere Node 22 o superior (verificado con Node 22) y las dependencias del proyecto. No importa la conexión PostgreSQL ni necesita DATABASE_URL; comparte únicamente el contrato Zod del receptor. La entrega no instala un servicio de Windows ni ejecuta conexiones reales a SAP.
 
 - config.js: configuración, URLs, TLS y vínculo de origen.
 - sap.client.js: Login, cookies B1SESSION/ROUTEID, lectura de Items, renovación una vez ante 401 y Logout.
 - productos.js: convierte ItemCode, ItemName, BarCode, Valid y Frozen al contrato del backend. Solo tYES/tNO se interpretan como booleanos. Código de barras vacío pasa a null; datos faltantes o inválidos detienen el envío.
 - backend.client.js: consulta el avance y envía lotes con la credencial Bearer del puente. Comprueba la confirmación.
-- estado.js: archivo local de avance y lote pendiente, escritura mediante archivo temporal + fsync + rename; candado para impedir dos ejecuciones usando la misma carpeta.
+- estado.js: archivo local de avance y lote pendiente, escritura mediante archivo temporal + fsync + rename; candado con el PID del proceso para impedir dos ejecuciones usando la misma carpeta y recuperarse solo tras un cierre forzado.
 - sincronizar.js: persiste antes de enviar, confirma después de respuesta y recupera pendientes al reiniciar.
 - ejecutar.js: ejecución única o periódica, espera creciente ante errores temporales y parada por señales.
 
 ## Instalación y configuración
 
-En el equipo donde se ejecutará el puente debe existir Node 24, las dependencias del proyecto y acceso de red a SAP y al backend. Este paquete usa puente/ y src/modules/sincronizacion/productos.schemas.js; no copiar únicamente puente/ a otro equipo sin ese contrato y zod. El empaquetado como servicio de Windows se hará después de validar la conexión.
+En el equipo donde se ejecutará el puente debe existir Node 22 o superior, las dependencias del proyecto y acceso de red a SAP y al backend. Este paquete usa puente/ y src/modules/sincronizacion/productos.schemas.js; no copiar únicamente puente/ a otro equipo sin ese contrato y zod. El empaquetado como servicio de Windows se hará después de validar la conexión.
 
 Copiar .env.puente.example a .env.puente sin sobrescribir una configuración existente. Completar localmente:
 
@@ -50,15 +50,17 @@ El modo periódico sigue siendo un proceso de consola; no está registrado en el
 
 ## Recorrido y recuperación
 
-Solicita hasta 50 productos por petición, ordenados por ItemCode, con filtro mayor al último código confirmado. Si SAP devuelve una página menor, continúa igualmente hasta recibir una página vacía. No sigue URLs nextLink externas: genera las consultas contra el origen configurado. Este recorrido por clave debe validarse con la ordenación/collation y permisos reales del catálogo.
+Solicita hasta 50 productos por petición (`$top=50` y `Prefer: odata.maxpagesize=50`; sin ese encabezado Service Layer devuelve 20), ordenados por ItemCode, con filtro mayor al último código confirmado. Si SAP devuelve una página menor, continúa igualmente hasta recibir una página vacía. No sigue URLs nextLink externas: genera las consultas contra el origen configurado. La consulta usa `$` literal y espacios como `%20`, la misma forma que Service Layer aceptó desde el navegador; no se usa `URLSearchParams` porque enviaría `%24select` y `+`, sin confirmar con el SAP real. Este recorrido por clave debe validarse con la ordenación/collation y permisos reales del catálogo.
 
 Cada página se valida y se guarda como lote pendiente ANTES de enviar. Si se pierde una respuesta, se reenvía el mismo contenido/número. El siguiente cursor solo se confirma después de que el backend acepte el lote. Al terminar se reinicia el cursor para recorrer el catálogo completo en el siguiente ciclo.
 
 El archivo se vincula a empresa, URL SAP y URL backend, sin guardar contraseñas ni cookies. Al arrancar se compara la secuencia local con la remota; discrepancias inesperadas requieren reconciliación. No borrar el archivo para forzar el inicio ni adoptar automáticamente la secuencia remota. Si se cambia la dirección, restauran bases o pierde estado, detener y revisar ambos extremos.
 
-Ante interrupción normal se retira ejecucion.lock. Una terminación forzada o apagón puede dejar el directorio de candado. En ese caso el programa se detiene con PUENTE_YA_BLOQUEADO: el administrador debe verificar que no quede otro proceso y retirar ÚNICAMENTE ese directorio vacío; conservar productos.json. No hay desbloqueo automático ni garantía de recuperación desatendida tras apagón en esta versión. El registro como servicio, reinicio supervisado y recuperación del candado quedan para endurecimiento de despliegue.
+ejecucion.lock contiene un archivo pid con el proceso que lo tomó. Ante interrupción normal se retira. Si una terminación forzada o un apagón lo deja, la siguiente ejecución comprueba ese PID: si el proceso ya no existe, aparta el candado huérfano (renombrado atómico con verificación) y continúa sin intervención. Si el proceso existe, responde PUENTE_YA_BLOQUEADO.
 
-Errores de conexión y HTTP 408/429/500/502/503/504 se reintentan en modo periódico con espera creciente hasta 60 segundos. Errores de datos, credenciales, configuración, disco o conflictos detienen el proceso con código de salida 1. No se imprimen respuestas remotas, cookies ni credenciales. Los errores de conexión/certificado se agrupan como CONEXION_O_TLS y requieren diagnóstico del administrador si persisten. No hay alertas externas ni rotación de registros configuradas aún.
+Casos que siguen requiriendo al administrador, todos poco frecuentes: un candado sin archivo pid (versión anterior del puente o corte justo entre crear la carpeta y escribir el PID) y un PID reutilizado por otro programa después de reiniciar el equipo. En ambos, verificar que no haya otro proceso del puente y retirar ÚNICAMENTE ejecucion.lock; conservar productos.json. `node scripts/comprobar-candado-puente.js` comprueba con procesos reales el cierre forzado y varias recuperaciones simultáneas; conviene ejecutarlo una vez en el equipo Windows del puente. El registro como servicio y el reinicio supervisado quedan para endurecimiento de despliegue.
+
+Errores de conexión y HTTP 408/429/500/502/503/504 se reintentan en modo periódico con espera creciente hasta 60 segundos. Errores de datos, credenciales, configuración, disco o conflictos detienen el proceso con código de salida 1. Un producto que no cumple el contrato se informa con su código y el campo SAP, sin el valor: `{"evento":"fallo","codigo":"PRODUCTO_SAP_INVALIDO","temporal":false,"detalle":{"itemCode":"A-100","campo":"ItemName"}}`. Hay que corregirlo en SAP; mientras tanto, los productos posteriores de ese recorrido no se actualizan. No se imprimen respuestas remotas, cookies ni credenciales. Los errores de conexión/certificado se agrupan como CONEXION_O_TLS y requieren diagnóstico del administrador si persisten. No hay alertas externas ni rotación de registros configuradas aún.
 
 ## Límites
 
@@ -68,6 +70,6 @@ Conservar el estado en disco evita pérdidas comunes por reinicio, pero no susti
 
 ## Evidencia
 
-211/211 pruebas automatizadas aprobadas. Incluyen configuración, transformación, estado persistente, candado, archivo corrupto, fallo de disco antes del envío, recuperación tras respuesta perdida, sesión SAP vencida, escape OData, confirmación incorrecta y recorrido HTTP con servidores locales simulados. No se contactó SAP ni se usaron credenciales reales.
+217/217 pruebas automatizadas aprobadas. Incluyen configuración, detalle del producto inválido, recuperación del candado huérfano, forma exacta de la consulta, transformación, estado persistente, candado, archivo corrupto, fallo de disco antes del envío, recuperación tras respuesta perdida, sesión SAP vencida, escape OData, confirmación incorrecta y recorrido HTTP con servidores locales simulados. No se contactó SAP ni se usaron credenciales reales.
 
 Referencia de sesiones: [guía oficial SAP](https://help.sap.com/doc/fc2f5477516c404c8bf9ad1315a17238/10.0/en-US/Working_with_SAP_Business_One_Service_Layer.pdf). Se usa el flujo clásico Login/B1SESSION disponible en la versión acordada; no se incorporan funciones recientes como webhooks.

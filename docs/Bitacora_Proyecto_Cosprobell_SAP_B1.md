@@ -424,3 +424,14 @@ Las muestras locales Items.json confirman los campos ItemCode, ItemName, BarCode
 La primera versión recorre el catálogo completo por ItemCode y reenvía páginas en cada ciclo. Incrementales, eliminaciones, códigos adicionales, unidades, stock y pedidos siguen pendientes. El modo --watch no equivale a un servicio Windows instalado. Tras apagón o terminación forzada puede requerir retirar el candado vacío después de verificar que no existe otro proceso; no borrar el estado. Despliegue, alertas y recuperación desatendida se completarán tras la prueba de conexión.
 
 Siguiente paso: incorporar entrega, configurar .env.puente localmente en equipo autorizado y ejecutar un solo ciclo contra XPRUEBAS2026, con backend de pruebas confirmado. Guía en PUENTE_PRODUCTOS.md.
+
+
+## 18. Emisor de productos — mejoras tras la revisión
+
+Revisión del commit 7f7f814 con PostgreSQL real y un Service Layer simulado (125 productos: 5 muestras del ZIP y 120 sintéticos). La carga, la repetición y la comprobación del receptor funcionaron. Se corrigieron tres puntos:
+
+- Producto inválido: el error indica el código del producto y el campo SAP (`detalle: { itemCode, campo }`), nunca el valor. Antes solo decía PRODUCTO_SAP_INVALIDO y el recorrido quedaba detenido en esa página sin saber por qué. Se mantiene la política de detener; queda por decidir si conviene saltar y reportar.
+- Candado local: ejecucion.lock guarda el PID. Tras un cierre forzado o un apagón, la siguiente ejecución aparta el candado huérfano y continúa sola. Un candado de proceso vivo o sin PID se respeta. Comprobado con procesos reales: kill -9 y 100 rondas de 6 procesos simultáneos sin que dos tomaran el candado. La prueba detecta la mutación que omite la verificación tras renombrar.
+- Consulta a Service Layer: `$` literal, espacios `%20` y `Prefer: odata.maxpagesize=50`. URLSearchParams enviaba `%24select` y `+`, forma no confirmada con el SAP real; sin Prefer las páginas eran de 20.
+
+Suite: **217 de 217 aprobadas**. No se conectó a SAP ni se aplicaron migraciones fuera de bases temporales, que se eliminaron junto con las muestras del ZIP. Pendiente sin cambios: reconciliación asistida cuando la secuencia local y la remota no coinciden, carga incremental, códigos adicionales, unidades, existencias y pedidos.

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile, mkdir, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
@@ -27,6 +27,16 @@ test("transforma los campos SAP sin perder ceros iniciales", () => {
 for (const datos of [{ ...fila(), Valid: null }, { ...fila(), Frozen: true }, { ...fila(), BarCode: 123 }, { ...fila(), ItemCode: " P1" }]) {
   test("rechaza producto SAP incompleto o incompatible", () => assert.throws(() => construirLote([datos], "TEST", 1), { code: "PRODUCTO_SAP_INVALIDO" }));
 }
+test("indica el producto y el campo SAP inválido sin incluir el valor", () => {
+  for (const [datos, campo] of [[{ ...fila("P2"), ItemName: null }, "ItemName"], [{ ...fila("P2"), BarCode: "7401 " }, "BarCode"],
+    [{ ...fila("P2"), Frozen: true }, "Frozen"], [fila(" P2"), "ItemCode"]]) {
+    assert.throws(() => construirLote([fila(), datos], "TEST", 1), (e) => {
+      assert.equal(e.code, "PRODUCTO_SAP_INVALIDO"); assert.deepEqual(e.detalle, { itemCode: datos.ItemCode, campo }); return true;
+    });
+  }
+  assert.throws(() => construirLote([fila(), fila()], "TEST", 1), (e) => assert.deepEqual(e.detalle, { itemCode: "P1", campo: "ItemCode" }) ?? true);
+  assert.throws(() => construirLote([fila()], "", 1), (e) => e.code === "PRODUCTO_SAP_INVALIDO" && e.detalle === undefined);
+});
 for (const cambio of [ { SAP_SERVICE_LAYER_URL: "http://sap.example/b1s/v1" }, { BACKEND_URL: "https://u:secreto@backend.example" },
   { SAP_SERVICE_LAYER_URL: "https://sap.example/otra" }, { NODE_TLS_REJECT_UNAUTHORIZED: "0" }, { BRIDGE_INTERVAL_SECONDS: "0" }, { BRIDGE_API_KEY: "corta" } ]) {
   test("rechaza configuración insegura sin revelar secretos", () => assert.throws(() => configurar({ ...variables, ...cambio }), (e) => !e.message.includes("secreto")));
@@ -37,6 +47,41 @@ test("bloquea segunda instancia y vincula el estado a su origen", async (t) => {
   await a.cerrar();
   await assert.rejects(abrirEstado({ ...config, origen: "otro" }), { code: "ESTADO_LOCAL_INCOMPATIBLE" });
   const b = await abrirEstado(config); await b.cerrar();
+});
+// PID fuera del rango que asignan Linux y Windows: nunca corresponde a un proceso vivo.
+const PID_TERMINADO = 2147483644;
+async function candadoPrevio(config, pid) {
+  const candado = join(config.directorio, "ejecucion.lock"); await mkdir(candado);
+  if (pid !== undefined) await writeFile(join(candado, "pid"), String(pid));
+  return candado;
+}
+test("recupera el candado de un proceso que ya terminó y guarda el PID propio", async (t) => {
+  const config = await configTemporal(t); const candado = await candadoPrevio(config, PID_TERMINADO);
+  const a = await abrirEstado(config);
+  assert.equal(await readFile(join(candado, "pid"), "utf8"), String(process.pid));
+  assert.deepEqual((await readdir(config.directorio)).sort(), ["ejecucion.lock", "productos.json"]);
+  await a.cerrar(); assert.deepEqual(await readdir(config.directorio), ["productos.json"]);
+});
+test("respeta un candado sin PID legible", async (t) => {
+  const config = await configTemporal(t); await candadoPrevio(config);
+  await assert.rejects(abrirEstado(config), { code: "PUENTE_YA_BLOQUEADO" });
+  await writeFile(join(config.directorio, "ejecucion.lock", "pid"), "no-es-un-pid");
+  await assert.rejects(abrirEstado(config), { code: "PUENTE_YA_BLOQUEADO" });
+});
+test("dos recuperaciones simultáneas del mismo candado huérfano: solo una continúa", async (t) => {
+  const config = await configTemporal(t); await candadoPrevio(config, PID_TERMINADO);
+  const resultados = await Promise.allSettled([abrirEstado(config), abrirEstado(config)]);
+  const abiertos = resultados.filter((r) => r.status === "fulfilled");
+  assert.equal(abiertos.length, 1);
+  assert.equal(resultados.find((r) => r.status === "rejected").reason.code, "PUENTE_YA_BLOQUEADO");
+  await abiertos[0].value.cerrar();
+  assert.deepEqual(await readdir(config.directorio), ["productos.json"]);
+});
+test("cerrar no retira un candado que ya no es propio", async (t) => {
+  const config = await configTemporal(t); const a = await abrirEstado(config);
+  await writeFile(join(config.directorio, "ejecucion.lock", "pid"), String(PID_TERMINADO));
+  await a.cerrar();
+  assert.equal(await readFile(join(config.directorio, "ejecucion.lock", "pid"), "utf8"), String(PID_TERMINADO));
 });
 test("archivo corrupto no reinicia la secuencia silenciosamente", async (t) => {
   const config = await configTemporal(t); await writeFile(join(config.directorio, "productos.json"), "{");
@@ -95,6 +140,17 @@ test("filtro OData escapa comillas del código", async () => {
     assert.equal(new URL(url).searchParams.get("$filter"), "ItemCode gt 'A''B'"); return Response.json({ value: [] });
   });
   await cliente.pagina("A'B");
+});
+test("consulta con $ literal, espacios %20, caracteres codificados y página de 50", async () => {
+  const urls = [];
+  const cliente = crearClienteSap(configurar(variables), async (url, opciones) => {
+    if (url.endsWith("/Login")) return new Response("{}", { headers: { "Set-Cookie": "B1SESSION=sesion" } });
+    urls.push(url); assert.equal(opciones.headers.Prefer, "odata.maxpagesize=50"); return Response.json({ value: [] });
+  });
+  await cliente.pagina(null); await cliente.pagina("A+B&C D");
+  assert.equal(urls[0], "https://sap.example/b1s/v1/Items?$select=ItemCode,ItemName,BarCode,Valid,Frozen&$orderby=ItemCode%20asc&$top=50");
+  assert.equal(urls[1], `${urls[0]}&$filter=ItemCode%20gt%20'A%2BB%26C%20D'`);
+  assert.equal(new URL(urls[1]).searchParams.get("$filter"), "ItemCode gt 'A+B&C D'");
 });
 test("confirmación inconsistente del backend se rechaza", async () => {
   const cliente = crearClienteBackend(configurar(variables), async () => Response.json({ data: { secuencia: 9, recibidos: 1, repetido: false } }));
