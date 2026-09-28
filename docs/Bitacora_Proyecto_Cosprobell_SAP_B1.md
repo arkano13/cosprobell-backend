@@ -22,7 +22,8 @@ Documentos de referencia:
 | Revisión de metadatos y muestras | ZIP revisado: XML de metadatos y 13 archivos JSON |
 | Contexto funcional | Bodega y consulta por WhatsApp para los dueños definidos; quedan reglas operativas pendientes |
 | Organización del código | Redistribución autorizada y aplicada; productos separado por capas |
-| Pruebas automatizadas | 30 aprobadas expresamente por el usuario; cierre ordenado añadió 5 y recibió confirmación general de funcionamiento, sin salida completa de 35 compartida |
+| Pruebas automatizadas | 61 de 61 aprobadas mediante ejecución de `npm test` por el asistente al cerrar la reorganización de picking; persistencia simulada |
+| Picking por capas | Completada la separación en rutas, schemas, controlador, servicio y repositorio; conservado el comportamiento anterior |
 | Búsqueda por código de barras | Código principal, adicional, inexistente y ambiguo comprobados manualmente por el usuario contra su base configurada |
 | Conexión de búsqueda con escaneo | Pendiente; picking todavía compara el código recibido con `itemCode` y suma uno |
 | Errores con `AppError` | Clase y manejador central implementados y probados; falta migrar las respuestas directas de las rutas |
@@ -180,9 +181,47 @@ Principios de trabajo:
 
 ## 9. Próxima acción
 
-1. Separar el módulo de picking por responsabilidades, preservando primero el comportamiento existente y agregando pruebas de regresión. No conectar todavía la búsqueda suponiendo equivalencias desconocidas.
+**Punto de pausa acordado:** reorganización de picking terminada y verificada. El usuario pidió cerrar este bloque y descansar. No iniciar más implementación en este punto.
+
+Al retomar:
+
+1. Revisar los contratos y riesgos pendientes del escaneo antes de cambiar su comportamiento. La separación por responsabilidades ya quedó terminada.
 2. Definir el contrato del escaneo: código, producto resuelto, presentación, cantidad e identificador de operación para controlar reintentos. Para un piloto de unidades, exigir una configuración explícita y rechazar presentaciones no resueltas.
 3. Confirmar con Cosprobell unidades/cajas, equivalencias, documento operativo y parciales; integrar después las reglas correspondientes.
 4. Conectar búsqueda y escaneo con errores coherentes; comprobar cierre simultáneo, cantidades excedidas y duplicados antes de dar el flujo por validado.
 5. Mantener pendientes la prueba manual del script sin argumento, cierre por señal y rotación de credencial; no marcarlos como completados sin evidencia.
 6. Retomar la reunión sobre acceso a SAP y muestras conectadas a partir de las dudas documentadas. La preparación de esa reunión no depende de terminar toda la aplicación.
+
+## 10. Cierre de la reorganización de picking
+
+El usuario incorporó el código de forma guiada. El asistente revisó los archivos guardados y ejecutó `npm test`: **61 pruebas, 61 aprobadas, 0 fallidas**.
+
+### Estructura comprobada
+
+- `picking.routes.js`: conecta las cuatro rutas con validadores y controladores; no contiene SQL ni pruebas.
+- `picking.schemas.js`: entradas de inicio, identificador de sesión y código escaneado.
+- `picking.controller.js`: adapta HTTP, conserva temporalmente el formato anterior de errores conocidos y delega fallos internos al manejador central.
+- `picking.service.js`: inicio, consulta, escaneo y finalización; utiliza `AppError` para los errores conocidos.
+- `picking.repository.js`: consulta de pedido, creación de sesión, consulta con líneas, consulta de estado, incremento SQL, búsqueda de línea y persistencia de finalización.
+
+### Cobertura incorporada durante el bloque
+
+Se añadieron pruebas de schemas, creación de sesión en el repositorio y respuestas HTTP de inicio/consulta. El último paso añadió ocho pruebas de servicio para escaneo exitoso, sesión inexistente, sesión cerrada, producto ajeno, cantidad completa, fallo técnico y finalización con/sin diferencias.
+
+Durante el aprendizaje, se corrigió un repositorio vacío en disco y se retiraron pruebas pegadas accidentalmente dentro de las rutas. Los archivos de aplicación y pruebas quedaron separados.
+
+### Alcance real del resultado
+
+La reorganización conserva las URLs y respuestas anteriores. No se modificaron el esquema Prisma ni las migraciones en este cierre y no se ejecutaron escrituras sobre una base real. La suite utiliza persistencia simulada: no valida el SQL bajo concurrencia ni el circuito real de SAP.
+
+Limitaciones que siguen abiertas:
+
+1. Escaneo por `itemCode` con incremento fijo de uno; búsqueda por etiquetas y presentaciones aún sin conectar.
+2. Cantidades originales al iniciar, sin reglas completas de pendientes, elegibilidad o sesiones duplicadas.
+3. Consulta del estado e incremento separados; cierre y escaneo todavía pueden competir.
+4. `SKIP LOCKED` puede omitir una línea bloqueada; el mensaje actual de cantidad completa no es una prueba de que realmente esté completa bajo concurrencia.
+5. No hay idempotencia por evento de escaneo ni historial individual completo.
+6. Finalización conserva las reglas anteriores, incluida la posibilidad de finalizar con diferencias y de volver a finalizar una sesión; no representa autorización de despacho parcial.
+7. Falta identidad personal fiable, reglas de cambios/cancelaciones de SAP y pruebas de PostgreSQL de desarrollo para concurrencia.
+
+**Conclusión:** bloque de estructura terminado; picking todavía no está certificado para operación real. El siguiente trabajo será definir unidades y contrato de escaneo y corregir la consistencia transaccional con pruebas apropiadas.
