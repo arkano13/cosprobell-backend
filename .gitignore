@@ -3,3 +3,7 @@ node_modules
 .env
 
 /generated/prisma
+
+# Configuración y lotes locales del puente
+.env.puente
+.bridge-state/

@@ -5,6 +5,16 @@ export default function errorHandler(error, req, res, next) {
     return next(error);
   }
 
+  // Errores del lector JSON en la entrada del puente son errores de petición.
+  if (req.originalUrl?.startsWith("/integracion/") &&
+      ["entity.parse.failed", "entity.too.large"].includes(error.type)) {
+    const grande = error.type === "entity.too.large";
+    return res.status(grande ? 413 : 400).json({ error: {
+      code: grande ? "CUERPO_DEMASIADO_GRANDE" : "JSON_INVALIDO",
+      message: grande ? "El envío supera el tamaño permitido" : "El cuerpo debe ser JSON válido",
+    } });
+  }
+
   const esErrorConocido = error instanceof AppError;
 
   const statusCode = esErrorConocido

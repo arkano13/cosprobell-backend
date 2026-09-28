@@ -681,3 +681,16 @@ model ApiKey {
 // NOTA: evaluaciones_credito se disena intencionalmente en la fase final del
 // proyecto (decision del usuario, ver bitacora seccion 13). No se incluye aqui
 // para no fijar una estructura antes de definir el criterio del semaforo.
+
+
+// Estado de recepción de una única empresa SAP por base local.
+model SincronizacionEstado {
+  entidad       String   @id
+  empresa       String
+  secuencia     Int
+  hash          String
+  cantidad      Int
+  actualizadoEn DateTime @default(now())
+
+  @@map("sincronizacion_estados")
+}

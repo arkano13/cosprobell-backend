@@ -1,0 +1,27 @@
+import { createHash } from "node:crypto";
+import { resolve } from "node:path";
+function urlSegura(valor, campo) {
+  let u;
+  try { u = new URL(valor); } catch { throw new Error(`Configuración inválida: ${campo}`); }
+  const local = ["127.0.0.1", "localhost", "[::1]"].includes(u.hostname);
+  if ((u.protocol !== "https:" && !(local && u.protocol === "http:")) || u.username || u.password || u.search || u.hash) {
+    throw new Error(`Configuración inválida: ${campo}`);
+  }
+  return u.href.replace(/\/+$/, "");
+}
+export function configurar(v) {
+  if (v.NODE_TLS_REJECT_UNAUTHORIZED === "0") throw new Error("No se permite desactivar la validación TLS");
+  for (const campo of ["SAP_COMPANY_DB", "SAP_USER", "SAP_PASSWORD", "BRIDGE_API_KEY", "BRIDGE_STATE_DIR"]) {
+    if (typeof v[campo] !== "string" || !v[campo].trim()) throw new Error(`Falta configuración: ${campo}`);
+  }
+  if (v.BRIDGE_API_KEY.length < 32) throw new Error("BRIDGE_API_KEY requiere al menos 32 caracteres");
+  const sapUrl = urlSegura(v.SAP_SERVICE_LAYER_URL, "SAP_SERVICE_LAYER_URL");
+  if (!/\/b1s\/v[12]$/.test(sapUrl)) throw new Error("SAP_SERVICE_LAYER_URL debe terminar en /b1s/v1 o /b1s/v2");
+  const backendUrl = urlSegura(v.BACKEND_URL, "BACKEND_URL");
+  const segundos = Number(v.BRIDGE_INTERVAL_SECONDS ?? 900);
+  if (!Number.isSafeInteger(segundos) || segundos < 60 || segundos > 86400) throw new Error("BRIDGE_INTERVAL_SECONDS debe estar entre 60 y 86400");
+  const empresa = v.SAP_COMPANY_DB.trim();
+  return { sapUrl, backendUrl, empresa, usuario: v.SAP_USER, password: v.SAP_PASSWORD,
+    clave: v.BRIDGE_API_KEY, directorio: resolve(v.BRIDGE_STATE_DIR), intervaloMs: segundos * 1000,
+    origen: createHash("sha256").update(JSON.stringify([sapUrl, backendUrl, empresa])).digest("hex") };
+}

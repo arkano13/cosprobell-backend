@@ -29,9 +29,5 @@ export async function requireAppAuth(req, res, next) {
   }
 }
 
-// Fase B: placeholder, todavia sin implementar (mecanismo del puente es
-// distinto — firma + timestamp + antirrepeticion, no una API key simple).
-export function requireBridgeAuth(_req, _res, next) {
-  // TODO (Fase B)
-  next();
-}
+// Credencial independiente de las aplicaciones de consulta.
+export { requireBridgeAuth } from "./bridgeAuth.js";

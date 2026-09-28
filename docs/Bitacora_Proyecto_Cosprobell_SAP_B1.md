@@ -396,3 +396,31 @@ Se confirmó texto UTF-8 interpretado como Windows-1252 en cuatro archivos: cont
 Tres pruebas adicionales comprueban los cuatro mensajes completos: LINEA_MODIFICADA, DATOS_ESCANEO_INVALIDOS, OPERACION_REUTILIZADA y PAGINACION_INVALIDA. También verifican el texto enviado al repositorio de historial y recuperado al reintentar LINEA_MODIFICADA. Suite: **165 de 165 aprobadas**.
 
 De estos cuatro errores, solo LINEA_MODIFICADA se persiste en el flujo actual. No se modificaron eventos existentes: si alguno ya contiene un mensaje dañado, el reintento conserva ese mensaje histórico. No se ejecutó ninguna reparación de datos ni migración.
+
+
+## 16. Primer receptor de datos del puente — entrega preparada
+
+Se acordó un programa de sincronización que consulte Service Layer desde el entorno autorizado y envíe información al backend. Empresa de pruebas informada por el usuario: XPRUEBAS2026. No se intentó conectar con SAP ni se incorporaron sus credenciales a los archivos.
+
+Entrega en copia externa, pendiente de copiar al proyecto. Añade POST /integracion/productos y GET /integracion/productos/estado, autenticación Bearer separada de las API keys de aplicaciones y configuración SAP_COMPANY_DB. Se reemplaza el marcador requireBridgeAuth que anteriormente no verificaba nada. La integración permanece cerrada si falta configuración segura.
+
+Contrato inicial: hasta 100 productos con código, nombre, código principal nullable y estados valid/frozen obligatorios. Inserta o actualiza por itemCode. No toca relaciones, escaneos, historial ni confirmaciones. Las existencias y códigos adicionales aún no se sincronizan.
+
+Migración aditiva 20260928160000_estado_sincronizacion_productos: una tabla para empresa, secuencia, hash, cantidad y fecha de recepción. No se aplicó al esquema público de la base del usuario. Un único origen por base, lotes consecutivos, reconocimiento del último lote repetido, rechazo de cambios de contenido/saltos/lotes antiguos y commit conjunto de productos y avance.
+
+Verificación: esquema Prisma válido y 190 de 190 pruebas aprobadas en copia externa; comprobación real en esquema temporal PostgreSQL aprobada: dos envíos concurrentes, upsert, ceros iniciales, rechazo de lote antiguo/conflictivo, fallo SQL con rollback y reintento exitoso. Esquema temporal eliminado. No se modificó el cambio local existente en tests/unit/picking.cantidades.test.js.
+
+El copiador compara hashes y crea respaldo. La guía INTEGRACION_PUENTE.md explica la configuración, contrato y límites. El próximo bloque es el programa emisor: acceso a SAP, lectura paginada, conversión de campos y conservación duradera de lotes pendientes. La fecha de recepción no certifica actualidad en SAP; la secuencia no sustituye la futura estrategia de detección de cambios.
+
+
+## 17. Emisor de productos — entrega preparada
+
+Se comprobó que los archivos del receptor ya están presentes en el checkout; no se deduce de ello que la migración o configuración estén aplicadas. Se preparó en copia externa el emisor puente/: cliente Service Layer, cliente backend, transformación, archivo persistente de avance y pendiente, candado local y ejecución única/periódica.
+
+Las muestras locales Items.json confirman los campos ItemCode, ItemName, BarCode, Valid=tYES y Frozen=tNO. Se utiliza el contrato v1 del receptor. El programa guarda cada lote antes de enviarlo, verifica confirmación y recupera el mismo lote tras pérdida de respuesta. Mantiene cookies de sesión solo en memoria y renueva una vez ante 401. URLs remotas HTTPS y redireccionamientos rechazados.
+
+**211/211 pruebas aprobadas** en la copia de entrega, con HTTP simulado y pruebas reales del archivo de estado local. No se conectó a SAP, no se utilizaron sus credenciales y no se instalaron servicios ni se aplicaron migraciones. Configuración de ejemplo sin secretos; nuevos archivos de configuración y estado excluidos de Git.
+
+La primera versión recorre el catálogo completo por ItemCode y reenvía páginas en cada ciclo. Incrementales, eliminaciones, códigos adicionales, unidades, stock y pedidos siguen pendientes. El modo --watch no equivale a un servicio Windows instalado. Tras apagón o terminación forzada puede requerir retirar el candado vacío después de verificar que no existe otro proceso; no borrar el estado. Despliegue, alertas y recuperación desatendida se completarán tras la prueba de conexión.
+
+Siguiente paso: incorporar entrega, configurar .env.puente localmente en equipo autorizado y ejecutar un solo ciclo contra XPRUEBAS2026, con backend de pruebas confirmado. Guía en PUENTE_PRODUCTOS.md.

@@ -77,3 +77,15 @@ La nueva entrega pasó 144 pruebas en la copia temporal y las comprobaciones Pos
 Se rechazan pedidos cerrados, cancelados o con estado desconocido, múltiples sesiones activas y un nuevo inicio si solo hay sesiones finalizadas. La regla sobre finalizadas es provisional hasta definir parciales/reapertura. No hay cambio de esquema; inserciones directas ajenas al servicio no quedan protegidas por un índice único.
 
 La entrega pasa 162 pruebas. `scripts/comprobar-inicio-picking.js` verifica además el inicio concurrente, rollback y reanudación con PostgreSQL y datos temporales. El cálculo sigue basado en quantity; pendientes y cambios SAP durante una sesión quedan por implementar.
+
+
+## Recepción de productos del puente
+
+El módulo src/modules/sincronizacion separa contrato, controlador, servicio y repositorio. Sus rutas /integracion se montan antes de la autenticación de aplicaciones y llevan autenticación propia obligatoria. La configuración vincula una empresa SAP; las credenciales SAP permanecen fuera del receptor.
+
+La tabla sincronizacion_estados y el bloqueo transaccional permiten guardar catálogo y avance conjuntamente, reconocer el último lote repetido y rechazar desorden/conflictos. Detalles, instalación y límites en INTEGRACION_PUENTE.md. Entrega preparada con 190 pruebas aprobadas; falta incorporar al checkout y aplicar la migración aditiva.
+
+
+## Emisor de productos
+
+puente/ contiene configuración, clientes HTTP SAP/backend, transformación, persistencia local y coordinación del envío. Se ejecuta separado del servidor Express y no necesita conexión PostgreSQL. Comparte el contrato de productos del receptor. puente/ejecutar.js ofrece --once y --watch; el segundo no instala un servicio de Windows. Configuración y límites en PUENTE_PRODUCTOS.md. Verificación en copia preparada: 211 pruebas aprobadas, sin conexión real con SAP.

@@ -127,4 +127,4 @@ test("una línea completa sigue teniendo unidades compatibles", () => {
       crearEtiqueta()
     )
   );
-});
+}); 

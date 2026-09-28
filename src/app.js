@@ -1,3 +1,4 @@
+import sincronizacionRoutes from "./modules/sincronizacion/sincronizacion.routes.js";
 import express from "express";
 import helmet from "helmet";
 import cors from "cors";
@@ -19,6 +20,7 @@ app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 app.use(pinoHttp({ logger }));
 app.use(healthRoutes);
+app.use("/integracion", sincronizacionRoutes);
 app.use(requireAppAuth);
 app.use(productosRoutes);
 app.use(bodegasRoutes);
