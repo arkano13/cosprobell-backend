@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { conDatosPicking } from "./helpers/datos-picking.js";
 import { setTimeout as esperar } from "node:timers/promises";
 
 import { prisma } from "../src/infrastructure/database/prisma.js";
@@ -42,39 +42,7 @@ async function leerSesion(id) {
 }
 
 async function conSesionTemporal(cantidades, prueba) {
-  const codigo = `PRUEBA-CIERRE-${randomUUID()}`;
-
-  const sesion = await prisma.pickingPedido.create({
-    data: {
-      pedidoDocEntry: -1,
-      usuarioId: "prueba-cierre",
-      estado: "en_proceso",
-      lineas: {
-        create: cantidades.map((cantidad, indice) => ({
-          pedidoLineNum: indice,
-          itemCode: codigo,
-          cantidadPedida: cantidad,
-          cantidadEscaneada: 0,
-        })),
-      },
-    },
-  });
-
-  try {
-    await prueba(sesion.id, codigo);
-  } finally {
-    await prisma.$transaction(async (tx) => {
-      await tx.pickingPedidoLinea.deleteMany({
-        where: { pickingId: sesion.id },
-      });
-
-      await tx.pickingPedido.delete({
-        where: { id: sesion.id },
-      });
-    });
-
-    console.log(`Sesión temporal ${sesion.id} eliminada.`);
-  }
+  return conDatosPicking(cantidades, ({ sesionId, codigo }) => prueba(sesionId, codigo));
 }
 
 async function confirmarEspera(pid, segundaTerminada) {

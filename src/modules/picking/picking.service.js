@@ -1,3 +1,5 @@
+import { resolverEtiquetaParaPicking } from "./picking.etiquetas.service.js";
+import { validarCompatibilidadLinea } from "./picking.cantidades.js";
 import { pickingRepository } from "./picking.repository.js";
 import { conSesionBloqueada } from "./picking.transaction.js";
 import { AppError } from "../../shared/errors/AppError.js";
@@ -54,6 +56,8 @@ export async function iniciarPicking({
       pedidoLineNum: linea.lineNum,
       itemCode: linea.itemCode,
       cantidadPedida: linea.quantity,
+      uomEntry: linea.uomEntry ?? null,
+      uomCode: linea.uomCode ?? null,
     })),
   });
 }
@@ -73,17 +77,18 @@ export async function escanearPicking(id, codigo) {
   return conSesionBloqueada(id, async ({ tx, sesion }) => {
     comprobarSesionActiva(sesion);
 
-    const filas =
-      await pickingRepository.incrementarLinea(id, codigo, tx);
+    const etiqueta = await resolverEtiquetaParaPicking(codigo, tx);
+    const picking = await pickingRepository.buscarSesionConLineas(id, tx);
 
-    if (filas.length > 0) {
-      return filas[0];
+    if (!picking) {
+      throw sesionNoEncontrada();
     }
 
-    const linea =
-      await pickingRepository.buscarLineaProducto(id, codigo, tx);
+    const lineas = picking.lineas
+      .filter((linea) => linea.itemCode === etiqueta.itemCode)
+      .sort((a, b) => a.id - b.id);
 
-    if (!linea) {
+    if (lineas.length === 0) {
       throw new AppError({
         code: "PRODUCTO_FUERA_DEL_PEDIDO",
         message: "Ese producto no pertenece a este pedido",
@@ -91,11 +96,41 @@ export async function escanearPicking(id, codigo) {
       });
     }
 
-    throw new AppError({
-      code: "CANTIDAD_COMPLETADA",
-      message: "Ese producto ya completo su cantidad pedida",
-      statusCode: 409,
-    });
+    // En este alcance no repartimos lecturas entre presentaciones distintas.
+    // Todas las líneas del producto deben tener cantidades compatibles.
+    for (const linea of lineas) {
+      validarCompatibilidadLinea(linea, etiqueta);
+    }
+
+    const pendiente = lineas.find(
+      (linea) => linea.cantidadEscaneada < linea.cantidadPedida
+    );
+
+    if (!pendiente) {
+      throw new AppError({
+        code: "CANTIDAD_COMPLETADA",
+        message: "Ese producto ya completo su cantidad pedida",
+        statusCode: 409,
+      });
+    }
+
+    const filas = await pickingRepository.incrementarLinea({
+      pickingId: id,
+      lineaId: pendiente.id,
+      itemCode: etiqueta.itemCode,
+      codigo: etiqueta.codigo,
+      uomEntry: etiqueta.uomEntry,
+    }, tx);
+
+    if (filas.length !== 1) {
+      throw new AppError({
+        code: "LINEA_MODIFICADA",
+        message: "La línea cambió durante el escaneo; vuelva a consultar la sesión",
+        statusCode: 409,
+      });
+    }
+
+    return filas[0];
   });
 }
 

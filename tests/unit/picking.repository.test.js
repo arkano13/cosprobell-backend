@@ -62,9 +62,11 @@ test("crearSesion envía la cabecera y sus líneas a Prisma", async (t) => {
       lineas: {
         create: [
           {
-            pedidoLineNum: 0,
+             pedidoLineNum: 0,
             itemCode: "PROD-001",
             cantidadPedida: 10,
+            uomEntry: null,
+            uomCode: null,
           },
         ],
       },
@@ -114,4 +116,19 @@ test("crearSesion propaga un fallo de persistencia", async (t) => {
     },
     (error) => error === fallo
   );
+});
+
+test("incremento limita la escritura a la línea validada y guarda la etiqueta", async () => {
+  let sql;
+  let parametros;
+  const tx = { async $queryRaw(partes, ...valores) {
+    sql = partes.join("?"); parametros = valores; return [{ id: 10 }];
+  } };
+  const resultado = await pickingRepository.incrementarLinea({
+    pickingId: 25, lineaId: 10, itemCode: "PROD-001", codigo: "00123", uomEntry: 1,
+  }, tx);
+  assert.deepEqual(parametros, ["00123", 10, 25, "PROD-001", 1]);
+  assert.match(sql, /"cantidadEscaneada" \+ 1 <= "cantidadPedida"/);
+  assert.match(sql, /"uomEntry" = \?/);
+  assert.deepEqual(resultado, [{ id: 10 }]);
 });

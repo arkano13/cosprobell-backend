@@ -22,11 +22,11 @@ Documentos de referencia:
 | Revisión de metadatos y muestras | ZIP revisado: XML de metadatos y 13 archivos JSON |
 | Contexto funcional | Bodega y consulta por WhatsApp para los dueños definidos; quedan reglas operativas pendientes |
 | Organización del código | Redistribución autorizada y aplicada; productos separado por capas |
-| Pruebas automatizadas | 61 de 61 aprobadas mediante ejecución de `npm test` por el asistente al cerrar la reorganización de picking; persistencia simulada |
+| Pruebas automatizadas | 128 de 128 aprobadas en copia temporal por el asistente y posteriormente en el proyecto del usuario, según salida completa compartida; persistencia simulada; sección 12 |
 | Picking por capas | Completada la separación en rutas, schemas, controlador, servicio y repositorio; conservado el comportamiento anterior |
 | Concurrencia de picking | Transacción con bloqueo de sesión y retirada de `SKIP LOCKED`; seis escenarios contra PostgreSQL aprobados según resultados compartidos y confirmación del usuario; detalle en sección 11 |
 | Búsqueda por código de barras | Código principal, adicional, inexistente y ambiguo comprobados manualmente por el usuario contra su base configurada |
-| Conexión de búsqueda con escaneo | Pendiente; picking todavía compara el código recibido con `itemCode` y suma uno |
+| Conexión de búsqueda con escaneo | Integración incorporada al proyecto; suite y demo aprobadas según salida del usuario: etiqueta confirmada, unidades compatibles y código leído persistido; sección 12 |
 | Errores con `AppError` | Clase y manejador central implementados y probados; falta migrar las respuestas directas de las rutas |
 | Validación de peticiones | Distingue errores de Zod de fallos internos; 4 pruebas adicionales aprobadas |
 | Validación de configuración | Implementada en `env.schema.js`, utilizada por `env.js` y Prisma; seis pruebas adicionales aprobadas por el usuario |
@@ -182,7 +182,7 @@ Principios de trabajo:
 
 ## 9. Próxima acción
 
-**Punto actual:** reorganización de picking terminada y ronda de concurrencia completada por el usuario. La sección 11 registra los resultados posteriores al cierre de estructura.
+**Punto actual:** integración incorporada y comprobada en el proyecto del usuario con 128 pruebas aprobadas y demo de PostgreSQL aprobada. Bloque de conexión y verificación cerrado para datos de prueba; siguen idempotencia e historial de escaneos. La sección 12 documenta la evidencia y sus límites.
 
 Al retomar:
 
@@ -260,3 +260,53 @@ Estos resultados se registran como ejecuciones del usuario; el asistente no volv
 La ronda acordada de concurrencia queda cerrada. El siguiente bloque es definir y conectar el contrato del escaneo con la búsqueda por código de barras: conservar el código leído, resolver el producto y determinar explícitamente la cantidad correspondiente a su presentación.
 
 Siguen pendientes las equivalencias unidad/caja, idempotencia para reintentos, trazabilidad individual de escaneos, elegibilidad y duplicidad de sesiones, cobertura HTTP de escanear/finalizar, uniformización de errores, identidad de operadores y reglas de sincronización con SAP. Las pruebas actuales trabajan con `itemCode` e incremento de uno; no validan etiquetas reales, carga sostenida ni todo el flujo de despacho.
+
+
+## 12. Integración del escaneo por etiquetas — 28 de septiembre de 2026
+
+### Alcance operativo confirmado
+
+El usuario aclaró que el picking verifica siempre unidades individuales. La zona grande almacena cajas y abastece a la pequeña; las cajas tienen etiquetas distintas de las individuales. No está confirmado que sean bodegas independientes en SAP. Los traslados entre zonas no se implementan en este bloque.
+
+Se localizaron los metadatos originales descomprimidos en el Escritorio, carpeta `XML COSPROBELL`. El XML declara `ItemBarCode.AbsEntry`, `UoMEntry`, `Barcode` y el catálogo `UnitOfMeasurement`. La línea de pedido revisada usa `UoMEntry = -1` y `UoMCode = Manual`: eso no certifica una equivalencia con una unidad individual.
+
+### Preparación incorporada por el usuario
+
+- Referencias SAP y unidades en códigos de barras; unidad y cantidades pendientes en líneas de pedido.
+- Catálogo `UnidadMedida` y confirmaciones locales `ConfirmacionEtiquetaPicking`.
+- Copia de `uomEntry` y `uomCode` en cada línea de picking al iniciar la sesión. Las sesiones antiguas conservan valores desconocidos; no se rellenan por suposición.
+- Resolución de etiquetas, comprobación de confirmación vigente y compatibilidad de cantidades. El usuario confirmó 104 pruebas aprobadas antes de esta integración.
+- Existe una migración vacía anterior al catálogo; se conservó y posteriormente se generó la que crea la tabla.
+
+### Entrega preparada para copiar
+
+El asistente preparó archivos completos fuera del repositorio en `entrega-picking-integrado`, dentro de su carpeta de artefactos. No sustituyó los archivos de aplicación del usuario durante la preparación. El copiador incluido comprueba hashes, guarda respaldo y solo copia los archivos declarados; la aplicación de la entrega queda a cargo del usuario.
+
+El flujo de `escanearPicking` queda así:
+
+1. Bloquear la sesión y comprobar que sigue activa.
+2. Resolver la etiqueta y su confirmación usando la misma transacción.
+3. Obtener las líneas del producto y validar unidades y cantidades enteras.
+4. Elegir la primera línea pendiente por id; incrementar exactamente esa línea.
+5. Guardar el código de barras normalizado, conservando ceros iniciales, en `codigoBarrasEscaneado`.
+
+El SQL exige la misma sesión, producto, unidad e identificador de línea, además de impedir superar la cantidad pedida. Si no actualiza una fila, se responde `LINEA_MODIFICADA`, sin confundirlo con cantidad completada.
+
+La URL y el cuerpo `{ codigo }` se conservan; el valor pasa a significar una etiqueta de barras registrada, no un código interno de producto. Se conserva temporalmente el formato HTTP de errores conocidos `{ error: mensaje }`. La comprobación actual exige que todas las líneas del mismo producto sean compatibles con esa unidad; se rechazan presentaciones mezcladas. No se implementan conversiones ni se interpreta `Manual` como unidad individual.
+
+### Evidencia de esta entrega
+
+- `npm test` ejecutado por el asistente en la copia temporal: **128 pruebas, 128 aprobadas, 0 fallidas**. Incluye HTTP de escaneo/finalización; su persistencia está simulada.
+- `node scripts/comprobar-picking-integrado.js` ejecutado por el asistente contra la base autorizada de pruebas: demo y seis escenarios de concurrencia aprobados.
+- Sesión 13: demo del servicio real; rechazó etiqueta desconocida, caja, producto ajeno, etiqueta sin confirmar, unidad incompatible/manual, exceso y sesión cerrada. Registró tres unidades y comprobó el código de barras persistido.
+- Sesiones 14–16: dos escaneos para cinco unidades, límite de una unidad y espera real de bloqueo confirmada por PostgreSQL.
+- Sesiones 17–19: escaneo antes del cierre, cierre antes del escaneo y producto repetido en dos líneas. Todos aprobados.
+- Los scripts informaron eliminación de los datos temporales de cada escenario. La preparación y limpieza están limitadas a los identificadores propios de cada ejecución.
+
+Estas ejecuciones del asistente verificaron inicialmente la entrega externa. Posteriormente, el usuario compartió la salida completa de `npm test` desde su proyecto: **128 aprobadas, 0 fallidas**, y de `node scripts/demo-picking.js`: **DEMO APROBADA**, sesión temporal **20** eliminada. La demo registró tres unidades con sus etiquetas y rechazó los ocho casos previstos sin cambios. Esto confirma el funcionamiento de la integración en su proyecto con datos ficticios; no representa una conexión a SAP ni una prueba con mercadería real.
+
+### Pendientes después de incorporar la entrega
+
+Idempotencia por lectura, historial de eventos y operador autenticado; gestión autorizada de confirmaciones; elegibilidad de órdenes y sesiones duplicadas; cantidades pendientes/entregas parciales; cancelaciones y modificaciones en SAP; uniformización de errores. El bloqueo actual coordina operaciones de la sesión de picking, no cambios concurrentes del catálogo o de confirmaciones: el futuro sincronizador deberá coordinar o versionar esos cambios.
+
+Con los metadatos actuales, una referencia manual o desconocida impide escanear. Falta obtener ejemplos reales y definir su interpretación con Cosprobell. Una confirmación local tampoco demuestra la identidad de quien la registró: esa autenticación sigue pendiente.

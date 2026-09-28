@@ -1,84 +1,58 @@
 # Estructura del backend
 
-## Organización actual
+Actualizado para la integración de picking del 28 de septiembre de 2026. Tras verificar la entrega en una copia temporal, el usuario la incorporó a su proyecto y compartió 128 pruebas aprobadas y la demo de PostgreSQL aprobada.
 
-```text
-src/
-  app.js                         Configura Express y monta las rutas
-  server.js                      Abre el puerto HTTP
-  index.js                       Entrada compatible con comandos anteriores
-  config/env.js                  Lee configuración del entorno
-  infrastructure/
-    database/prisma.js           Instancia compartida de Prisma
-    logging/logger.js            Registro de eventos con ocultación de claves
-  shared/
-    security/hash.js             Hash de las API keys
-    validation/safeString.js     Validación común de texto
-  middleware/
-    authenticate.js              Autenticación de aplicaciones
-    validate.js                  Validación HTTP con Zod
-    errorHandler.js              Respuesta central a errores
-  modules/
-    productos/                   Primer módulo separado por capas
-    bodegas/                     Rutas existentes por área
-    clientes/
-    facturas/
-    pagos/
-    picking/
-    health/
-tests/
-  unit/productos.service.test.js Reglas de búsqueda por código
-  integration/app.test.js        HTTP y middleware con persistencia simulada
-prisma/                          Esquema, migraciones y datos sintéticos
-scripts/                         Comandos manuales
-docs/                            Contexto y decisiones
-```
+## Organización
 
-## Capas de productos
+- `src/app.js`: configura Express sin abrir un puerto al importarlo.
+- `src/server.js`: inicia HTTP y coordina el cierre ordenado.
+- `src/config/`: carga y validación del entorno.
+- `src/infrastructure/`: Prisma, logs y cierre de recursos.
+- `src/shared/`: errores, seguridad y validación común.
+- `src/middleware/`: autenticación, validación HTTP y errores.
+- `src/modules/productos/`: productos y búsqueda informativa de etiquetas.
+- `src/modules/unidades-medida/`: consulta del catálogo; no interpreta automáticamente cajas o unidades individuales.
+- `src/modules/picking/`: rutas, schemas, controlador, servicios, reglas, repositorios y transacción.
+- Bodegas, clientes, facturas, pagos y health conservan su organización existente.
+- `tests/unit/` y `tests/integration/`: reglas y HTTP con persistencia simulada.
+- `scripts/`: comprobaciones manuales contra la base configurada.
+
+## Picking
 
 | Archivo | Responsabilidad |
 |---|---|
-| `productos.routes.js` | URLs, validadores y controladores |
-| `productos.schemas.js` | Entradas admitidas |
-| `productos.controller.js` | Peticiones y respuestas HTTP |
-| `productos.service.js` | Operaciones y reglas del módulo |
-| `productos.repository.js` | Consultas a PostgreSQL mediante Prisma |
+| `picking.routes.js` | URLs, validación y controladores |
+| `picking.schemas.js` | Entradas admitidas |
+| `picking.controller.js` | Adaptación HTTP; mantiene temporalmente errores conocidos como texto |
+| `picking.service.js` | Inicio, consulta, escaneo integrado y cierre |
+| `picking.repository.js` | Lecturas, creación, incremento de la línea validada y finalización |
+| `picking.transaction.js` | Transacción y bloqueo de sesión |
+| `picking.etiquetas.repository.js` | Consulta de asociaciones y confirmaciones |
+| `picking.etiquetas.service.js` | Resuelve una asociación única para picking |
+| `picking.etiqueta.js` | Comprueba confirmación de unidad individual y datos vigentes |
+| `picking.cantidades.js` | Comprueba producto, unidad y cantidades enteras compatibles |
 
-El servicio no recibe `req` ni `res`: se puede reutilizar desde otra aplicación o proceso. El repositorio desconoce HTTP. Se conservaron las consultas y respuestas existentes al redistribuirlas.
+El escaneo usa un código de barras, identifica el producto, valida su confirmación y compara la unidad con las líneas de la sesión. La escritura guarda el código realmente leído. El servicio no recibe `req` ni `res` y todas las consultas del escaneo reciben la misma transacción.
 
-La búsqueda que antes estaba en `lib/buscarProductoPorCodigo.js` ahora está en `src/modules/productos/productos.service.js`. Su consulta pasó al repositorio. Todavía no está conectada al escaneo de picking.
-
-Los otros módulos mantienen por ahora sus manejadores y consultas dentro de sus archivos `.routes.js`. Se separarán durante las siguientes sesiones guiadas. No se crearon archivos vacíos para funcionalidades que aún no se han implementado.
+La búsqueda informativa de productos sigue disponible por separado. No autoriza un incremento por sí misma.
 
 ## Comandos
 
-Desde la raíz del proyecto:
-
-```powershell
+```bash
 npm run dev
 npm test
-node scripts/probar-codigo-de-barras.js 0012345678905
+node scripts/demo-picking.js
+node scripts/comprobar-picking-integrado.js
 ```
 
-- `npm run dev` inicia `src/server.js` con observación de cambios.
-- `npm start` inicia el mismo servidor sin observación.
-- `npm test` ejecuta pruebas de reglas y HTTP sin consultar una base real. Se usan repositorios/métodos simulados y una URL ficticia de prueba.
-- El script de código de barras sí consulta la base configurada en `.env`.
-- `node src/index.js` se conserva como entrada compatible.
-- Seed y creación de API keys mantienen sus comandos y sus efectos anteriores sobre la base configurada. No ejecutarlos como verificación de una redistribución.
+`npm test` no consulta una base real. La entrega pasó 128 pruebas en una copia temporal.
 
-## Qué se verificó
+Los scripts de picking sí usan la base de `.env`; el usuario identificó la actual como base de pruebas. Crean datos ficticios y limpian sus registros. `scripts/helpers/datos-picking.js` centraliza esa preparación; no es un módulo de aplicación. El comando integrado ejecuta la demo y los scripts de concurrencia en procesos separados y se detiene si uno falla.
 
-Doce pruebas: entradas inválidas, ceros iniciales, código desconocido, ambigüedad, propagación de fallos técnicos, protección de rutas, listado HTTP de productos, límite inválido, detalle inexistente, respuesta 500 y salud pública con éxito/fallo simulado.
+Los scripts de concurrencia conservan sus nombres, pero sus datos fueron adaptados a etiquetas confirmadas y unidades explícitas. No usar las versiones antiguas con el nuevo contrato.
 
-Estas pruebas no certifican SQL, datos reales, concurrencia de picking ni conectividad con SAP. No se cambiaron el esquema, las migraciones o las reglas de preparación en esta redistribución.
+## Límites
 
-## Próximos pasos guiados
+No hay conversión de cajas, autorización por nombre de unidad, idempotencia por lectura ni historial individual completo. Las referencias manuales o desconocidas bloquean el escaneo; las presentaciones mezcladas del mismo producto se rechazan. La confirmación de una etiqueta se administra todavía fuera de un flujo autenticado. La creación de sesiones conserva cantidades originales del pedido; quedan pendientes elegibilidad, parciales y políticas de cambios SAP.
 
-1. Clase de errores y manejo central con códigos estables.
-2. Diferenciar errores de validación de errores internos.
-3. Completar pruebas de códigos de barras contra una base de desarrollo.
-4. Separar picking y conectar identificación, unidades y reglas acordadas.
-5. Validar configuración al arrancar y cerrar el servidor/conexiones de forma ordenada.
-
-Los cambios de formato de error, identidad de personas, sincronización y WhatsApp siguen pendientes; mover archivos no implementa esas capacidades.
+Ver la sección 12 de la bitácora para evidencia de PostgreSQL y pendientes.

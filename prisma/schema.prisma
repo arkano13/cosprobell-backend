@@ -12,7 +12,6 @@ datasource db {
   provider = "postgresql"
 }
 
-
 // Cosprobell · SAP B1 — schema.prisma (Fase A, borrador para validar)
 //
 // Basado en Modelo_Datos_Campos_Permitidos_Cosprobell.md (bitacora del proyecto).
@@ -23,7 +22,6 @@ datasource db {
 // - Catalogo real de proveedores (Proveedor abajo es un placeholder minimo).
 // - Orden de carga Warehouses antes que Items (se resuelve en el codigo de sync, no aqui).
 // - evaluaciones_credito: fuera de este schema a proposito (fase final del proyecto).
-
 
 // ---------------------------------------------------------------------------
 // Catalogos
@@ -38,11 +36,11 @@ model GrupoProducto {
 }
 
 model Bodega {
-  warehouseCode String                @id
+  warehouseCode String               @id
   warehouseName String
   city          String?
   country       String?
-  inactive      Boolean               @default(false)
+  inactive      Boolean              @default(false)
   existencias   ProductoExistencia[]
 
   @@map("bodegas")
@@ -70,7 +68,7 @@ model Vendedor {
 // catalogo real de proveedores en SAP (BusinessPartners con CardType distinto,
 // o una fuente separada). No forzar relacion con Cliente.
 model Proveedor {
-  cardCode String              @id
+  cardCode String             @id
   cardName String?
   entradas EntradaMercancia[]
 
@@ -82,19 +80,19 @@ model Proveedor {
 // ---------------------------------------------------------------------------
 
 model Producto {
-  itemCode                   String   @id
+  itemCode                   String         @id
   itemName                   String
   itemsGroupCode             Int?
   grupo                      GrupoProducto? @relation(fields: [itemsGroupCode], references: [number])
   barCode                    String?
-  valid                      Boolean  @default(true)
-  frozen                     Boolean  @default(false)
+  valid                      Boolean        @default(true)
+  frozen                     Boolean        @default(false)
   quantityOnStock            Float?
   quantityOrderedFromVendors Float?
   quantityOrderedByCustomers Float?
   sapCreateDate              DateTime?
   sapUpdateDate              DateTime?
-  sincronizadoEn             DateTime @default(now())
+  sincronizadoEn             DateTime       @default(now())
 
   precios       ProductoPrecio[]
   existencias   ProductoExistencia[]
@@ -104,7 +102,7 @@ model Producto {
 }
 
 model ProductoPrecio {
-  id          Int    @id @default(autoincrement())
+  id          Int         @id @default(autoincrement())
   producto    Producto    @relation(fields: [itemCode], references: [itemCode])
   itemCode    String
   listaPrecio ListaPrecio @relation(fields: [priceListNo], references: [priceListNo])
@@ -133,14 +131,43 @@ model ProductoExistencia {
 }
 
 // Vacia en la muestra actual (ItemBarCodeCollection sin registros).
-// Se deja lista para cuando la carga completa traiga datos reales.
+// Se deja lista para cuando la carga completa traiga datos reales. ProductoCodigoBarras
 model ProductoCodigoBarras {
-  id       Int      @id @default(autoincrement())
-  producto Producto @relation(fields: [itemCode], references: [itemCode])
-  itemCode String
-  codigo   String
+  id          Int      @id @default(autoincrement())
+  producto    Producto @relation(fields: [itemCode], references: [itemCode])
+  itemCode    String
+  codigo      String
+  sapAbsEntry Int?
+  uomEntry    Int?
+
+  confirmacionPicking ConfirmacionEtiquetaPicking?
 
   @@map("productos_codigos_barras")
+}
+
+model ConfirmacionEtiquetaPicking {
+  codigoBarrasId Int @id
+
+  codigoBarras ProductoCodigoBarras @relation(fields: [codigoBarrasId], references: [id], onDelete: Cascade)
+
+  esUnidadIndividual Boolean
+
+  itemCodeConfirmado String
+  codigoConfirmado   String
+  uomEntryConfirmado Int?
+
+  confirmadaEn DateTime @default(now())
+  observacion  String?
+
+  @@map("confirmaciones_etiquetas_picking")
+}
+
+model UnidadMedida {
+  absEntry Int     @id
+  code     String?
+  name     String?
+
+  @@map("unidades_medida")
 }
 
 // ---------------------------------------------------------------------------
@@ -165,7 +192,7 @@ model Cliente {
   frozen                   Boolean  @default(false)
   phone1                   String?
   cellular                 String?
-  emailAddress              String?
+  emailAddress             String?
   city                     String?
   country                  String?
   uRtn                     String?
@@ -229,8 +256,8 @@ model Factura {
 }
 
 model FacturaLinea {
-  id              Int      @id @default(autoincrement())
-  factura         Factura  @relation(fields: [facturaDocEntry], references: [docEntry])
+  id              Int     @id @default(autoincrement())
+  factura         Factura @relation(fields: [facturaDocEntry], references: [docEntry])
   facturaDocEntry Int
   lineNum         Int
   itemCode        String
@@ -284,8 +311,8 @@ model Pedido {
 }
 
 model PedidoLinea {
-  id              Int    @id @default(autoincrement())
-  pedido          Pedido @relation(fields: [pedidoDocEntry], references: [docEntry])
+  id              Int     @id @default(autoincrement())
+  pedido          Pedido  @relation(fields: [pedidoDocEntry], references: [docEntry])
   pedidoDocEntry  Int
   lineNum         Int
   itemCode        String
@@ -297,6 +324,12 @@ model PedidoLinea {
   warehouseCode   String?
   lineTotal       Float?
   lineStatus      String?
+
+  uomEntry                       Int?
+  uomCode                        String?
+  remainingOpenQuantity          Float?
+  inventoryQuantity              Float?
+  remainingOpenInventoryQuantity Float?
 
   @@unique([pedidoDocEntry, lineNum])
   @@map("pedidos_lineas")
@@ -398,19 +431,19 @@ model NotaCreditoLinea {
 // ---------------------------------------------------------------------------
 
 model Pago {
-  docEntry       Int       @id
+  docEntry       Int      @id
   docNum         Int?
   cardCode       String?
-  cliente        Cliente?  @relation(fields: [cardCode], references: [cardCode])
+  cliente        Cliente? @relation(fields: [cardCode], references: [cardCode])
   docDate        DateTime
   docCurrency    String?
   cashSum        Float?
   transferSum    Float?
   reference1     String?
   remarks        String?
-  cancelled      Boolean   @default(false)
+  cancelled      Boolean  @default(false)
   uVendedor      String?
-  sincronizadoEn DateTime  @default(now())
+  sincronizadoEn DateTime @default(now())
 
   aplicaciones PagoFactura[]
 
@@ -440,19 +473,19 @@ model PagoFactura {
 // ---------------------------------------------------------------------------
 
 model EntradaMercancia {
-  docEntry        Int        @id
-  docNum          Int
-  cardCode        String?
-  proveedor       Proveedor? @relation(fields: [cardCode], references: [cardCode])
-  docDate         DateTime
-  docTotal        Float?
-  docCurrency     String?
-  documentStatus  String?
-  cancelled       Boolean    @default(false)
-  uTipo           String?
-  uZona           String?
-  sapUpdateDate   DateTime?
-  sincronizadoEn  DateTime   @default(now())
+  docEntry       Int        @id
+  docNum         Int
+  cardCode       String?
+  proveedor      Proveedor? @relation(fields: [cardCode], references: [cardCode])
+  docDate        DateTime
+  docTotal       Float?
+  docCurrency    String?
+  documentStatus String?
+  cancelled      Boolean    @default(false)
+  uTipo          String?
+  uZona          String?
+  sapUpdateDate  DateTime?
+  sincronizadoEn DateTime   @default(now())
 
   lineas EntradaMercanciaLinea[]
 
@@ -482,7 +515,7 @@ model EntradaMercanciaLinea {
 // ---------------------------------------------------------------------------
 
 model TrasladoInventario {
-  docEntry       Int       @id
+  docEntry       Int      @id
   docNum         Int
   docDate        DateTime
   fromWarehouse  String?
@@ -491,7 +524,7 @@ model TrasladoInventario {
   documentStatus String?
   uTipo          String?
   uZona          String?
-  sincronizadoEn DateTime  @default(now())
+  sincronizadoEn DateTime @default(now())
 
   lineas TrasladoInventarioLinea[]
 
@@ -500,8 +533,8 @@ model TrasladoInventario {
 
 // Conservar origen/destino por linea; no sustituir por los de cabecera.
 model TrasladoInventarioLinea {
-  id                Int                 @id @default(autoincrement())
-  traslado          TrasladoInventario  @relation(fields: [trasladoDocEntry], references: [docEntry])
+  id                Int                @id @default(autoincrement())
+  traslado          TrasladoInventario @relation(fields: [trasladoDocEntry], references: [docEntry])
   trasladoDocEntry  Int
   lineNum           Int
   itemCode          String
@@ -534,23 +567,23 @@ model Sincronizacion {
 }
 
 model SincronizacionLote {
-  id                Int             @id @default(autoincrement())
-  sincronizacion    Sincronizacion  @relation(fields: [sincronizacionId], references: [id])
+  id                Int            @id @default(autoincrement())
+  sincronizacion    Sincronizacion @relation(fields: [sincronizacionId], references: [id])
   sincronizacionId  Int
-  loteId            String          @unique
+  loteId            String         @unique
   cantidadRegistros Int
   resultado         String
-  creadoEn          DateTime        @default(now())
+  creadoEn          DateTime       @default(now())
 
   @@map("sincronizaciones_lotes")
 }
 
 model ErrorSincronizacion {
-  id        Int      @id @default(autoincrement())
-  entidad   String
-  loteId    String?
-  mensaje   String
-  creadoEn  DateTime @default(now())
+  id       Int      @id @default(autoincrement())
+  entidad  String
+  loteId   String?
+  mensaje  String
+  creadoEn DateTime @default(now())
 
   @@map("errores_sincronizacion")
 }
@@ -584,26 +617,29 @@ model PickingPedido {
 }
 
 model PickingPedidoLinea {
-  id                    Int       @id @default(autoincrement())
+  id                    Int           @id @default(autoincrement())
   picking               PickingPedido @relation(fields: [pickingId], references: [id])
   pickingId             Int
   pedidoLineNum         Int
   itemCode              String
   cantidadPedida        Float
-  cantidadEscaneada     Float     @default(0)
+  cantidadEscaneada     Float         @default(0)
   codigoBarrasEscaneado String?
   timestampEscaneo      DateTime?
+
+  uomEntry Int?
+  uomCode  String?
 
   @@map("picking_pedidos_lineas")
 }
 
 model ApiKey {
-  id         Int       @id @default(autoincrement())
-  nombre     String    // ej. "app-escaner-bodega1", "app-reportes"
-  claveHash  String    @unique
-  activa     Boolean   @default(true)
-  creadaEn   DateTime  @default(now())
-  ultimoUso  DateTime?
+  id        Int       @id @default(autoincrement())
+  nombre    String // ej. "app-escaner-bodega1", "app-reportes"
+  claveHash String    @unique
+  activa    Boolean   @default(true)
+  creadaEn  DateTime  @default(now())
+  ultimoUso DateTime?
 
   @@map("api_keys")
 }

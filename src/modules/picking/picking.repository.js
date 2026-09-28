@@ -23,6 +23,8 @@ export const pickingRepository = {
             pedidoLineNum: linea.pedidoLineNum,
             itemCode: linea.itemCode,
             cantidadPedida: linea.cantidadPedida,
+            uomEntry: linea.uomEntry ?? null,
+            uomCode: linea.uomCode ?? null,
           })),
         },
       },
@@ -54,22 +56,19 @@ export const pickingRepository = {
     });
   },
 
-  incrementarLinea(pickingId, codigo, db = prisma) {
+  incrementarLinea({ pickingId, lineaId, itemCode, codigo, uomEntry }, db = prisma) {
+    // La sesión ya está bloqueada por conSesionBloqueada.
+    // Actualizamos exactamente la línea que validó el servicio.
     return db.$queryRaw`
       UPDATE picking_pedidos_lineas
       SET "cantidadEscaneada" = "cantidadEscaneada" + 1,
           "codigoBarrasEscaneado" = ${codigo},
           "timestampEscaneo" = now()
-      WHERE id = (
-        SELECT id
-        FROM picking_pedidos_lineas
-        WHERE "pickingId" = ${pickingId}
-          AND "itemCode" = ${codigo}
-          AND "cantidadEscaneada" < "cantidadPedida"
-        ORDER BY id
-        LIMIT 1
-        FOR UPDATE
-      )
+      WHERE id = ${lineaId}
+        AND "pickingId" = ${pickingId}
+        AND "itemCode" = ${itemCode}
+        AND "uomEntry" = ${uomEntry}
+        AND "cantidadEscaneada" + 1 <= "cantidadPedida"
       RETURNING *;
     `;
   },

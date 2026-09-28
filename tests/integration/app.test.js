@@ -420,6 +420,8 @@ test("iniciar picking crea una sesión y responde 201", async (t) => {
             pedidoLineNum: 0,
             itemCode: "PROD-001",
             cantidadPedida: 10,
+            uomEntry: null,
+            uomCode: null,
           },
         ],
       });
@@ -595,3 +597,118 @@ test("consultar picking oculta los fallos internos", async (t) => {
     },
   });
 });
+
+// Escaneo y cierre mediante HTTP, con persistencia simulada.
+const { pickingEtiquetasRepository } = await import(
+  "../../src/modules/picking/picking.etiquetas.repository.js"
+);
+
+function prepararEscaneoHttp(t, cambios = {}) {
+  const linea = { id: 10, pickingId: 25, itemCode: "PROD-001", uomEntry: 1,
+    cantidadPedida: 3, cantidadEscaneada: 0, ...cambios.linea };
+  const sesion = { id: 25, estado: cambios.estado ?? "en_proceso", lineas: [linea] };
+  const tx = { async $queryRaw() { return [sesion]; } };
+  sustituir(t, prisma, "$transaction", async (operacion) => operacion(tx));
+  t.mock.method(pickingEtiquetasRepository, "buscarProductos", async (codigo, db) => {
+    assert.equal(db, tx);
+    assert.equal(codigo, "00123");
+    if (cambios.fallo) throw new Error("detalle privado de escaneo");
+    if (cambios.desconocida) return [];
+    return [{ itemCode: "PROD-001", codigosBarras: [{
+      id: 5, itemCode: "PROD-001", codigo, uomEntry: 1,
+      confirmacionPicking: cambios.sinConfirmar ? null : {
+        codigoBarrasId: 5, esUnidadIndividual: !cambios.caja,
+        itemCodeConfirmado: "PROD-001", codigoConfirmado: codigo, uomEntryConfirmado: 1,
+      },
+    }] }];
+  });
+  t.mock.method(pickingRepository, "buscarSesionConLineas", async (id, db) => {
+    assert.equal(db, tx); return sesion;
+  });
+  const incrementar = t.mock.method(pickingRepository, "incrementarLinea", async (datos, db) => {
+    assert.equal(db, tx);
+    assert.equal(datos.itemCode, "PROD-001");
+    assert.equal(datos.codigo, "00123");
+    return [{ ...linea, cantidadEscaneada: linea.cantidadEscaneada + 1, codigoBarrasEscaneado: datos.codigo }];
+  });
+  t.mock.method(pickingRepository, "guardarFinalizacion", async (id, estado, fechaFin, db) => {
+    assert.equal(db, tx); return { ...sesion, estado, fechaFin };
+  });
+  return incrementar;
+}
+
+async function enviarEscaneo(headers, codigo = "00123", id = "25") {
+  return fetch(`${baseUrl}/picking/${id}/escanear`, {
+    method: "POST", headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({ codigo }),
+  });
+}
+
+test("HTTP escanear registra el código de barras y conserva ceros iniciales", async (t) => {
+  const headers = autenticar(t);
+  const incrementar = prepararEscaneoHttp(t);
+  const respuesta = await enviarEscaneo(headers, " 00123 ");
+  assert.equal(respuesta.status, 200);
+  const { data } = await respuesta.json();
+  assert.equal(data.cantidadEscaneada, 1);
+  assert.equal(data.codigoBarrasEscaneado, "00123");
+  assert.equal(incrementar.mock.callCount(), 1);
+});
+
+const rechazosHttp = [
+  { nombre: "etiqueta desconocida", cambios: { desconocida: true }, status: 404 },
+  { nombre: "caja", cambios: { caja: true }, status: 409 },
+  { nombre: "etiqueta sin confirmar", cambios: { sinConfirmar: true }, status: 409 },
+  { nombre: "unidad manual", cambios: { linea: { uomEntry: -1 } }, status: 409 },
+  { nombre: "cantidad completa", cambios: { linea: { cantidadEscaneada: 3 } }, status: 409 },
+  { nombre: "sesión cerrada", cambios: { estado: "completo" }, status: 400 },
+];
+for (const caso of rechazosHttp) {
+  test(`HTTP escanear rechaza ${caso.nombre} sin incrementar`, async (t) => {
+    const headers = autenticar(t);
+    const incrementar = prepararEscaneoHttp(t, caso.cambios);
+    const respuesta = await enviarEscaneo(headers);
+    assert.equal(respuesta.status, caso.status);
+    // Se conserva por ahora el contrato de errores del controlador.
+    assert.equal(typeof (await respuesta.json()).error, "string");
+    assert.equal(incrementar.mock.callCount(), 0);
+  });
+}
+
+test("HTTP escanear valida identificador y código antes de abrir transacción", async (t) => {
+  const headers = autenticar(t);
+  let transacciones = 0;
+  sustituir(t, prisma, "$transaction", async () => { transacciones++; });
+  assert.equal((await enviarEscaneo(headers, "00123", "abc")).status, 400);
+  assert.equal((await enviarEscaneo(headers, " ")).status, 400);
+  assert.equal(transacciones, 0);
+});
+
+test("HTTP escanear y finalizar requieren autenticación", async () => {
+  assert.equal((await enviarEscaneo({})).status, 401);
+  const respuesta = await fetch(`${baseUrl}/picking/25/finalizar`, { method: "POST" });
+  assert.equal(respuesta.status, 401);
+});
+
+test("HTTP escanear oculta errores internos", async (t) => {
+  const headers = autenticar(t);
+  const incrementar = prepararEscaneoHttp(t, { fallo: true });
+  const respuesta = await enviarEscaneo(headers);
+  assert.equal(respuesta.status, 500);
+  assert.deepEqual(await respuesta.json(), { error: {
+    code: "INTERNAL_ERROR", message: "Error interno del servidor",
+  } });
+  assert.equal(incrementar.mock.callCount(), 0);
+});
+
+for (const cantidad of [2, 3]) {
+  test(`HTTP finalizar con ${cantidad} de 3 conserva el estado correcto`, async (t) => {
+    const headers = autenticar(t);
+    prepararEscaneoHttp(t, { linea: { cantidadEscaneada: cantidad } });
+    const respuesta = await fetch(`${baseUrl}/picking/25/finalizar`, { method: "POST", headers });
+    assert.equal(respuesta.status, 200);
+    const { data } = await respuesta.json();
+    assert.equal(data.estado, cantidad === 3 ? "completo" : "con_diferencias");
+    assert.ok(data.fechaFin);
+  });
+}
