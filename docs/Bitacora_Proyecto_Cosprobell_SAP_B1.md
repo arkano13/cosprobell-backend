@@ -22,7 +22,7 @@ Documentos de referencia:
 | Revisión de metadatos y muestras | ZIP revisado: XML de metadatos y 13 archivos JSON |
 | Contexto funcional | Bodega y consulta por WhatsApp para los dueños definidos; quedan reglas operativas pendientes |
 | Organización del código | Redistribución autorizada y aplicada; productos separado por capas |
-| Pruebas automatizadas | 128 de 128 aprobadas en copia temporal por el asistente y posteriormente en el proyecto del usuario, según salida completa compartida; persistencia simulada; sección 12 |
+| Pruebas automatizadas | 128 aprobadas en el proyecto del usuario; nueva entrega de reintentos e historial con 144 de 144 aprobadas por el asistente en copia temporal; secciones 12 y 13 |
 | Picking por capas | Completada la separación en rutas, schemas, controlador, servicio y repositorio; conservado el comportamiento anterior |
 | Concurrencia de picking | Transacción con bloqueo de sesión y retirada de `SKIP LOCKED`; seis escenarios contra PostgreSQL aprobados según resultados compartidos y confirmación del usuario; detalle en sección 11 |
 | Búsqueda por código de barras | Código principal, adicional, inexistente y ambiguo comprobados manualmente por el usuario contra su base configurada |
@@ -182,7 +182,7 @@ Principios de trabajo:
 
 ## 9. Próxima acción
 
-**Punto actual:** integración incorporada y comprobada en el proyecto del usuario con 128 pruebas aprobadas y demo de PostgreSQL aprobada. Bloque de conexión y verificación cerrado para datos de prueba; siguen idempotencia e historial de escaneos. La sección 12 documenta la evidencia y sus límites.
+**Punto actual:** integración de etiquetas incorporada por el usuario. Reintentos e historial terminados y verificados en una entrega externa lista para copiar, descrita en la sección 13. El usuario pidió terminar esos dos puntos y parar; no iniciar otro bloque al cerrar esta entrega.
 
 Al retomar:
 
@@ -310,3 +310,49 @@ Estas ejecuciones del asistente verificaron inicialmente la entrega externa. Pos
 Idempotencia por lectura, historial de eventos y operador autenticado; gestión autorizada de confirmaciones; elegibilidad de órdenes y sesiones duplicadas; cantidades pendientes/entregas parciales; cancelaciones y modificaciones en SAP; uniformización de errores. El bloqueo actual coordina operaciones de la sesión de picking, no cambios concurrentes del catálogo o de confirmaciones: el futuro sincronizador deberá coordinar o versionar esos cambios.
 
 Con los metadatos actuales, una referencia manual o desconocida impide escanear. Falta obtener ejemplos reales y definir su interpretación con Cosprobell. Una confirmación local tampoco demuestra la identidad de quien la registró: esa autenticación sigue pendiente.
+
+
+## 13. Reintentos sin doble conteo e historial de lecturas
+
+### Contrato y comportamiento
+
+El cuerpo de `POST /picking/:id/escanear` ahora exige `codigo` y `operacionId` (UUID). La aplicación debe crear y conservar ese UUID antes del primer envío de una lectura. Un reintento de red reutiliza la misma pareja; una lectura física nueva utiliza otro UUID. No se genera una clave alternativa en el servidor cuando falta el identificador.
+
+La clave es única por sesión: `(pickingId, operacionId)`. El código se normaliza quitando espacios exteriores, conservando ceros; el UUID se normaliza a minúsculas. Mismo UUID y código devuelven la respuesta guardada sin incrementar ni crear otro evento. Mismo UUID con otro código produce `OPERACION_REUTILIZADA` y conserva el evento original. La misma clave puede existir en sesiones distintas.
+
+La búsqueda del resultado previo ocurre bajo el bloqueo de sesión y antes de comprobar su estado actual. Así se puede recuperar una respuesta perdida después del cierre. Se devuelve el resultado histórico de aquella lectura, no el total actual; para actualizar el avance de pantalla debe consultarse la sesión.
+
+### Persistencia
+
+Nueva tabla `picking_escaneos`, modelo `PickingEscaneo`, enum `ResultadoEscaneoPicking`, clave única e índice por sesión/id. Guarda código, operación, resultado, fecha, aplicación autenticada cuando existe, y producto/línea/unidad/cantidades antes y después para aceptados. Conserva la respuesta original o el error de negocio para reproducirlos.
+
+El incremento y el evento aceptado se confirman en la misma transacción. Un fallo técnico al guardar el evento revierte el incremento. Los rechazos de negocio se guardan sin sumar; el error se entrega después de confirmar el evento. Reintentar un rechazo devuelve ese mismo rechazo, incluso si los datos se corrigieron después; reevaluarlo requiere una operación nueva.
+
+El historial contiene una entrada por operación válida resuelta en una sesión existente, no una entrada por intento de transporte. No registra peticiones sin autenticar, datos inválidos rechazados antes del servicio, sesiones inexistentes, conflictos al reutilizar una clave ni fallos técnicos revertidos. No reconstruye escaneos anteriores a esta implementación.
+
+Las relaciones restringen el borrado accidental de sesiones o líneas con historial. No se creó un endpoint para editar o borrar eventos. Los scripts de prueba eliminan explícitamente sus propios eventos antes de retirar sus sesiones.
+
+### Consulta HTTP
+
+`GET /picking/:id/escaneos?limit=50&despuesDe=123`, protegido por la autenticación existente. `limit` admite de 1 a 100 y vale 50 por defecto; se omite `despuesDe` en la primera página. Devuelve `{ data, siguienteCursor }` ordenado por id ascendente; cursor null indica última página. No incluye la copia completa de la respuesta de cada lectura.
+
+La aplicación se toma de `req.appNombre`, establecido por autenticación, no del cuerpo. No identifica todavía al operador individual. Se conserva el formato HTTP anterior de errores conocidos de picking.
+
+### Verificación y entrega
+
+- **144 pruebas automatizadas aprobadas**, ejecutadas por el asistente en la copia temporal: reglas anteriores, UUID obligatorio, respuesta estable, conflicto de clave, reintento tras cierre, persistencia de rechazo, fallo al guardar historial, paginación y HTTP.
+- Migración `20260928120000_historial_escaneos_idempotentes` generada comparando esquemas, revisada y **aplicada en la base de pruebas autorizada**. Solo añade el tipo, tabla, índices y relaciones; no modifica cantidades existentes. La aplicación en el checkout del usuario sigue pendiente de copiar los archivos y regenerar Prisma.
+- Sesión 21: demo integrada aprobada y limpiada.
+- Sesión 22: mismo UUID concurrente deja una unidad/un evento; nueva lectura suma; otro código con la misma clave se rechaza; el rechazo sigue estable tras corregir la etiqueta; fallo SQL intencionado revierte cantidades e historial; reintento posterior funciona; respuesta aceptada se recupera después del cierre. Historial paginado con cinco aceptados y dos rechazos, sin duplicados. Limpieza completada.
+- Sesión 23: comprobación adicional de alcance por sesión, limpiada. La prueba se reforzó después manteniendo dos sesiones simultáneamente.
+- Sesiones 24–29: los seis escenarios anteriores de concurrencia volvieron a aprobarse con historial activado; limpieza completada.
+- Sesiones 30 y 31: mismo UUID presente al mismo tiempo en dos sesiones distintas, ambos aceptados una vez; comprobación aprobada y datos eliminados.
+- Hubo un fallo inicial al iniciar la transacción de preparación del script. Se amplió únicamente `maxWait` del helper de datos ficticios a 10 segundos; los límites de la transacción de aplicación no cambiaron. Las comprobaciones posteriores aprobaron.
+
+La entrega `entrega-escaneos-historial` contiene los archivos completos, migración, guía y copiador con respaldo. No incluye credenciales ni modifica el checkout hasta ejecutar el copiador. La migración ya está aplicada en la base de pruebas: `migrate deploy` desde el checkout actualizado comprobará ese estado sin repetirla.
+
+### Punto de pausa
+
+Los dos objetivos de esta entrega están implementados y comprobados con datos de prueba. Tras incorporar la entrega, regenerar Prisma y confirmar la suite local, parar según lo solicitado por el usuario. No empezar hoy otra funcionalidad.
+
+Siguen fuera de estos dos objetivos: operador autenticado, gestión de confirmaciones, elegibilidad/duplicidad de sesiones, pendientes/parciales, cambios concurrentes del catálogo, integración SAP y resolución de referencias Manual con ejemplos reales. El historial no convierte la API key de una aplicación en identidad personal.

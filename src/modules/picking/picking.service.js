@@ -1,3 +1,5 @@
+import { pickingEscaneosRepository } from "./picking.escaneos.repository.js";
+import { escanearBodySchema, historialQuerySchema } from "./picking.schemas.js";
 import { resolverEtiquetaParaPicking } from "./picking.etiquetas.service.js";
 import { validarCompatibilidadLinea } from "./picking.cantidades.js";
 import { pickingRepository } from "./picking.repository.js";
@@ -73,65 +75,161 @@ export async function consultarPicking(id) {
   return picking;
 }
 
-export async function escanearPicking(id, codigo) {
-  return conSesionBloqueada(id, async ({ tx, sesion }) => {
-    comprobarSesionActiva(sesion);
+async function registrarUnidad(id, codigo, tx) {
+  const etiqueta = await resolverEtiquetaParaPicking(codigo, tx);
+  const picking = await pickingRepository.buscarSesionConLineas(id, tx);
 
-    const etiqueta = await resolverEtiquetaParaPicking(codigo, tx);
-    const picking = await pickingRepository.buscarSesionConLineas(id, tx);
+  if (!picking) {
+    throw sesionNoEncontrada();
+  }
 
-    if (!picking) {
-      throw sesionNoEncontrada();
+  const lineas = picking.lineas
+    .filter((linea) => linea.itemCode === etiqueta.itemCode)
+    .sort((a, b) => a.id - b.id);
+
+  if (lineas.length === 0) {
+    throw new AppError({
+      code: "PRODUCTO_FUERA_DEL_PEDIDO",
+      message: "Ese producto no pertenece a este pedido",
+      statusCode: 409,
+    });
+  }
+
+  // En este alcance no repartimos lecturas entre presentaciones distintas.
+  // Todas las líneas del producto deben tener cantidades compatibles.
+  for (const linea of lineas) {
+    validarCompatibilidadLinea(linea, etiqueta);
+  }
+
+  const pendiente = lineas.find(
+    (linea) => linea.cantidadEscaneada < linea.cantidadPedida
+  );
+
+  if (!pendiente) {
+    throw new AppError({
+      code: "CANTIDAD_COMPLETADA",
+      message: "Ese producto ya completo su cantidad pedida",
+      statusCode: 409,
+    });
+  }
+
+  const filas = await pickingRepository.incrementarLinea({
+    pickingId: id,
+    lineaId: pendiente.id,
+    itemCode: etiqueta.itemCode,
+    codigo: etiqueta.codigo,
+    uomEntry: etiqueta.uomEntry,
+  }, tx);
+
+  if (filas.length !== 1) {
+    throw new AppError({
+      code: "LINEA_MODIFICADA",
+      message: "La línea cambió durante el escaneo; vuelva a consultar la sesión",
+      statusCode: 409,
+    });
+  }
+
+  return filas[0];
+}
+
+export async function escanearPicking(id, codigo, operacionId, { aplicacion = null } = {}) {
+  const entrada = escanearBodySchema.safeParse({ codigo, operacionId });
+  if (!entrada.success) {
+    throw new AppError({
+      code: "DATOS_ESCANEO_INVALIDOS",
+      message: "El escaneo requiere un código válido y un operacionId UUID",
+      statusCode: 400,
+    });
+  }
+
+  const datos = entrada.data;
+  const evento = await conSesionBloqueada(id, async ({ tx, sesion }) => {
+    if (!sesion) throw sesionNoEncontrada();
+
+    // Consultar antes del estado permite recuperar una respuesta perdida
+    // incluso si la sesión ya se cerró después de aquella lectura.
+    const anterior = await pickingEscaneosRepository.buscarOperacion(id, datos.operacionId, tx);
+    if (anterior) {
+      if (anterior.codigo !== datos.codigo) {
+        throw new AppError({
+          code: "OPERACION_REUTILIZADA",
+          message: "El operacionId ya se utilizó con otro código de barras",
+          statusCode: 409,
+        });
+      }
+      return anterior;
     }
 
-    const lineas = picking.lineas
-      .filter((linea) => linea.itemCode === etiqueta.itemCode)
-      .sort((a, b) => a.id - b.id);
-
-    if (lineas.length === 0) {
-      throw new AppError({
-        code: "PRODUCTO_FUERA_DEL_PEDIDO",
-        message: "Ese producto no pertenece a este pedido",
-        statusCode: 409,
-      });
-    }
-
-    // En este alcance no repartimos lecturas entre presentaciones distintas.
-    // Todas las líneas del producto deben tener cantidades compatibles.
-    for (const linea of lineas) {
-      validarCompatibilidadLinea(linea, etiqueta);
-    }
-
-    const pendiente = lineas.find(
-      (linea) => linea.cantidadEscaneada < linea.cantidadPedida
-    );
-
-    if (!pendiente) {
-      throw new AppError({
-        code: "CANTIDAD_COMPLETADA",
-        message: "Ese producto ya completo su cantidad pedida",
-        statusCode: 409,
-      });
-    }
-
-    const filas = await pickingRepository.incrementarLinea({
+    const base = {
       pickingId: id,
-      lineaId: pendiente.id,
-      itemCode: etiqueta.itemCode,
-      codigo: etiqueta.codigo,
-      uomEntry: etiqueta.uomEntry,
-    }, tx);
+      operacionId: datos.operacionId,
+      codigo: datos.codigo,
+      aplicacion,
+    };
 
-    if (filas.length !== 1) {
-      throw new AppError({
-        code: "LINEA_MODIFICADA",
-        message: "La línea cambió durante el escaneo; vuelva a consultar la sesión",
-        statusCode: 409,
-      });
+    let linea;
+    try {
+      comprobarSesionActiva(sesion);
+      linea = await registrarUnidad(id, datos.codigo, tx);
+    } catch (error) {
+      if (!(error instanceof AppError) || error.statusCode >= 500) throw error;
+      // Un rechazo de negocio no incrementa cantidades. Lo persistimos y
+      // lo convertimos de nuevo en error DESPUÉS de confirmar la transacción.
+      return pickingEscaneosRepository.crear({
+        ...base,
+        resultado: "rechazado",
+        cantidadRegistrada: 0,
+        httpStatus: error.statusCode,
+        errorCode: error.code,
+        errorMessage: error.message,
+      }, tx);
     }
 
-    return filas[0];
+    // El evento y el incremento se confirman juntos. Si falla esta escritura,
+    // PostgreSQL revierte también la unidad; no se pierde el historial.
+    return pickingEscaneosRepository.crear({
+      ...base,
+      resultado: "aceptado",
+      lineaId: linea.id,
+      itemCode: linea.itemCode,
+      uomEntry: linea.uomEntry,
+      cantidadRegistrada: 1,
+      cantidadAntes: linea.cantidadEscaneada - 1,
+      cantidadDespues: linea.cantidadEscaneada,
+      httpStatus: 200,
+      respuesta: JSON.parse(JSON.stringify(linea)),
+    }, tx);
   });
+
+  if (evento.resultado === "rechazado") {
+    throw new AppError({
+      code: evento.errorCode,
+      message: evento.errorMessage,
+      statusCode: evento.httpStatus,
+    });
+  }
+
+  // Respuesta histórica de ESTA lectura, no el total actual de la sesión.
+  return evento.respuesta;
+}
+
+export async function consultarHistorialPicking(id, query = {}) {
+  const entrada = historialQuerySchema.safeParse(query);
+  if (!entrada.success) {
+    throw new AppError({
+      code: "PAGINACION_INVALIDA",
+      message: "La paginación del historial no es válida",
+      statusCode: 400,
+    });
+  }
+  const sesion = await pickingRepository.buscarEstadoSesion(id);
+  if (!sesion) throw sesionNoEncontrada();
+  const filas = await pickingEscaneosRepository.listar(id, entrada.data);
+  const data = filas.slice(0, entrada.data.limit);
+  return {
+    data,
+    siguienteCursor: filas.length > entrada.data.limit ? data.at(-1).id : null,
+  };
 }
 
 export async function finalizarPicking(id) {

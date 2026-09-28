@@ -51,7 +51,7 @@ export async function conDatosPicking(cantidades, operacion) {
       })) },
     } });
     return sesion.id;
-  }, { timeout: 20_000 });
+  }, { maxWait: 10_000, timeout: 20_000 });
 
   console.log(`Sesión temporal creada: ${sesionId}`);
   try {
@@ -59,6 +59,7 @@ export async function conDatosPicking(cantidades, operacion) {
       otroCodigo, sinConfirmarCodigo, unidadId, cajaId });
   } finally {
     await prisma.$transaction(async (tx) => {
+      await tx.pickingEscaneo.deleteMany({ where: { pickingId: sesionId } });
       await tx.pickingPedidoLinea.deleteMany({ where: { pickingId: sesionId } });
       await tx.pickingPedido.delete({ where: { id: sesionId } });
       const filtro = { itemCode: { in: [itemCode, otroItemCode] } };
@@ -69,7 +70,7 @@ export async function conDatosPicking(cantidades, operacion) {
       await tx.productoCodigoBarras.deleteMany({ where: filtro });
       await tx.producto.deleteMany({ where: filtro });
       await tx.unidadMedida.deleteMany({ where: { absEntry: { in: [unidadId, cajaId] } } });
-    }, { timeout: 20_000 });
+    }, { maxWait: 10_000, timeout: 20_000 });
     console.log("Datos temporales eliminados.");
   }
 }

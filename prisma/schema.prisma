@@ -611,7 +611,8 @@ model PickingPedido {
   fechaFin       DateTime?
   estado         String    @default("en_proceso") // en_proceso | completo | con_diferencias
 
-  lineas PickingPedidoLinea[]
+  lineas   PickingPedidoLinea[]
+  escaneos PickingEscaneo[]
 
   @@map("picking_pedidos")
 }
@@ -630,7 +631,40 @@ model PickingPedidoLinea {
   uomEntry Int?
   uomCode  String?
 
+  escaneos PickingEscaneo[]
+
   @@map("picking_pedidos_lineas")
+}
+
+enum ResultadoEscaneoPicking {
+  aceptado
+  rechazado
+}
+
+model PickingEscaneo {
+  id                 Int                     @id @default(autoincrement())
+  pickingId          Int
+  picking            PickingPedido           @relation(fields: [pickingId], references: [id], onDelete: Restrict)
+  operacionId        String                  @db.Uuid
+  codigo             String
+  resultado          ResultadoEscaneoPicking
+  lineaId            Int?
+  linea              PickingPedidoLinea?     @relation(fields: [lineaId], references: [id], onDelete: Restrict)
+  itemCode           String?
+  uomEntry           Int?
+  cantidadRegistrada Int
+  cantidadAntes      Float?
+  cantidadDespues    Float?
+  httpStatus         Int
+  errorCode          String?
+  errorMessage       String?
+  respuesta          Json?
+  aplicacion         String?
+  creadoEn           DateTime                @default(now())
+
+  @@unique([pickingId, operacionId])
+  @@index([pickingId, id])
+  @@map("picking_escaneos")
 }
 
 model ApiKey {

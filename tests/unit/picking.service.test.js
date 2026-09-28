@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -6,6 +7,7 @@ const { prisma } = await import("../../src/infrastructure/database/prisma.js");
 const { pickingRepository } = await import("../../src/modules/picking/picking.repository.js");
 const { pickingEtiquetasRepository } = await import("../../src/modules/picking/picking.etiquetas.repository.js");
 const { escanearPicking, finalizarPicking } = await import("../../src/modules/picking/picking.service.js");
+const { pickingEscaneosRepository } = await import("../../src/modules/picking/picking.escaneos.repository.js");
 const { AppError } = await import("../../src/shared/errors/AppError.js");
 
 function linea(cambios = {}) {
@@ -30,6 +32,13 @@ function preparar(t, opciones = {}) {
   const original = prisma.$transaction;
   prisma.$transaction = async (operacion) => operacion(tx);
   t.after(() => { prisma.$transaction = original; });
+
+  t.mock.method(pickingEscaneosRepository, "buscarOperacion", async (id, operacionId, db) => {
+    assert.equal(db, tx); return null;
+  });
+  t.mock.method(pickingEscaneosRepository, "crear", async (datos, db) => {
+    assert.equal(db, tx); return { id: 1, ...datos };
+  });
 
   const consultaEtiquetas = t.mock.method(pickingEtiquetasRepository, "buscarProductos", async (codigo, db) => {
     assert.equal(db, tx);
@@ -73,7 +82,7 @@ function errorEsperado(code, statusCode = 409) {
 
 test("escaneo integra etiqueta, confirmación y unidades en la misma transacción", async (t) => {
   const mocks = preparar(t);
-  const resultado = await escanearPicking(25, " 00123 ");
+  const resultado = await escanearPicking(25, " 00123 ", randomUUID());
   assert.equal(resultado.cantidadEscaneada, 1);
   assert.equal(resultado.codigoBarrasEscaneado, "00123");
   assert.deepEqual(mocks.incrementar.mock.calls[0].arguments, [{
@@ -84,7 +93,7 @@ test("escaneo integra etiqueta, confirmación y unidades en la misma transacció
 
 test("sesión inexistente impide escanear y finalizar antes de consultar etiquetas", async (t) => {
   const mocks = preparar(t, { sesion: null });
-  await assert.rejects(escanearPicking(999, "00123"), errorEsperado("PICKING_NO_ENCONTRADO", 404));
+  await assert.rejects(escanearPicking(999, "00123", randomUUID()), errorEsperado("PICKING_NO_ENCONTRADO", 404));
   await assert.rejects(finalizarPicking(999), errorEsperado("PICKING_NO_ENCONTRADO", 404));
   assert.equal(mocks.consultaEtiquetas.mock.callCount(), 0);
   assert.equal(mocks.incrementar.mock.callCount(), 0);
@@ -93,7 +102,7 @@ test("sesión inexistente impide escanear y finalizar antes de consultar etiquet
 
 test("sesión cerrada impide escanear y volver a finalizar", async (t) => {
   const mocks = preparar(t, { sesion: { id: 25, estado: "completo" } });
-  await assert.rejects(escanearPicking(25, "00123"), errorEsperado("PICKING_NO_ACTIVO", 400));
+  await assert.rejects(escanearPicking(25, "00123", randomUUID()), errorEsperado("PICKING_NO_ACTIVO", 400));
   await assert.rejects(finalizarPicking(25), errorEsperado("PICKING_NO_ACTIVO", 400));
   assert.equal(mocks.consultaEtiquetas.mock.callCount(), 0);
   assert.equal(mocks.incrementar.mock.callCount(), 0);
@@ -122,28 +131,28 @@ const rechazos = [
 for (const caso of rechazos) {
   test(`escaneo rechaza ${caso.nombre} antes de incrementar`, async (t) => {
     const mocks = preparar(t, caso.preparar());
-    await assert.rejects(escanearPicking(25, "00123"), errorEsperado(caso.code, caso.status ?? 409));
+    await assert.rejects(escanearPicking(25, "00123", randomUUID()), errorEsperado(caso.code, caso.status ?? 409));
     assert.equal(mocks.incrementar.mock.callCount(), 0);
   });
 }
 
 test("elige la primera línea pendiente por id y no cambia otra línea", async (t) => {
   const mocks = preparar(t, { lineas: [linea({ id: 12 }), linea({ id: 10, cantidadEscaneada: 3 }), linea({ id: 11 })] });
-  const resultado = await escanearPicking(25, "00123");
+  const resultado = await escanearPicking(25, "00123", randomUUID());
   assert.equal(resultado.id, 11);
   assert.equal(mocks.incrementar.mock.calls[0].arguments[0].lineaId, 11);
 });
 
 test("no confunde una actualización vacía con cantidad completada", async (t) => {
   preparar(t, { sinActualizacion: true });
-  await assert.rejects(escanearPicking(25, "00123"), errorEsperado("LINEA_MODIFICADA"));
+  await assert.rejects(escanearPicking(25, "00123", randomUUID()), errorEsperado("LINEA_MODIFICADA"));
 });
 
 for (const origen of ["falloEtiqueta", "falloIncremento"]) {
   test(`propaga ${origen} para que la transacción revierta`, async (t) => {
     const fallo = new Error("Fallo simulado");
     preparar(t, { [origen]: fallo });
-    await assert.rejects(escanearPicking(25, "00123"), (error) => error === fallo);
+    await assert.rejects(escanearPicking(25, "00123", randomUUID()), (error) => error === fallo);
   });
 }
 

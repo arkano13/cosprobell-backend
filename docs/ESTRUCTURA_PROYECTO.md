@@ -53,6 +53,18 @@ Los scripts de concurrencia conservan sus nombres, pero sus datos fueron adaptad
 
 ## Límites
 
-No hay conversión de cajas, autorización por nombre de unidad, idempotencia por lectura ni historial individual completo. Las referencias manuales o desconocidas bloquean el escaneo; las presentaciones mezcladas del mismo producto se rechazan. La confirmación de una etiqueta se administra todavía fuera de un flujo autenticado. La creación de sesiones conserva cantidades originales del pedido; quedan pendientes elegibilidad, parciales y políticas de cambios SAP.
+No hay conversión de cajas ni autorización por nombre de unidad. La entrega de la sección 13 añade idempotencia e historial por operación; sigue pendiente identificar al operador individual. Las referencias manuales o desconocidas bloquean el escaneo; las presentaciones mezcladas del mismo producto se rechazan. La confirmación de una etiqueta se administra todavía fuera de un flujo autenticado. La creación de sesiones conserva cantidades originales del pedido; quedan pendientes elegibilidad, parciales y políticas de cambios SAP.
 
 Ver la sección 12 de la bitácora para evidencia de PostgreSQL y pendientes.
+
+
+## Reintentos e historial — entrega posterior
+
+- `picking.escaneos.repository.js`: obtiene una operación previa, guarda su resultado y pagina el historial.
+- `picking.service.js`: coordina reintento, escaneo e historial bajo el bloqueo existente; confirma el rechazo antes de responderlo.
+- `picking.schemas.js`: exige UUID en cada lectura y valida paginación.
+- `picking.controller.js` y rutas: reciben `operacionId`, usan el nombre autenticado de aplicación y exponen `GET /picking/:id/escaneos`.
+- `PickingEscaneo`: evento persistido y respuesta original; único por sesión/operación.
+- `scripts/comprobar-reintentos-picking.js`: prueba doble envío, respuesta histórica, conflicto, rechazo persistido, reversión SQL, cierre y paginación. El script integrado también lo ejecuta.
+
+La nueva entrega pasó 144 pruebas en la copia temporal y las comprobaciones PostgreSQL documentadas en la sección 13. Los scripts anteriores fueron actualizados para enviar un UUID nuevo por lectura física y limpiar sus eventos. No se añaden UUID automáticamente en el backend: el cliente debe conservarlos al reenviar.

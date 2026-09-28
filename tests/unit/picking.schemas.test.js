@@ -1,3 +1,4 @@
+const operacionId = "48e763e8-3a90-486f-8eb6-a0b9a0ab71a4";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -43,10 +44,12 @@ test("valida el identificador de la sesión", () => {
 test("conserva los ceros iniciales del código escaneado", () => {
   const resultado = escanearBodySchema.parse({
     codigo: " 0012345678905 ",
+    operacionId,
   });
 
   assert.deepEqual(resultado, {
     codigo: "0012345678905",
+    operacionId,
   });
 });
 
@@ -60,7 +63,7 @@ test("rechaza códigos vacíos, no textuales o con byte nulo", () => {
     "ABC\u0000DEF",
   ]) {
     assert.equal(
-      escanearBodySchema.safeParse({ codigo: valor }).success,
+      escanearBodySchema.safeParse({ codigo: valor, operacionId }).success,
       false
     );
   }
@@ -83,4 +86,10 @@ test("acepta usuario opcional y rechaza texto inválido", () => {
       false
     );
   }
+});
+test("exige un UUID de operación válido y normaliza mayúsculas", () => {
+  for (const valor of [undefined, null, "", "abc", 123]) {
+    assert.equal(escanearBodySchema.safeParse({ codigo: "00123", operacionId: valor }).success, false);
+  }
+  assert.equal(escanearBodySchema.parse({ codigo: "00123", operacionId: operacionId.toUpperCase() }).operacionId, operacionId);
 });

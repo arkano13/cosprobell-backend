@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import { prisma } from "../src/infrastructure/database/prisma.js";
 import { consultarPicking, escanearPicking, finalizarPicking } from "../src/modules/picking/picking.service.js";
@@ -8,7 +9,7 @@ try {
     console.log("OBJETIVO: preparar 3 shampoos individuales con el servicio real.");
     async function rechazar(etiqueta, code) {
       const antes = await consultarPicking(sesionId);
-      await assert.rejects(escanearPicking(sesionId, etiqueta), (error) => error.code === code);
+      await assert.rejects(escanearPicking(sesionId, etiqueta, randomUUID()), (error) => error.code === code);
       assert.deepEqual(await consultarPicking(sesionId), antes);
       console.log(`RECHAZADO sin cambios: ${code}`);
     }
@@ -25,7 +26,7 @@ try {
     await prisma.pickingPedidoLinea.updateMany({ where: { pickingId: sesionId }, data: { uomEntry: unidadId } });
 
     for (let cantidad = 1; cantidad <= 3; cantidad++) {
-      const linea = await escanearPicking(sesionId, codigo);
+      const linea = await escanearPicking(sesionId, codigo, randomUUID());
       assert.equal(linea.cantidadEscaneada, cantidad);
       assert.equal(linea.codigoBarrasEscaneado, codigo);
       const guardada = (await consultarPicking(sesionId)).lineas[0];

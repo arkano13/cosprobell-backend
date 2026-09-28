@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
@@ -603,11 +604,23 @@ const { pickingEtiquetasRepository } = await import(
   "../../src/modules/picking/picking.etiquetas.repository.js"
 );
 
+const { pickingEscaneosRepository } = await import("../../src/modules/picking/picking.escaneos.repository.js");
+
 function prepararEscaneoHttp(t, cambios = {}) {
   const linea = { id: 10, pickingId: 25, itemCode: "PROD-001", uomEntry: 1,
     cantidadPedida: 3, cantidadEscaneada: 0, ...cambios.linea };
   const sesion = { id: 25, estado: cambios.estado ?? "en_proceso", lineas: [linea] };
   const tx = { async $queryRaw() { return [sesion]; } };
+  const eventos = new Map();
+  t.mock.method(pickingEscaneosRepository, "buscarOperacion", async (id, operacionId, db) => {
+    assert.equal(db, tx); return eventos.get(operacionId) ?? null;
+  });
+  t.mock.method(pickingEscaneosRepository, "crear", async (datos, db) => {
+    assert.equal(db, tx);
+    const evento = { id: eventos.size + 1, ...datos };
+    eventos.set(datos.operacionId, evento);
+    return evento;
+  });
   sustituir(t, prisma, "$transaction", async (operacion) => operacion(tx));
   t.mock.method(pickingEtiquetasRepository, "buscarProductos", async (codigo, db) => {
     assert.equal(db, tx);
@@ -637,10 +650,10 @@ function prepararEscaneoHttp(t, cambios = {}) {
   return incrementar;
 }
 
-async function enviarEscaneo(headers, codigo = "00123", id = "25") {
+async function enviarEscaneo(headers, codigo = "00123", id = "25", operacionId = randomUUID()) {
   return fetch(`${baseUrl}/picking/${id}/escanear`, {
     method: "POST", headers: { ...headers, "Content-Type": "application/json" },
-    body: JSON.stringify({ codigo }),
+    body: JSON.stringify({ codigo, operacionId }),
   });
 }
 
@@ -712,3 +725,60 @@ for (const cantidad of [2, 3]) {
     assert.ok(data.fechaFin);
   });
 }
+
+
+test("HTTP repetir el mismo operacionId devuelve la misma respuesta y no incrementa", async (t) => {
+  const headers = autenticar(t);
+  const incrementar = prepararEscaneoHttp(t);
+  const id = randomUUID();
+  const primera = await enviarEscaneo(headers, "00123", "25", id);
+  const segunda = await enviarEscaneo(headers, "00123", "25", id);
+  assert.equal(primera.status, 200);
+  assert.equal(segunda.status, 200);
+  assert.deepEqual(await segunda.json(), await primera.json());
+  assert.equal(incrementar.mock.callCount(), 1);
+});
+
+test("HTTP reutilizar operacionId con otro código responde 409", async (t) => {
+  const headers = autenticar(t);
+  const incrementar = prepararEscaneoHttp(t);
+  const id = randomUUID();
+  assert.equal((await enviarEscaneo(headers, "00123", "25", id)).status, 200);
+  assert.equal((await enviarEscaneo(headers, "OTRO", "25", id)).status, 409);
+  assert.equal(incrementar.mock.callCount(), 1);
+});
+
+test("HTTP exige operacionId antes de abrir una transacción", async (t) => {
+  const headers = autenticar(t);
+  let llamadas = 0;
+  sustituir(t, prisma, "$transaction", async () => { llamadas++; });
+  const respuesta = await fetch(`${baseUrl}/picking/25/escanear`, {
+    method: "POST", headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({ codigo: "00123" }),
+  });
+  assert.equal(respuesta.status, 400);
+  assert.equal(llamadas, 0);
+});
+
+test("HTTP historial requiere autenticación y pagina los eventos", async (t) => {
+  assert.equal((await fetch(`${baseUrl}/picking/25/escaneos`)).status, 401);
+  const headers = autenticar(t);
+  t.mock.method(pickingRepository, "buscarEstadoSesion", async () => ({ estado: "completo" }));
+  const consulta = t.mock.method(pickingEscaneosRepository, "listar", async (id, query) => {
+    assert.equal(id, 25);
+    assert.deepEqual(query, { limit: 1, despuesDe: 7 });
+    return [{ id: 8, resultado: "aceptado" }, { id: 9, resultado: "rechazado" }];
+  });
+  const respuesta = await fetch(`${baseUrl}/picking/25/escaneos?limit=1&despuesDe=7`, { headers });
+  assert.equal(respuesta.status, 200);
+  assert.deepEqual(await respuesta.json(), { data: [{ id: 8, resultado: "aceptado" }], siguienteCursor: 8 });
+  const invalida = await fetch(`${baseUrl}/picking/25/escaneos?limit=1000`, { headers });
+  assert.equal(invalida.status, 400);
+  assert.equal(consulta.mock.callCount(), 1);
+});
+
+test("HTTP historial inexistente devuelve 404", async (t) => {
+  const headers = autenticar(t);
+  t.mock.method(pickingRepository, "buscarEstadoSesion", async () => null);
+  assert.equal((await fetch(`${baseUrl}/picking/999/escaneos`, { headers })).status, 404);
+});

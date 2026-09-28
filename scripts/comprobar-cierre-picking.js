@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import { conDatosPicking } from "./helpers/datos-picking.js";
 import { setTimeout as esperar } from "node:timers/promises";
@@ -142,7 +143,7 @@ async function probarEscaneoPrimero() {
   await conSesionTemporal([1], async (id, codigo) => {
     const [escaneo, cierre] = await ejecutarEnOrden(
       "incrementarLinea",
-      () => escanearPicking(id, codigo),
+      () => escanearPicking(id, codigo, randomUUID()),
       () => finalizarPicking(id)
     );
 
@@ -169,7 +170,7 @@ async function probarCierrePrimero() {
     const [cierre, escaneo] = await ejecutarEnOrden(
       "guardarFinalizacion",
       () => finalizarPicking(id),
-      () => escanearPicking(id, codigo)
+      () => escanearPicking(id, codigo, randomUUID())
     );
 
     const finalizacion = exigirExito(cierre);
@@ -201,7 +202,7 @@ async function probarProductoEnVariasLineas() {
   await conSesionTemporal([1, 2], async (id, codigo) => {
     // Cuatro solicitudes para tres unidades repartidas en dos líneas.
     const resultados = await Promise.allSettled(
-      Array.from({ length: 4 }, () => escanearPicking(id, codigo))
+      Array.from({ length: 4 }, () => escanearPicking(id, codigo, randomUUID()))
     );
 
     const aceptados = resultados.filter(

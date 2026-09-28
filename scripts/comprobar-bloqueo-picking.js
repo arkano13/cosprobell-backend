@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import { setTimeout as esperar } from "node:timers/promises";
 import pg from "pg";
@@ -19,7 +20,7 @@ try {
       transaccionAbierta = true;
       await conexion.query("SELECT id FROM picking_pedidos WHERE id = $1 FOR UPDATE", [sesionId]);
       const { rows: [{ pid }] } = await conexion.query("SELECT pg_backend_pid() AS pid");
-      resultadoEscaneo = escanearPicking(sesionId, codigo).then(
+      resultadoEscaneo = escanearPicking(sesionId, codigo, randomUUID()).then(
         (valor) => { terminado = true; return { ok: true, valor }; },
         (error) => { terminado = true; return { ok: false, error }; }
       );
