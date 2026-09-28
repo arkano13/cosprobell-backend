@@ -1,0 +1,613 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+
+// Cosprobell · SAP B1 — schema.prisma (Fase A, borrador para validar)
+//
+// Basado en Modelo_Datos_Campos_Permitidos_Cosprobell.md (bitacora del proyecto).
+// NO incluye datos reales. Este archivo aun no fue aprobado formalmente para
+// migrar contra una base de produccion; usar primero con datos sinteticos/muestra.
+//
+// Pendientes conocidos que este schema todavia no resuelve (ver bitacora):
+// - Catalogo real de proveedores (Proveedor abajo es un placeholder minimo).
+// - Orden de carga Warehouses antes que Items (se resuelve en el codigo de sync, no aqui).
+// - evaluaciones_credito: fuera de este schema a proposito (fase final del proyecto).
+
+
+// ---------------------------------------------------------------------------
+// Catalogos
+// ---------------------------------------------------------------------------
+
+model GrupoProducto {
+  number    Int        @id
+  groupName String
+  productos Producto[]
+
+  @@map("grupos_productos")
+}
+
+model Bodega {
+  warehouseCode String                @id
+  warehouseName String
+  city          String?
+  country       String?
+  inactive      Boolean               @default(false)
+  existencias   ProductoExistencia[]
+
+  @@map("bodegas")
+}
+
+model ListaPrecio {
+  priceListNo   Int              @id
+  priceListName String
+  active        Boolean          @default(true)
+  isGrossPrice  Boolean          @default(false)
+  precios       ProductoPrecio[]
+
+  @@map("listas_precios")
+}
+
+model Vendedor {
+  salesEmployeeCode Int     @id
+  salesEmployeeName String
+  active            Boolean @default(true)
+
+  @@map("vendedores")
+}
+
+// Placeholder minimo. Pendiente de confirmar con Cosprobell si existe un
+// catalogo real de proveedores en SAP (BusinessPartners con CardType distinto,
+// o una fuente separada). No forzar relacion con Cliente.
+model Proveedor {
+  cardCode String              @id
+  cardName String?
+  entradas EntradaMercancia[]
+
+  @@map("proveedores")
+}
+
+// ---------------------------------------------------------------------------
+// Producto
+// ---------------------------------------------------------------------------
+
+model Producto {
+  itemCode                   String   @id
+  itemName                   String
+  itemsGroupCode             Int?
+  grupo                      GrupoProducto? @relation(fields: [itemsGroupCode], references: [number])
+  barCode                    String?
+  valid                      Boolean  @default(true)
+  frozen                     Boolean  @default(false)
+  quantityOnStock            Float?
+  quantityOrderedFromVendors Float?
+  quantityOrderedByCustomers Float?
+  sapCreateDate              DateTime?
+  sapUpdateDate              DateTime?
+  sincronizadoEn             DateTime @default(now())
+
+  precios       ProductoPrecio[]
+  existencias   ProductoExistencia[]
+  codigosBarras ProductoCodigoBarras[]
+
+  @@map("productos")
+}
+
+model ProductoPrecio {
+  id          Int    @id @default(autoincrement())
+  producto    Producto    @relation(fields: [itemCode], references: [itemCode])
+  itemCode    String
+  listaPrecio ListaPrecio @relation(fields: [priceListNo], references: [priceListNo])
+  priceListNo Int
+  price       Float
+  currency    String
+  factor      Float?
+
+  @@unique([itemCode, priceListNo])
+  @@map("productos_precios")
+}
+
+model ProductoExistencia {
+  id            Int      @id @default(autoincrement())
+  producto      Producto @relation(fields: [itemCode], references: [itemCode])
+  itemCode      String
+  bodega        Bodega?  @relation(fields: [warehouseCode], references: [warehouseCode])
+  warehouseCode String
+  inStock       Float
+  committed     Float
+  ordered       Float
+  actualizadoEn DateTime @default(now())
+
+  @@unique([itemCode, warehouseCode])
+  @@map("productos_existencias")
+}
+
+// Vacia en la muestra actual (ItemBarCodeCollection sin registros).
+// Se deja lista para cuando la carga completa traiga datos reales.
+model ProductoCodigoBarras {
+  id       Int      @id @default(autoincrement())
+  producto Producto @relation(fields: [itemCode], references: [itemCode])
+  itemCode String
+  codigo   String
+
+  @@map("productos_codigos_barras")
+}
+
+// ---------------------------------------------------------------------------
+// Clientes
+// ---------------------------------------------------------------------------
+
+model Cliente {
+  cardCode                 String   @id
+  cardName                 String
+  cardType                 String?
+  groupCode                Int?
+  creditLimit              Float?
+  currentAccountBalance    Float?
+  openDeliveryNotesBalance Float?
+  openOrdersBalance        Float?
+  openChecksBalance        Float?
+  priceListNum             Int?
+  payTermsGrpCode          Int?
+  salesPersonCode          Int?
+  currency                 String?
+  valid                    Boolean  @default(true)
+  frozen                   Boolean  @default(false)
+  phone1                   String?
+  cellular                 String?
+  emailAddress              String?
+  city                     String?
+  country                  String?
+  uRtn                     String?
+  uTipoCliente             String?
+  uZona                    String?
+  uMuniList                String?
+  sincronizadoEn           DateTime @default(now())
+
+  facturas     Factura[]
+  pedidos      Pedido[]
+  entregas     Entrega[]
+  notasCredito NotaCredito[]
+  pagos        Pago[]
+
+  @@map("clientes")
+}
+
+// ---------------------------------------------------------------------------
+// Documentos de venta (Factura, Pedido, Entrega, Nota de credito)
+// Comparten allowlist de cabecera (ver Modelo_Datos_Campos_Permitidos).
+// ---------------------------------------------------------------------------
+
+model Factura {
+  docEntry        Int       @id
+  docNum          Int
+  docType         String?
+  cardCode        String
+  cliente         Cliente   @relation(fields: [cardCode], references: [cardCode])
+  docDate         DateTime
+  docDueDate      DateTime?
+  taxDate         DateTime?
+  docTotal        Float
+  docCurrency     String?
+  docRate         Float?
+  vatSum          Float?
+  totalDiscount   Float?
+  documentStatus  String?
+  cancelled       Boolean   @default(false)
+  cancelStatus    String?
+  salesPersonCode Int?
+  comments        String?
+  reference1      String?
+  paidToDate      Float?
+  uTipo           String?
+  uTipoFactura    String?
+  uZona           String?
+  uRtn            String?
+  uCredito        String?
+  uCai            String?
+  uGira           String?
+  uCodigo         String?
+  sapCreationDate DateTime?
+  sapUpdateDate   DateTime?
+  sincronizadoEn  DateTime  @default(now())
+
+  lineas       FacturaLinea[]
+  aplicaciones PagoFactura[]
+  notasCredito NotaCredito[]
+
+  @@map("facturas")
+}
+
+model FacturaLinea {
+  id              Int      @id @default(autoincrement())
+  factura         Factura  @relation(fields: [facturaDocEntry], references: [docEntry])
+  facturaDocEntry Int
+  lineNum         Int
+  itemCode        String
+  itemDescription String?
+  quantity        Float
+  price           Float?
+  currency        String?
+  discountPercent Float?
+  warehouseCode   String?
+  lineTotal       Float?
+  taxTotal        Float?
+  totalInclTax    Float?
+  baseType        Int?
+  baseEntry       Int?
+  baseLine        Int?
+  lineStatus      String?
+
+  @@unique([facturaDocEntry, lineNum])
+  @@map("facturas_lineas")
+}
+
+model Pedido {
+  docEntry        Int       @id
+  docNum          Int
+  docType         String?
+  cardCode        String
+  cliente         Cliente   @relation(fields: [cardCode], references: [cardCode])
+  docDate         DateTime
+  docDueDate      DateTime?
+  taxDate         DateTime?
+  docTotal        Float
+  docCurrency     String?
+  docRate         Float?
+  vatSum          Float?
+  totalDiscount   Float?
+  documentStatus  String?
+  cancelled       Boolean   @default(false)
+  cancelStatus    String?
+  salesPersonCode Int?
+  comments        String?
+  reference1      String?
+  uTipo           String?
+  uZona           String?
+  sapCreationDate DateTime?
+  sapUpdateDate   DateTime?
+  sincronizadoEn  DateTime  @default(now())
+
+  lineas PedidoLinea[]
+
+  @@map("pedidos")
+}
+
+model PedidoLinea {
+  id              Int    @id @default(autoincrement())
+  pedido          Pedido @relation(fields: [pedidoDocEntry], references: [docEntry])
+  pedidoDocEntry  Int
+  lineNum         Int
+  itemCode        String
+  itemDescription String?
+  quantity        Float
+  price           Float?
+  currency        String?
+  discountPercent Float?
+  warehouseCode   String?
+  lineTotal       Float?
+  lineStatus      String?
+
+  @@unique([pedidoDocEntry, lineNum])
+  @@map("pedidos_lineas")
+}
+
+model Entrega {
+  docEntry        Int       @id
+  docNum          Int
+  docType         String?
+  cardCode        String
+  cliente         Cliente   @relation(fields: [cardCode], references: [cardCode])
+  docDate         DateTime
+  docDueDate      DateTime?
+  taxDate         DateTime?
+  docTotal        Float
+  docCurrency     String?
+  documentStatus  String?
+  cancelled       Boolean   @default(false)
+  salesPersonCode Int?
+  comments        String?
+  reference1      String?
+  uTipo           String?
+  uZona           String?
+  sapCreationDate DateTime?
+  sapUpdateDate   DateTime?
+  sincronizadoEn  DateTime  @default(now())
+
+  lineas EntregaLinea[]
+
+  @@map("entregas")
+}
+
+model EntregaLinea {
+  id              Int     @id @default(autoincrement())
+  entrega         Entrega @relation(fields: [entregaDocEntry], references: [docEntry])
+  entregaDocEntry Int
+  lineNum         Int
+  itemCode        String
+  itemDescription String?
+  quantity        Float
+  warehouseCode   String?
+  lineTotal       Float?
+  baseType        Int?
+  baseEntry       Int?
+  baseLine        Int?
+  lineStatus      String?
+
+  @@unique([entregaDocEntry, lineNum])
+  @@map("entregas_lineas")
+}
+
+model NotaCredito {
+  docEntry         Int       @id
+  docNum           Int
+  docType          String?
+  cardCode         String
+  cliente          Cliente   @relation(fields: [cardCode], references: [cardCode])
+  docDate          DateTime
+  docTotal         Float
+  docCurrency      String?
+  documentStatus   String?
+  cancelled        Boolean   @default(false)
+  salesPersonCode  Int?
+  comments         String?
+  reference1       String?
+  uTipo            String?
+  uZona            String?
+  facturaBaseEntry Int?
+  facturaBase      Factura?  @relation(fields: [facturaBaseEntry], references: [docEntry])
+  sapCreationDate  DateTime?
+  sapUpdateDate    DateTime?
+  sincronizadoEn   DateTime  @default(now())
+
+  lineas NotaCreditoLinea[]
+
+  @@map("notas_credito")
+}
+
+model NotaCreditoLinea {
+  id                  Int         @id @default(autoincrement())
+  notaCredito         NotaCredito @relation(fields: [notaCreditoDocEntry], references: [docEntry])
+  notaCreditoDocEntry Int
+  lineNum             Int
+  itemCode            String
+  itemDescription     String?
+  quantity            Float
+  warehouseCode       String?
+  lineTotal           Float?
+  baseType            Int?
+  baseEntry           Int?
+  baseLine            Int?
+
+  @@unique([notaCreditoDocEntry, lineNum])
+  @@map("notas_credito_lineas")
+}
+
+// ---------------------------------------------------------------------------
+// Cobros
+// ---------------------------------------------------------------------------
+
+model Pago {
+  docEntry       Int       @id
+  docNum         Int?
+  cardCode       String?
+  cliente        Cliente?  @relation(fields: [cardCode], references: [cardCode])
+  docDate        DateTime
+  docCurrency    String?
+  cashSum        Float?
+  transferSum    Float?
+  reference1     String?
+  remarks        String?
+  cancelled      Boolean   @default(false)
+  uVendedor      String?
+  sincronizadoEn DateTime  @default(now())
+
+  aplicaciones PagoFactura[]
+
+  @@map("pagos")
+}
+
+// Confirmado con datos reales: un pago puede tener 0 aplicaciones.
+// No forzar relacion obligatoria.
+model PagoFactura {
+  id              Int     @id @default(autoincrement())
+  pago            Pago    @relation(fields: [pagoDocEntry], references: [docEntry])
+  pagoDocEntry    Int
+  lineNum         Int
+  facturaDocEntry Int
+  factura         Factura @relation(fields: [facturaDocEntry], references: [docEntry])
+  sumApplied      Float
+  invoiceType     String?
+  docLine         Int?
+  installmentId   Int?
+
+  @@unique([pagoDocEntry, lineNum])
+  @@map("pagos_facturas")
+}
+
+// ---------------------------------------------------------------------------
+// Entradas de mercancias de proveedores
+// ---------------------------------------------------------------------------
+
+model EntradaMercancia {
+  docEntry        Int        @id
+  docNum          Int
+  cardCode        String?
+  proveedor       Proveedor? @relation(fields: [cardCode], references: [cardCode])
+  docDate         DateTime
+  docTotal        Float?
+  docCurrency     String?
+  documentStatus  String?
+  cancelled       Boolean    @default(false)
+  uTipo           String?
+  uZona           String?
+  sapUpdateDate   DateTime?
+  sincronizadoEn  DateTime   @default(now())
+
+  lineas EntradaMercanciaLinea[]
+
+  @@map("entradas_mercancias")
+}
+
+model EntradaMercanciaLinea {
+  id              Int              @id @default(autoincrement())
+  entrada         EntradaMercancia @relation(fields: [entradaDocEntry], references: [docEntry])
+  entradaDocEntry Int
+  lineNum         Int
+  itemCode        String
+  quantity        Float
+  warehouseCode   String?
+  baseType        Int?
+  baseEntry       Int?
+  baseLine        Int?
+  price           Float?
+  lineTotal       Float?
+
+  @@unique([entradaDocEntry, lineNum])
+  @@map("entradas_mercancias_lineas")
+}
+
+// ---------------------------------------------------------------------------
+// Traslados entre bodegas
+// ---------------------------------------------------------------------------
+
+model TrasladoInventario {
+  docEntry       Int       @id
+  docNum         Int
+  docDate        DateTime
+  fromWarehouse  String?
+  toWarehouse    String?
+  reference1     String?
+  documentStatus String?
+  uTipo          String?
+  uZona          String?
+  sincronizadoEn DateTime  @default(now())
+
+  lineas TrasladoInventarioLinea[]
+
+  @@map("traslados_inventario")
+}
+
+// Conservar origen/destino por linea; no sustituir por los de cabecera.
+model TrasladoInventarioLinea {
+  id                Int                 @id @default(autoincrement())
+  traslado          TrasladoInventario  @relation(fields: [trasladoDocEntry], references: [docEntry])
+  trasladoDocEntry  Int
+  lineNum           Int
+  itemCode          String
+  quantity          Float
+  fromWarehouseCode String?
+  warehouseCode     String?
+  baseType          String?
+  baseEntry         Int?
+  baseLine          Int?
+  uoMCode           String?
+
+  @@unique([trasladoDocEntry, lineNum])
+  @@map("traslados_inventario_lineas")
+}
+
+// ---------------------------------------------------------------------------
+// Operacion (sincronizacion, auditoria) — diseño propio, sin campos SAP
+// ---------------------------------------------------------------------------
+
+model Sincronizacion {
+  id              Int      @id @default(autoincrement())
+  entidad         String
+  cursor          String?
+  ultimaEjecucion DateTime @default(now())
+  estado          String
+
+  lotes SincronizacionLote[]
+
+  @@map("sincronizaciones")
+}
+
+model SincronizacionLote {
+  id                Int             @id @default(autoincrement())
+  sincronizacion    Sincronizacion  @relation(fields: [sincronizacionId], references: [id])
+  sincronizacionId  Int
+  loteId            String          @unique
+  cantidadRegistros Int
+  resultado         String
+  creadoEn          DateTime        @default(now())
+
+  @@map("sincronizaciones_lotes")
+}
+
+model ErrorSincronizacion {
+  id        Int      @id @default(autoincrement())
+  entidad   String
+  loteId    String?
+  mensaje   String
+  creadoEn  DateTime @default(now())
+
+  @@map("errores_sincronizacion")
+}
+
+model Auditoria {
+  id       Int      @id @default(autoincrement())
+  entidad  String
+  accion   String
+  usuario  String?
+  detalle  String?
+  creadoEn DateTime @default(now())
+
+  @@map("auditoria")
+}
+
+// ---------------------------------------------------------------------------
+// Picking de pedidos (diseño propio, sin escritura en SAP) — Fase C
+// ---------------------------------------------------------------------------
+
+model PickingPedido {
+  id             Int       @id @default(autoincrement())
+  pedidoDocEntry Int
+  usuarioId      String?
+  fechaInicio    DateTime  @default(now())
+  fechaFin       DateTime?
+  estado         String    @default("en_proceso") // en_proceso | completo | con_diferencias
+
+  lineas PickingPedidoLinea[]
+
+  @@map("picking_pedidos")
+}
+
+model PickingPedidoLinea {
+  id                    Int       @id @default(autoincrement())
+  picking               PickingPedido @relation(fields: [pickingId], references: [id])
+  pickingId             Int
+  pedidoLineNum         Int
+  itemCode              String
+  cantidadPedida        Float
+  cantidadEscaneada     Float     @default(0)
+  codigoBarrasEscaneado String?
+  timestampEscaneo      DateTime?
+
+  @@map("picking_pedidos_lineas")
+}
+
+model ApiKey {
+  id         Int       @id @default(autoincrement())
+  nombre     String    // ej. "app-escaner-bodega1", "app-reportes"
+  claveHash  String    @unique
+  activa     Boolean   @default(true)
+  creadaEn   DateTime  @default(now())
+  ultimoUso  DateTime?
+
+  @@map("api_keys")
+}
+
+// NOTA: evaluaciones_credito se disena intencionalmente en la fase final del
+// proyecto (decision del usuario, ver bitacora seccion 13). No se incluye aqui
+// para no fijar una estructura antes de definir el criterio del semaforo.
