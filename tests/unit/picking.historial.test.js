@@ -163,3 +163,41 @@ test("repositorio de historial limita la consulta a una sesión y no devuelve la
   assert.deepEqual(consulta.orderBy, { id: "asc" });
   assert.equal(consulta.select.respuesta, undefined);
 });
+
+
+// Comprobar solo error.code no detecta mensajes con codificación dañada.
+test("mensajes de validación conservan las tildes", async () => {
+  await assert.rejects(escanearPicking(25, "00123", "invalido"), {
+    code: "DATOS_ESCANEO_INVALIDOS",
+    message: "El escaneo requiere un código válido y un operacionId UUID",
+  });
+  await assert.rejects(consultarHistorialPicking(25, { limit: 0 }), {
+    code: "PAGINACION_INVALIDA",
+    message: "La paginación del historial no es válida",
+  });
+});
+
+test("conflicto de operación conserva el mensaje completo", async (t) => {
+  preparar(t);
+  const uuid = randomUUID();
+  await escanearPicking(25, "00123", uuid);
+  await assert.rejects(escanearPicking(25, "OTRO", uuid), {
+    code: "OPERACION_REUTILIZADA",
+    message: "El operacionId ya se utilizó con otro código de barras",
+  });
+});
+
+test("línea modificada conserva tildes al guardar y repetir el rechazo", async (t) => {
+  const f = preparar(t);
+  t.mock.method(pickingRepository, "incrementarLinea", async () => []);
+  const uuid = randomUUID();
+  const esperado = {
+    code: "LINEA_MODIFICADA",
+    message: "La línea cambió durante el escaneo; vuelva a consultar la sesión",
+  };
+  await assert.rejects(escanearPicking(25, "00123", uuid), esperado);
+  const evento = [...f.eventos.values()][0];
+  assert.equal(evento.errorMessage, esperado.message);
+  await assert.rejects(escanearPicking(25, "00123", uuid), esperado);
+  assert.equal(f.eventos.size, 1);
+});

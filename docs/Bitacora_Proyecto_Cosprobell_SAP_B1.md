@@ -387,3 +387,12 @@ El usuario confirmó que la entrega anterior funciona y pidió continuar. Esta s
 La comprobación usa la copia local del pedido; no consulta SAP en tiempo real. Este cambio no vuelve a validar su cabecera en cada escaneo de una sesión ya abierta. Sigue copiando `quantity`; falta definir y aplicar cantidades pendientes, líneas cerradas, parciales y modificaciones de SAP durante la preparación. Por ello todavía no debe considerarse completo el flujo para pedidos reales parcialmente despachados.
 
 Siguiente bloque: acordar con ejemplos reales cómo se representan las unidades pendientes y las líneas abiertas; después implementar ese contrato antes de conectar el flujo a pedidos reales de SAP.
+
+
+## 15. Corrección de codificación en picking
+
+Se confirmó texto UTF-8 interpretado como Windows-1252 en cuatro archivos: controlador, repositorio, servicio de picking y pruebas HTTP. Se corrigieron mensajes, comentarios y nombres de pruebas directamente en el checkout, conservando UTF-8 explícito. La herramienta concreta que originó el daño no se determinó.
+
+Tres pruebas adicionales comprueban los cuatro mensajes completos: LINEA_MODIFICADA, DATOS_ESCANEO_INVALIDOS, OPERACION_REUTILIZADA y PAGINACION_INVALIDA. También verifican el texto enviado al repositorio de historial y recuperado al reintentar LINEA_MODIFICADA. Suite: **165 de 165 aprobadas**.
+
+De estos cuatro errores, solo LINEA_MODIFICADA se persiste en el flujo actual. No se modificaron eventos existentes: si alguno ya contiene un mensaje dañado, el reintento conserva ese mensaje histórico. No se ejecutó ninguna reparación de datos ni migración.

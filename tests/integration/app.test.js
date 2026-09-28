@@ -3,7 +3,7 @@ import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 
-// URL ficticia: las consultas de estas pruebas estÃ¡n simuladas.
+// URL ficticia: las consultas de estas pruebas están simuladas.
 process.env.DATABASE_URL =
   "postgresql://test:test@127.0.0.1:1/test";
 
@@ -57,7 +57,7 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-// Sustituye temporalmente los mÃ©todos dinÃ¡micos de Prisma.
+// Sustituye temporalmente los métodos dinámicos de Prisma.
 function sustituir(t, objeto, nombre, implementacion) {
   const original = objeto[nombre];
 
@@ -68,7 +68,7 @@ function sustituir(t, objeto, nombre, implementacion) {
   });
 }
 
-// Simula una API key vÃ¡lida sin consultar PostgreSQL.
+// Simula una API key válida sin consultar PostgreSQL.
 function autenticar(t) {
   sustituir(t, prisma.apiKey, "findUnique", async () => ({
     id: 1,
@@ -84,7 +84,7 @@ function autenticar(t) {
 }
 
 // --------------------------------------------------
-// AutenticaciÃ³n
+// Autenticación
 // --------------------------------------------------
 
 test("las rutas de negocio siguen requiriendo autenticacion", async () => {
@@ -294,7 +294,7 @@ test("iniciar picking devuelve 404 si el pedido no existe", async (t) => {
   assert.equal(creaciones, 0);
 });
 
-test("iniciar picking rechaza un pedido sin lÃ­neas", async (t) => {
+test("iniciar picking rechaza un pedido sin líneas", async (t) => {
   simularInicio(t);
   const headers = {
     ...autenticar(t),
@@ -377,7 +377,7 @@ test("iniciar picking oculta los errores de consulta", async (t) => {
   assert.equal(creaciones, 0);
 });
 
-test("iniciar picking crea una sesiÃ³n y responde 201", async (t) => {
+test("iniciar picking crea una sesión y responde 201", async (t) => {
   simularInicio(t);
   const headers = {
     ...autenticar(t),
@@ -455,7 +455,7 @@ test("iniciar picking crea una sesiÃ³n y responde 201", async (t) => {
   assert.equal(crear.mock.callCount(), 1);
 });
 
-test("iniciar picking oculta un fallo al guardar la sesiÃ³n", async (t) => {
+test("iniciar picking oculta un fallo al guardar la sesión", async (t) => {
   simularInicio(t);
   const headers = {
     ...autenticar(t),
@@ -506,7 +506,7 @@ test("iniciar picking oculta un fallo al guardar la sesiÃ³n", async (t) => {
   assert.equal(crear.mock.callCount(), 1);
 });
 
-test("consultar picking devuelve la sesiÃ³n y sus lÃ­neas", async (t) => {
+test("consultar picking devuelve la sesión y sus líneas", async (t) => {
   simularInicio(t);
   const headers = autenticar(t);
 
@@ -564,7 +564,7 @@ test("consultar picking inexistente devuelve 404", async (t) => {
   });
 });
 
-test("consultar picking rechaza un identificador invÃ¡lido", async (t) => {
+test("consultar picking rechaza un identificador inválido", async (t) => {
   simularInicio(t);
   const headers = autenticar(t);
 
@@ -669,7 +669,7 @@ async function enviarEscaneo(headers, codigo = "00123", id = "25", operacionId =
   });
 }
 
-test("HTTP escanear registra el cÃ³digo de barras y conserva ceros iniciales", async (t) => {
+test("HTTP escanear registra el código de barras y conserva ceros iniciales", async (t) => {
   const headers = autenticar(t);
   const incrementar = prepararEscaneoHttp(t);
   const respuesta = await enviarEscaneo(headers, " 00123 ");
@@ -686,7 +686,7 @@ const rechazosHttp = [
   { nombre: "etiqueta sin confirmar", cambios: { sinConfirmar: true }, status: 409 },
   { nombre: "unidad manual", cambios: { linea: { uomEntry: -1 } }, status: 409 },
   { nombre: "cantidad completa", cambios: { linea: { cantidadEscaneada: 3 } }, status: 409 },
-  { nombre: "sesiÃ³n cerrada", cambios: { estado: "completo" }, status: 400 },
+  { nombre: "sesión cerrada", cambios: { estado: "completo" }, status: 400 },
 ];
 for (const caso of rechazosHttp) {
   test(`HTTP escanear rechaza ${caso.nombre} sin incrementar`, async (t) => {
@@ -700,7 +700,7 @@ for (const caso of rechazosHttp) {
   });
 }
 
-test("HTTP escanear valida identificador y cÃ³digo antes de abrir transacciÃ³n", async (t) => {
+test("HTTP escanear valida identificador y código antes de abrir transacción", async (t) => {
   const headers = autenticar(t);
   let transacciones = 0;
   sustituir(t, prisma, "$transaction", async () => { transacciones++; });
@@ -709,7 +709,7 @@ test("HTTP escanear valida identificador y cÃ³digo antes de abrir transacciÃ�
   assert.equal(transacciones, 0);
 });
 
-test("HTTP escanear y finalizar requieren autenticaciÃ³n", async () => {
+test("HTTP escanear y finalizar requieren autenticación", async () => {
   assert.equal((await enviarEscaneo({})).status, 401);
   const respuesta = await fetch(`${baseUrl}/picking/25/finalizar`, { method: "POST" });
   assert.equal(respuesta.status, 401);
@@ -751,7 +751,7 @@ test("HTTP repetir el mismo operacionId devuelve la misma respuesta y no increme
   assert.equal(incrementar.mock.callCount(), 1);
 });
 
-test("HTTP reutilizar operacionId con otro cÃ³digo responde 409", async (t) => {
+test("HTTP reutilizar operacionId con otro código responde 409", async (t) => {
   const headers = autenticar(t);
   const incrementar = prepararEscaneoHttp(t);
   const id = randomUUID();
@@ -760,7 +760,7 @@ test("HTTP reutilizar operacionId con otro cÃ³digo responde 409", async (t) =>
   assert.equal(incrementar.mock.callCount(), 1);
 });
 
-test("HTTP exige operacionId antes de abrir una transacciÃ³n", async (t) => {
+test("HTTP exige operacionId antes de abrir una transacción", async (t) => {
   const headers = autenticar(t);
   let llamadas = 0;
   sustituir(t, prisma, "$transaction", async () => { llamadas++; });
@@ -772,7 +772,7 @@ test("HTTP exige operacionId antes de abrir una transacciÃ³n", async (t) => {
   assert.equal(llamadas, 0);
 });
 
-test("HTTP historial requiere autenticaciÃ³n y pagina los eventos", async (t) => {
+test("HTTP historial requiere autenticación y pagina los eventos", async (t) => {
   assert.equal((await fetch(`${baseUrl}/picking/25/escaneos`)).status, 401);
   const headers = autenticar(t);
   t.mock.method(pickingRepository, "buscarEstadoSesion", async () => ({ estado: "completo" }));

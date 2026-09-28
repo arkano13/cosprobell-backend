@@ -10,7 +10,7 @@ import { AppError } from "../../shared/errors/AppError.js";
 
 function responderError(error, res, next) {
   // Compatibilidad con las respuestas actuales de picking.
-  // La migraciÃ³n al formato estructurado serÃ¡ un cambio separado.
+  // La migración al formato estructurado será un cambio separado.
   if (
     error instanceof AppError &&
     error.statusCode < 500

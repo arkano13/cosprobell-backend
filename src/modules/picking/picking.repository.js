@@ -78,8 +78,8 @@ export const pickingRepository = {
   },
 
   incrementarLinea({ pickingId, lineaId, itemCode, codigo, uomEntry }, db = prisma) {
-    // La sesiÃ³n ya estÃ¡ bloqueada por conSesionBloqueada.
-    // Actualizamos exactamente la lÃ­nea que validÃ³ el servicio.
+    // La sesión ya está bloqueada por conSesionBloqueada.
+    // Actualizamos exactamente la línea que validó el servicio.
     return db.$queryRaw`
       UPDATE picking_pedidos_lineas
       SET "cantidadEscaneada" = "cantidadEscaneada" + 1,
