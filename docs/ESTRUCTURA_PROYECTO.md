@@ -68,3 +68,12 @@ Ver la sección 12 de la bitácora para evidencia de PostgreSQL y pendientes.
 - `scripts/comprobar-reintentos-picking.js`: prueba doble envío, respuesta histórica, conflicto, rechazo persistido, reversión SQL, cierre y paginación. El script integrado también lo ejecuta.
 
 La nueva entrega pasó 144 pruebas en la copia temporal y las comprobaciones PostgreSQL documentadas en la sección 13. Los scripts anteriores fueron actualizados para enviar un UUID nuevo por lectura física y limpiar sus eventos. No se añaden UUID automáticamente en el backend: el cliente debe conservarlos al reenviar.
+
+
+## Inicio y reanudación de picking
+
+`picking.pedido.js` valida el estado local del pedido. El servicio ejecuta el inicio dentro de `pickingRepository.conPedidoBloqueado`: bloquea la cabecera, comprueba elegibilidad y consulta las sesiones bloqueadas antes de crear. Los inicios del mismo pedido esperan su turno. Una activa se retoma con HTTP 200; una nueva responde 201. No se reinician avances ni se cambia el usuario guardado.
+
+Se rechazan pedidos cerrados, cancelados o con estado desconocido, múltiples sesiones activas y un nuevo inicio si solo hay sesiones finalizadas. La regla sobre finalizadas es provisional hasta definir parciales/reapertura. No hay cambio de esquema; inserciones directas ajenas al servicio no quedan protegidas por un índice único.
+
+La entrega pasa 162 pruebas. `scripts/comprobar-inicio-picking.js` verifica además el inicio concurrente, rollback y reanudación con PostgreSQL y datos temporales. El cálculo sigue basado en quantity; pendientes y cambios SAP durante una sesión quedan por implementar.

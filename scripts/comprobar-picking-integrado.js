@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 
 // Cada script usa su propio proceso y limpia sus datos de prueba.
 const scripts = [
+  "comprobar-inicio-picking.js",
   "demo-picking.js",
   "comprobar-reintentos-picking.js",
   "comprobar-concurrencia-picking.js",
@@ -19,7 +20,7 @@ try {
       windowsHide: true,
     });
   }
-  console.log("\nAPROBADO: demo, reintentos, historial y seis escenarios de concurrencia.");
+  console.log("\nAPROBADO: inicio, demo, reintentos, historial y seis escenarios de concurrencia.");
 } catch {
   console.error("Se detuvo la comprobación porque un script falló.");
   process.exitCode = 1;

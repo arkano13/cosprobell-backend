@@ -22,7 +22,7 @@ Documentos de referencia:
 | Revisión de metadatos y muestras | ZIP revisado: XML de metadatos y 13 archivos JSON |
 | Contexto funcional | Bodega y consulta por WhatsApp para los dueños definidos; quedan reglas operativas pendientes |
 | Organización del código | Redistribución autorizada y aplicada; productos separado por capas |
-| Pruebas automatizadas | 128 aprobadas en el proyecto del usuario; nueva entrega de reintentos e historial con 144 de 144 aprobadas por el asistente en copia temporal; secciones 12 y 13 |
+| Pruebas automatizadas | Usuario confirmó funcionamiento de reintentos e historial; nueva entrega de inicio con 162 de 162 aprobadas por el asistente en copia temporal; secciones 13 y 14 |
 | Picking por capas | Completada la separación en rutas, schemas, controlador, servicio y repositorio; conservado el comportamiento anterior |
 | Concurrencia de picking | Transacción con bloqueo de sesión y retirada de `SKIP LOCKED`; seis escenarios contra PostgreSQL aprobados según resultados compartidos y confirmación del usuario; detalle en sección 11 |
 | Búsqueda por código de barras | Código principal, adicional, inexistente y ambiguo comprobados manualmente por el usuario contra su base configurada |
@@ -356,3 +356,34 @@ La entrega `entrega-escaneos-historial` contiene los archivos completos, migraci
 Los dos objetivos de esta entrega están implementados y comprobados con datos de prueba. Tras incorporar la entrega, regenerar Prisma y confirmar la suite local, parar según lo solicitado por el usuario. No empezar hoy otra funcionalidad.
 
 Siguen fuera de estos dos objetivos: operador autenticado, gestión de confirmaciones, elegibilidad/duplicidad de sesiones, pendientes/parciales, cambios concurrentes del catálogo, integración SAP y resolución de referencias Manual con ejemplos reales. El historial no convierte la API key de una aplicación en identidad personal.
+
+
+## 14. Inicio y reanudación de picking — entrega preparada
+
+El usuario confirmó que la entrega anterior funciona y pidió continuar. Esta sección actualiza el punto de pausa de la sección 13. Los archivos de esta nueva entrega se verificaron en una copia; su incorporación al checkout depende de ejecutar el copiador.
+
+### Comportamiento
+
+- Solo iniciar o retomar pedidos con `documentStatus = bost_Open` y `cancelled = false`. `cancelStatus` admite `csNo` o ausencia; si informa `csYes` o `csCancellation`, se rechaza. Valores desconocidos se rechazan. El sincronizador futuro debe convertir correctamente tNO/tYES y no sustituir estados ausentes por false.
+- Los cinco pedidos del archivo local `Orders.json` tienen `DocumentStatus = bost_Close`, `Cancelled = tNO`, `CancelStatus = csNo`: no son ejemplos elegibles para iniciar.
+- Una sesión activa se devuelve con HTTP 200, conservando id, usuario, cantidades, líneas e historial. Una nueva se devuelve con HTTP 201. Ambos conservan `{ data: sesion }`.
+- Dos solicitudes del mismo pedido se serializan bloqueando su cabecera en PostgreSQL. Todas las lecturas y la creación usan una transacción ReadCommitted.
+- Se bloquean también las sesiones existentes para coordinar con la finalización. Más de una activa produce `SESIONES_DUPLICADAS`; no se escoge arbitrariamente ni se elimina información.
+- Si no hay activa y existe historial de sesiones, se rechaza un nuevo inicio con `PEDIDO_CON_PICKING_FINALIZADO`. Es una regla provisional para evitar repetir todas las cantidades hasta definir parciales y reapertura. No hay una operación de reapertura en este cambio.
+- Si hay una única activa junto con sesiones antiguas, se retoma la activa. No se modifica `usuarioId` usando el dato de quien retoma.
+
+### Archivos y verificación
+
+- `picking.pedido.js`: comprueba el estado de la cabecera local.
+- Repositorio: bloqueo del pedido, lectura bloqueada de sesiones y uso del cliente transaccional.
+- Servicio: valida elegibilidad y decide crear, retomar o rechazar.
+- Controlador: distingue HTTP 201 y 200 sin cambiar el cuerpo de respuesta.
+- **162 de 162 pruebas aprobadas** en la copia preparada, incluyendo casos HTTP y reglas de estado, duplicados, finalizadas y uso de la misma transacción.
+- `comprobar-inicio-picking.js` aprobado contra PostgreSQL de pruebas: cerrado/cancelado/desconocido no crean; fallo tras INSERT revierte; dos inicios concurrentes crean una sola sesión; retomar conserva usuario y 2 de 5; cancelación impide retomar; finalizada impide repetir. Cliente, pedido, líneas y sesiones temporales eliminados.
+- No se modifica el esquema ni se necesita migración o regeneración del cliente Prisma. La exclusión está garantizada para inicios que pasan por este servicio; no se añade un índice único que impida inserciones directas desde otros programas.
+
+### Límites y siguiente paso
+
+La comprobación usa la copia local del pedido; no consulta SAP en tiempo real. Este cambio no vuelve a validar su cabecera en cada escaneo de una sesión ya abierta. Sigue copiando `quantity`; falta definir y aplicar cantidades pendientes, líneas cerradas, parciales y modificaciones de SAP durante la preparación. Por ello todavía no debe considerarse completo el flujo para pedidos reales parcialmente despachados.
+
+Siguiente bloque: acordar con ejemplos reales cómo se representan las unidades pendientes y las líneas abiertas; después implementar ese contrato antes de conectar el flujo a pedidos reales de SAP.

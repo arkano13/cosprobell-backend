@@ -36,6 +36,8 @@ const casos = [
 
 for (const caso of casos) {
   test(caso.nombre, async (t) => {
+    t.mock.method(pickingRepository, "conPedidoBloqueado", async (_id, operacion) => operacion(prisma));
+    t.mock.method(pickingRepository, "buscarSesionesDelPedido", async () => []);
     const lineaPedido = {
       lineNum: 0,
       itemCode: "PROD-001",
@@ -45,6 +47,7 @@ for (const caso of casos) {
 
     const pedido = {
       docEntry: 9001,
+      documentStatus: "bost_Open", cancelled: false,
       lineas: [lineaPedido],
     };
 
