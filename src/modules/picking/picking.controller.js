@@ -3,6 +3,7 @@ import {
   consultarPicking,
   escanearPicking,
   finalizarPicking,
+  consultarHistorialPicking,
 } from "./picking.service.js";
 
 import { AppError } from "../../shared/errors/AppError.js";
@@ -24,9 +25,9 @@ function responderError(error, res, next) {
 
 export async function iniciar(req, res, next) {
   try {
-    const picking = await iniciarPicking(req.body);
+    const { picking, creada } = await iniciarPicking(req.body);
 
-    return res.status(201).json({
+    return res.status(creada ? 201 : 200).json({
       data: picking,
     });
   } catch (error) {
@@ -50,7 +51,9 @@ export async function escanear(req, res, next) {
   try {
     const linea = await escanearPicking(
       req.params.id,
-      req.body.codigo
+      req.body.codigo,
+      req.body.operacionId,
+      { aplicacion: req.appNombre ?? null }
     );
 
     return res.json({
@@ -68,6 +71,13 @@ export async function finalizar(req, res, next) {
     return res.json({
       data: picking,
     });
+  } catch (error) {
+    return responderError(error, res, next);
+  }
+}
+export async function historial(req, res, next) {
+  try {
+    return res.json(await consultarHistorialPicking(req.params.id, req.validatedQuery));
   } catch (error) {
     return responderError(error, res, next);
   }

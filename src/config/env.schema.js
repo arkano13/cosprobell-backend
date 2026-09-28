@@ -31,7 +31,8 @@ const envSchema = z.object({
     .min(1)
     .refine(esUrlPostgres),
 
-  BRIDGE_SECRET: z.string().min(32).optional(),
+  BRIDGE_API_KEY: z.string().optional(),
+  SAP_COMPANY_DB: z.string().trim().min(1).max(128).optional(),
   APP_JWT_SECRET: z.string().optional(),
 });
 
@@ -58,7 +59,8 @@ export function parseEnv(variables) {
     nodeEnv: datos.NODE_ENV,
     port: datos.PORT,
     databaseUrl: datos.DATABASE_URL,
-    bridgeSecret: datos.BRIDGE_SECRET,
+    bridgeApiKey: datos.BRIDGE_API_KEY,
+    sapCompanyDb: datos.SAP_COMPANY_DB,
     appJwtSecret: datos.APP_JWT_SECRET,
   });
 }

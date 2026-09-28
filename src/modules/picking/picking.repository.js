@@ -1,8 +1,29 @@
 import { prisma } from "../../infrastructure/database/prisma.js";
 
 export const pickingRepository = {
-  buscarPedidoConLineas(pedidoDocEntry) {
-    return prisma.pedido.findUnique({
+  // Bloquear la cabecera serializa inicios del mismo pedido, incluso sin sesiones.
+  conPedidoBloqueado(pedidoDocEntry, operacion) {
+    return prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`
+        SELECT "docEntry" FROM pedidos
+        WHERE "docEntry" = ${pedidoDocEntry} FOR UPDATE
+      `;
+      return operacion(tx);
+    }, { isolationLevel: "ReadCommitted", maxWait: 5_000, timeout: 10_000 });
+  },
+
+  async buscarSesionesDelPedido(pedidoDocEntry, db = prisma) {
+    // Coordina también con finalizarPicking, que bloquea la sesión.
+    await db.$queryRaw`
+      SELECT id FROM picking_pedidos
+      WHERE "pedidoDocEntry" = ${pedidoDocEntry} ORDER BY id FOR UPDATE
+    `;
+    return db.pickingPedido.findMany({
+      where: { pedidoDocEntry }, include: { lineas: true }, orderBy: { id: "asc" },
+    });
+  },
+  buscarPedidoConLineas(pedidoDocEntry, db = prisma) {
+    return db.pedido.findUnique({
       where: {
         docEntry: pedidoDocEntry,
       },
@@ -12,8 +33,8 @@ export const pickingRepository = {
     });
   },
 
-  crearSesion({ pedidoDocEntry, usuarioId, lineas }) {
-    return prisma.pickingPedido.create({
+  crearSesion({ pedidoDocEntry, usuarioId, lineas }, db = prisma) {
+    return db.pickingPedido.create({
       data: {
         pedidoDocEntry,
         usuarioId: usuarioId ?? null,
@@ -23,6 +44,8 @@ export const pickingRepository = {
             pedidoLineNum: linea.pedidoLineNum,
             itemCode: linea.itemCode,
             cantidadPedida: linea.cantidadPedida,
+            uomEntry: linea.uomEntry ?? null,
+            uomCode: linea.uomCode ?? null,
           })),
         },
       },
@@ -54,22 +77,19 @@ export const pickingRepository = {
     });
   },
 
-  incrementarLinea(pickingId, codigo, db = prisma) {
+  incrementarLinea({ pickingId, lineaId, itemCode, codigo, uomEntry }, db = prisma) {
+    // La sesión ya está bloqueada por conSesionBloqueada.
+    // Actualizamos exactamente la línea que validó el servicio.
     return db.$queryRaw`
       UPDATE picking_pedidos_lineas
       SET "cantidadEscaneada" = "cantidadEscaneada" + 1,
           "codigoBarrasEscaneado" = ${codigo},
           "timestampEscaneo" = now()
-      WHERE id = (
-        SELECT id
-        FROM picking_pedidos_lineas
-        WHERE "pickingId" = ${pickingId}
-          AND "itemCode" = ${codigo}
-          AND "cantidadEscaneada" < "cantidadPedida"
-        ORDER BY id
-        LIMIT 1
-        FOR UPDATE
-      )
+      WHERE id = ${lineaId}
+        AND "pickingId" = ${pickingId}
+        AND "itemCode" = ${itemCode}
+        AND "uomEntry" = ${uomEntry}
+        AND "cantidadEscaneada" + 1 <= "cantidadPedida"
       RETURNING *;
     `;
   },

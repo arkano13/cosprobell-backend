@@ -22,11 +22,11 @@ Documentos de referencia:
 | Revisión de metadatos y muestras | ZIP revisado: XML de metadatos y 13 archivos JSON |
 | Contexto funcional | Bodega y consulta por WhatsApp para los dueños definidos; quedan reglas operativas pendientes |
 | Organización del código | Redistribución autorizada y aplicada; productos separado por capas |
-| Pruebas automatizadas | 61 de 61 aprobadas mediante ejecución de `npm test` por el asistente al cerrar la reorganización de picking; persistencia simulada |
+| Pruebas automatizadas | Usuario confirmó funcionamiento de reintentos e historial; nueva entrega de inicio con 162 de 162 aprobadas por el asistente en copia temporal; secciones 13 y 14 |
 | Picking por capas | Completada la separación en rutas, schemas, controlador, servicio y repositorio; conservado el comportamiento anterior |
 | Concurrencia de picking | Transacción con bloqueo de sesión y retirada de `SKIP LOCKED`; seis escenarios contra PostgreSQL aprobados según resultados compartidos y confirmación del usuario; detalle en sección 11 |
 | Búsqueda por código de barras | Código principal, adicional, inexistente y ambiguo comprobados manualmente por el usuario contra su base configurada |
-| Conexión de búsqueda con escaneo | Pendiente; picking todavía compara el código recibido con `itemCode` y suma uno |
+| Conexión de búsqueda con escaneo | Integración incorporada al proyecto; suite y demo aprobadas según salida del usuario: etiqueta confirmada, unidades compatibles y código leído persistido; sección 12 |
 | Errores con `AppError` | Clase y manejador central implementados y probados; falta migrar las respuestas directas de las rutas |
 | Validación de peticiones | Distingue errores de Zod de fallos internos; 4 pruebas adicionales aprobadas |
 | Validación de configuración | Implementada en `env.schema.js`, utilizada por `env.js` y Prisma; seis pruebas adicionales aprobadas por el usuario |
@@ -182,7 +182,7 @@ Principios de trabajo:
 
 ## 9. Próxima acción
 
-**Punto actual:** reorganización de picking terminada y ronda de concurrencia completada por el usuario. La sección 11 registra los resultados posteriores al cierre de estructura.
+**Punto actual:** integración de etiquetas incorporada por el usuario. Reintentos e historial terminados y verificados en una entrega externa lista para copiar, descrita en la sección 13. El usuario pidió terminar esos dos puntos y parar; no iniciar otro bloque al cerrar esta entrega.
 
 Al retomar:
 
@@ -260,3 +260,167 @@ Estos resultados se registran como ejecuciones del usuario; el asistente no volv
 La ronda acordada de concurrencia queda cerrada. El siguiente bloque es definir y conectar el contrato del escaneo con la búsqueda por código de barras: conservar el código leído, resolver el producto y determinar explícitamente la cantidad correspondiente a su presentación.
 
 Siguen pendientes las equivalencias unidad/caja, idempotencia para reintentos, trazabilidad individual de escaneos, elegibilidad y duplicidad de sesiones, cobertura HTTP de escanear/finalizar, uniformización de errores, identidad de operadores y reglas de sincronización con SAP. Las pruebas actuales trabajan con `itemCode` e incremento de uno; no validan etiquetas reales, carga sostenida ni todo el flujo de despacho.
+
+
+## 12. Integración del escaneo por etiquetas — 28 de septiembre de 2026
+
+### Alcance operativo confirmado
+
+El usuario aclaró que el picking verifica siempre unidades individuales. La zona grande almacena cajas y abastece a la pequeña; las cajas tienen etiquetas distintas de las individuales. No está confirmado que sean bodegas independientes en SAP. Los traslados entre zonas no se implementan en este bloque.
+
+Se localizaron los metadatos originales descomprimidos en el Escritorio, carpeta `XML COSPROBELL`. El XML declara `ItemBarCode.AbsEntry`, `UoMEntry`, `Barcode` y el catálogo `UnitOfMeasurement`. La línea de pedido revisada usa `UoMEntry = -1` y `UoMCode = Manual`: eso no certifica una equivalencia con una unidad individual.
+
+### Preparación incorporada por el usuario
+
+- Referencias SAP y unidades en códigos de barras; unidad y cantidades pendientes en líneas de pedido.
+- Catálogo `UnidadMedida` y confirmaciones locales `ConfirmacionEtiquetaPicking`.
+- Copia de `uomEntry` y `uomCode` en cada línea de picking al iniciar la sesión. Las sesiones antiguas conservan valores desconocidos; no se rellenan por suposición.
+- Resolución de etiquetas, comprobación de confirmación vigente y compatibilidad de cantidades. El usuario confirmó 104 pruebas aprobadas antes de esta integración.
+- Existe una migración vacía anterior al catálogo; se conservó y posteriormente se generó la que crea la tabla.
+
+### Entrega preparada para copiar
+
+El asistente preparó archivos completos fuera del repositorio en `entrega-picking-integrado`, dentro de su carpeta de artefactos. No sustituyó los archivos de aplicación del usuario durante la preparación. El copiador incluido comprueba hashes, guarda respaldo y solo copia los archivos declarados; la aplicación de la entrega queda a cargo del usuario.
+
+El flujo de `escanearPicking` queda así:
+
+1. Bloquear la sesión y comprobar que sigue activa.
+2. Resolver la etiqueta y su confirmación usando la misma transacción.
+3. Obtener las líneas del producto y validar unidades y cantidades enteras.
+4. Elegir la primera línea pendiente por id; incrementar exactamente esa línea.
+5. Guardar el código de barras normalizado, conservando ceros iniciales, en `codigoBarrasEscaneado`.
+
+El SQL exige la misma sesión, producto, unidad e identificador de línea, además de impedir superar la cantidad pedida. Si no actualiza una fila, se responde `LINEA_MODIFICADA`, sin confundirlo con cantidad completada.
+
+La URL y el cuerpo `{ codigo }` se conservan; el valor pasa a significar una etiqueta de barras registrada, no un código interno de producto. Se conserva temporalmente el formato HTTP de errores conocidos `{ error: mensaje }`. La comprobación actual exige que todas las líneas del mismo producto sean compatibles con esa unidad; se rechazan presentaciones mezcladas. No se implementan conversiones ni se interpreta `Manual` como unidad individual.
+
+### Evidencia de esta entrega
+
+- `npm test` ejecutado por el asistente en la copia temporal: **128 pruebas, 128 aprobadas, 0 fallidas**. Incluye HTTP de escaneo/finalización; su persistencia está simulada.
+- `node scripts/comprobar-picking-integrado.js` ejecutado por el asistente contra la base autorizada de pruebas: demo y seis escenarios de concurrencia aprobados.
+- Sesión 13: demo del servicio real; rechazó etiqueta desconocida, caja, producto ajeno, etiqueta sin confirmar, unidad incompatible/manual, exceso y sesión cerrada. Registró tres unidades y comprobó el código de barras persistido.
+- Sesiones 14–16: dos escaneos para cinco unidades, límite de una unidad y espera real de bloqueo confirmada por PostgreSQL.
+- Sesiones 17–19: escaneo antes del cierre, cierre antes del escaneo y producto repetido en dos líneas. Todos aprobados.
+- Los scripts informaron eliminación de los datos temporales de cada escenario. La preparación y limpieza están limitadas a los identificadores propios de cada ejecución.
+
+Estas ejecuciones del asistente verificaron inicialmente la entrega externa. Posteriormente, el usuario compartió la salida completa de `npm test` desde su proyecto: **128 aprobadas, 0 fallidas**, y de `node scripts/demo-picking.js`: **DEMO APROBADA**, sesión temporal **20** eliminada. La demo registró tres unidades con sus etiquetas y rechazó los ocho casos previstos sin cambios. Esto confirma el funcionamiento de la integración en su proyecto con datos ficticios; no representa una conexión a SAP ni una prueba con mercadería real.
+
+### Pendientes después de incorporar la entrega
+
+Idempotencia por lectura, historial de eventos y operador autenticado; gestión autorizada de confirmaciones; elegibilidad de órdenes y sesiones duplicadas; cantidades pendientes/entregas parciales; cancelaciones y modificaciones en SAP; uniformización de errores. El bloqueo actual coordina operaciones de la sesión de picking, no cambios concurrentes del catálogo o de confirmaciones: el futuro sincronizador deberá coordinar o versionar esos cambios.
+
+Con los metadatos actuales, una referencia manual o desconocida impide escanear. Falta obtener ejemplos reales y definir su interpretación con Cosprobell. Una confirmación local tampoco demuestra la identidad de quien la registró: esa autenticación sigue pendiente.
+
+
+## 13. Reintentos sin doble conteo e historial de lecturas
+
+### Contrato y comportamiento
+
+El cuerpo de `POST /picking/:id/escanear` ahora exige `codigo` y `operacionId` (UUID). La aplicación debe crear y conservar ese UUID antes del primer envío de una lectura. Un reintento de red reutiliza la misma pareja; una lectura física nueva utiliza otro UUID. No se genera una clave alternativa en el servidor cuando falta el identificador.
+
+La clave es única por sesión: `(pickingId, operacionId)`. El código se normaliza quitando espacios exteriores, conservando ceros; el UUID se normaliza a minúsculas. Mismo UUID y código devuelven la respuesta guardada sin incrementar ni crear otro evento. Mismo UUID con otro código produce `OPERACION_REUTILIZADA` y conserva el evento original. La misma clave puede existir en sesiones distintas.
+
+La búsqueda del resultado previo ocurre bajo el bloqueo de sesión y antes de comprobar su estado actual. Así se puede recuperar una respuesta perdida después del cierre. Se devuelve el resultado histórico de aquella lectura, no el total actual; para actualizar el avance de pantalla debe consultarse la sesión.
+
+### Persistencia
+
+Nueva tabla `picking_escaneos`, modelo `PickingEscaneo`, enum `ResultadoEscaneoPicking`, clave única e índice por sesión/id. Guarda código, operación, resultado, fecha, aplicación autenticada cuando existe, y producto/línea/unidad/cantidades antes y después para aceptados. Conserva la respuesta original o el error de negocio para reproducirlos.
+
+El incremento y el evento aceptado se confirman en la misma transacción. Un fallo técnico al guardar el evento revierte el incremento. Los rechazos de negocio se guardan sin sumar; el error se entrega después de confirmar el evento. Reintentar un rechazo devuelve ese mismo rechazo, incluso si los datos se corrigieron después; reevaluarlo requiere una operación nueva.
+
+El historial contiene una entrada por operación válida resuelta en una sesión existente, no una entrada por intento de transporte. No registra peticiones sin autenticar, datos inválidos rechazados antes del servicio, sesiones inexistentes, conflictos al reutilizar una clave ni fallos técnicos revertidos. No reconstruye escaneos anteriores a esta implementación.
+
+Las relaciones restringen el borrado accidental de sesiones o líneas con historial. No se creó un endpoint para editar o borrar eventos. Los scripts de prueba eliminan explícitamente sus propios eventos antes de retirar sus sesiones.
+
+### Consulta HTTP
+
+`GET /picking/:id/escaneos?limit=50&despuesDe=123`, protegido por la autenticación existente. `limit` admite de 1 a 100 y vale 50 por defecto; se omite `despuesDe` en la primera página. Devuelve `{ data, siguienteCursor }` ordenado por id ascendente; cursor null indica última página. No incluye la copia completa de la respuesta de cada lectura.
+
+La aplicación se toma de `req.appNombre`, establecido por autenticación, no del cuerpo. No identifica todavía al operador individual. Se conserva el formato HTTP anterior de errores conocidos de picking.
+
+### Verificación y entrega
+
+- **144 pruebas automatizadas aprobadas**, ejecutadas por el asistente en la copia temporal: reglas anteriores, UUID obligatorio, respuesta estable, conflicto de clave, reintento tras cierre, persistencia de rechazo, fallo al guardar historial, paginación y HTTP.
+- Migración `20260928120000_historial_escaneos_idempotentes` generada comparando esquemas, revisada y **aplicada en la base de pruebas autorizada**. Solo añade el tipo, tabla, índices y relaciones; no modifica cantidades existentes. La aplicación en el checkout del usuario sigue pendiente de copiar los archivos y regenerar Prisma.
+- Sesión 21: demo integrada aprobada y limpiada.
+- Sesión 22: mismo UUID concurrente deja una unidad/un evento; nueva lectura suma; otro código con la misma clave se rechaza; el rechazo sigue estable tras corregir la etiqueta; fallo SQL intencionado revierte cantidades e historial; reintento posterior funciona; respuesta aceptada se recupera después del cierre. Historial paginado con cinco aceptados y dos rechazos, sin duplicados. Limpieza completada.
+- Sesión 23: comprobación adicional de alcance por sesión, limpiada. La prueba se reforzó después manteniendo dos sesiones simultáneamente.
+- Sesiones 24–29: los seis escenarios anteriores de concurrencia volvieron a aprobarse con historial activado; limpieza completada.
+- Sesiones 30 y 31: mismo UUID presente al mismo tiempo en dos sesiones distintas, ambos aceptados una vez; comprobación aprobada y datos eliminados.
+- Hubo un fallo inicial al iniciar la transacción de preparación del script. Se amplió únicamente `maxWait` del helper de datos ficticios a 10 segundos; los límites de la transacción de aplicación no cambiaron. Las comprobaciones posteriores aprobaron.
+
+La entrega `entrega-escaneos-historial` contiene los archivos completos, migración, guía y copiador con respaldo. No incluye credenciales ni modifica el checkout hasta ejecutar el copiador. La migración ya está aplicada en la base de pruebas: `migrate deploy` desde el checkout actualizado comprobará ese estado sin repetirla.
+
+### Punto de pausa
+
+Los dos objetivos de esta entrega están implementados y comprobados con datos de prueba. Tras incorporar la entrega, regenerar Prisma y confirmar la suite local, parar según lo solicitado por el usuario. No empezar hoy otra funcionalidad.
+
+Siguen fuera de estos dos objetivos: operador autenticado, gestión de confirmaciones, elegibilidad/duplicidad de sesiones, pendientes/parciales, cambios concurrentes del catálogo, integración SAP y resolución de referencias Manual con ejemplos reales. El historial no convierte la API key de una aplicación en identidad personal.
+
+
+## 14. Inicio y reanudación de picking — entrega preparada
+
+El usuario confirmó que la entrega anterior funciona y pidió continuar. Esta sección actualiza el punto de pausa de la sección 13. Los archivos de esta nueva entrega se verificaron en una copia; su incorporación al checkout depende de ejecutar el copiador.
+
+### Comportamiento
+
+- Solo iniciar o retomar pedidos con `documentStatus = bost_Open` y `cancelled = false`. `cancelStatus` admite `csNo` o ausencia; si informa `csYes` o `csCancellation`, se rechaza. Valores desconocidos se rechazan. El sincronizador futuro debe convertir correctamente tNO/tYES y no sustituir estados ausentes por false.
+- Los cinco pedidos del archivo local `Orders.json` tienen `DocumentStatus = bost_Close`, `Cancelled = tNO`, `CancelStatus = csNo`: no son ejemplos elegibles para iniciar.
+- Una sesión activa se devuelve con HTTP 200, conservando id, usuario, cantidades, líneas e historial. Una nueva se devuelve con HTTP 201. Ambos conservan `{ data: sesion }`.
+- Dos solicitudes del mismo pedido se serializan bloqueando su cabecera en PostgreSQL. Todas las lecturas y la creación usan una transacción ReadCommitted.
+- Se bloquean también las sesiones existentes para coordinar con la finalización. Más de una activa produce `SESIONES_DUPLICADAS`; no se escoge arbitrariamente ni se elimina información.
+- Si no hay activa y existe historial de sesiones, se rechaza un nuevo inicio con `PEDIDO_CON_PICKING_FINALIZADO`. Es una regla provisional para evitar repetir todas las cantidades hasta definir parciales y reapertura. No hay una operación de reapertura en este cambio.
+- Si hay una única activa junto con sesiones antiguas, se retoma la activa. No se modifica `usuarioId` usando el dato de quien retoma.
+
+### Archivos y verificación
+
+- `picking.pedido.js`: comprueba el estado de la cabecera local.
+- Repositorio: bloqueo del pedido, lectura bloqueada de sesiones y uso del cliente transaccional.
+- Servicio: valida elegibilidad y decide crear, retomar o rechazar.
+- Controlador: distingue HTTP 201 y 200 sin cambiar el cuerpo de respuesta.
+- **162 de 162 pruebas aprobadas** en la copia preparada, incluyendo casos HTTP y reglas de estado, duplicados, finalizadas y uso de la misma transacción.
+- `comprobar-inicio-picking.js` aprobado contra PostgreSQL de pruebas: cerrado/cancelado/desconocido no crean; fallo tras INSERT revierte; dos inicios concurrentes crean una sola sesión; retomar conserva usuario y 2 de 5; cancelación impide retomar; finalizada impide repetir. Cliente, pedido, líneas y sesiones temporales eliminados.
+- No se modifica el esquema ni se necesita migración o regeneración del cliente Prisma. La exclusión está garantizada para inicios que pasan por este servicio; no se añade un índice único que impida inserciones directas desde otros programas.
+
+### Límites y siguiente paso
+
+La comprobación usa la copia local del pedido; no consulta SAP en tiempo real. Este cambio no vuelve a validar su cabecera en cada escaneo de una sesión ya abierta. Sigue copiando `quantity`; falta definir y aplicar cantidades pendientes, líneas cerradas, parciales y modificaciones de SAP durante la preparación. Por ello todavía no debe considerarse completo el flujo para pedidos reales parcialmente despachados.
+
+Siguiente bloque: acordar con ejemplos reales cómo se representan las unidades pendientes y las líneas abiertas; después implementar ese contrato antes de conectar el flujo a pedidos reales de SAP.
+
+
+## 15. Corrección de codificación en picking
+
+Se confirmó texto UTF-8 interpretado como Windows-1252 en cuatro archivos: controlador, repositorio, servicio de picking y pruebas HTTP. Se corrigieron mensajes, comentarios y nombres de pruebas directamente en el checkout, conservando UTF-8 explícito. La herramienta concreta que originó el daño no se determinó.
+
+Tres pruebas adicionales comprueban los cuatro mensajes completos: LINEA_MODIFICADA, DATOS_ESCANEO_INVALIDOS, OPERACION_REUTILIZADA y PAGINACION_INVALIDA. También verifican el texto enviado al repositorio de historial y recuperado al reintentar LINEA_MODIFICADA. Suite: **165 de 165 aprobadas**.
+
+De estos cuatro errores, solo LINEA_MODIFICADA se persiste en el flujo actual. No se modificaron eventos existentes: si alguno ya contiene un mensaje dañado, el reintento conserva ese mensaje histórico. No se ejecutó ninguna reparación de datos ni migración.
+
+
+## 16. Primer receptor de datos del puente — entrega preparada
+
+Se acordó un programa de sincronización que consulte Service Layer desde el entorno autorizado y envíe información al backend. Empresa de pruebas informada por el usuario: XPRUEBAS2026. No se intentó conectar con SAP ni se incorporaron sus credenciales a los archivos.
+
+Entrega en copia externa, pendiente de copiar al proyecto. Añade POST /integracion/productos y GET /integracion/productos/estado, autenticación Bearer separada de las API keys de aplicaciones y configuración SAP_COMPANY_DB. Se reemplaza el marcador requireBridgeAuth que anteriormente no verificaba nada. La integración permanece cerrada si falta configuración segura.
+
+Contrato inicial: hasta 100 productos con código, nombre, código principal nullable y estados valid/frozen obligatorios. Inserta o actualiza por itemCode. No toca relaciones, escaneos, historial ni confirmaciones. Las existencias y códigos adicionales aún no se sincronizan.
+
+Migración aditiva 20260928160000_estado_sincronizacion_productos: una tabla para empresa, secuencia, hash, cantidad y fecha de recepción. No se aplicó al esquema público de la base del usuario. Un único origen por base, lotes consecutivos, reconocimiento del último lote repetido, rechazo de cambios de contenido/saltos/lotes antiguos y commit conjunto de productos y avance.
+
+Verificación: esquema Prisma válido y 190 de 190 pruebas aprobadas en copia externa; comprobación real en esquema temporal PostgreSQL aprobada: dos envíos concurrentes, upsert, ceros iniciales, rechazo de lote antiguo/conflictivo, fallo SQL con rollback y reintento exitoso. Esquema temporal eliminado. No se modificó el cambio local existente en tests/unit/picking.cantidades.test.js.
+
+El copiador compara hashes y crea respaldo. La guía INTEGRACION_PUENTE.md explica la configuración, contrato y límites. El próximo bloque es el programa emisor: acceso a SAP, lectura paginada, conversión de campos y conservación duradera de lotes pendientes. La fecha de recepción no certifica actualidad en SAP; la secuencia no sustituye la futura estrategia de detección de cambios.
+
+
+## 17. Emisor de productos — entrega preparada
+
+Se comprobó que los archivos del receptor ya están presentes en el checkout; no se deduce de ello que la migración o configuración estén aplicadas. Se preparó en copia externa el emisor puente/: cliente Service Layer, cliente backend, transformación, archivo persistente de avance y pendiente, candado local y ejecución única/periódica.
+
+Las muestras locales Items.json confirman los campos ItemCode, ItemName, BarCode, Valid=tYES y Frozen=tNO. Se utiliza el contrato v1 del receptor. El programa guarda cada lote antes de enviarlo, verifica confirmación y recupera el mismo lote tras pérdida de respuesta. Mantiene cookies de sesión solo en memoria y renueva una vez ante 401. URLs remotas HTTPS y redireccionamientos rechazados.
+
+**211/211 pruebas aprobadas** en la copia de entrega, con HTTP simulado y pruebas reales del archivo de estado local. No se conectó a SAP, no se utilizaron sus credenciales y no se instalaron servicios ni se aplicaron migraciones. Configuración de ejemplo sin secretos; nuevos archivos de configuración y estado excluidos de Git.
+
+La primera versión recorre el catálogo completo por ItemCode y reenvía páginas en cada ciclo. Incrementales, eliminaciones, códigos adicionales, unidades, stock y pedidos siguen pendientes. El modo --watch no equivale a un servicio Windows instalado. Tras apagón o terminación forzada puede requerir retirar el candado vacío después de verificar que no existe otro proceso; no borrar el estado. Despliegue, alertas y recuperación desatendida se completarán tras la prueba de conexión.
+
+Siguiente paso: incorporar entrega, configurar .env.puente localmente en equipo autorizado y ejecutar un solo ciclo contra XPRUEBAS2026, con backend de pruebas confirmado. Guía en PUENTE_PRODUCTOS.md.

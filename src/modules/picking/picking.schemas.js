@@ -12,4 +12,9 @@ export const idParamsSchema = z.object({
 
 export const escanearBodySchema = z.object({
   codigo: safeString(1),
+  operacionId: z.string().trim().uuid().transform((valor) => valor.toLowerCase()),
+});
+export const historialQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  despuesDe: z.coerce.number().int().positive().max(2_147_483_647).optional(),
 });

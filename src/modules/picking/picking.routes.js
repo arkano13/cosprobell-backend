@@ -5,6 +5,7 @@ import {
   iniciarBodySchema,
   idParamsSchema,
   escanearBodySchema,
+  historialQuerySchema,
 } from "./picking.schemas.js";
 
 import {
@@ -12,6 +13,7 @@ import {
   consultar,
   escanear,
   finalizar,
+  historial,
 } from "./picking.controller.js";
 
 const router = Router();
@@ -41,6 +43,12 @@ router.post(
   "/picking/:id/finalizar",
   validate({ params: idParamsSchema }),
   finalizar
+);
+
+router.get(
+  "/picking/:id/escaneos",
+  validate({ params: idParamsSchema, query: historialQuerySchema }),
+  historial
 );
 
 export default router;

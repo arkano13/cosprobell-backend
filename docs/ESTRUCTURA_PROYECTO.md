@@ -1,79 +1,91 @@
 # Estructura del backend
 
-## Organización actual
+Actualizado para la integración de picking del 28 de septiembre de 2026. Tras verificar la entrega en una copia temporal, el usuario la incorporó a su proyecto y compartió 128 pruebas aprobadas y la demo de PostgreSQL aprobada.
 
-```text
-src/
-  app.js                         Configura Express y monta las rutas
-  server.js                      Abre el puerto HTTP y conecta el cierre ordenado
-  index.js                       Entrada compatible con comandos anteriores
-  config/
-    env.schema.js                Validación de variables de entorno
-    env.js                       Carga la configuración validada
-  infrastructure/
-    database/prisma.js           Instancia compartida de Prisma
-    logging/logger.js            Registro de eventos con ocultación de claves y firmas
-    shutdown.js                  Cierre HTTP y desconexión de PostgreSQL
-  shared/
-    errors/AppError.js           Errores conocidos con código y estado HTTP
-    security/hash.js             Hash de las API keys
-    security/firma.js            Firma HMAC del sincronizador
-    validation/safeString.js     Validación común de texto
-  middleware/
-    authenticate.js              API key de aplicaciones y firma del sincronizador
-    validate.js                  Validación HTTP con Zod
-    errorHandler.js              Respuesta central a errores
-  modules/
-    productos/                   Separado por capas
-    picking/                     Separado por capas, con transacción de sesión
-    sincronizacion/              Recepción de lotes desde SAP
-    bodegas/ clientes/ facturas/ pagos/ health/   Lógica todavía en sus rutas
-sincronizador/                   Agente que corre en la red de Cosprobell (ver SINCRONIZACION.md)
-tests/
-  unit/                          Reglas, servicios, esquemas y middleware
-  integration/                   HTTP con persistencia simulada
-prisma/                          Esquema, migraciones y datos sintéticos
-scripts/                         Comprobaciones manuales contra la base configurada
-docs/                            Contexto y decisiones
-```
+## Organización
 
-## Capas de un módulo
+- `src/app.js`: configura Express sin abrir un puerto al importarlo.
+- `src/server.js`: inicia HTTP y coordina el cierre ordenado.
+- `src/config/`: carga y validación del entorno.
+- `src/infrastructure/`: Prisma, logs y cierre de recursos.
+- `src/shared/`: errores, seguridad y validación común.
+- `src/middleware/`: autenticación, validación HTTP y errores.
+- `src/modules/productos/`: productos y búsqueda informativa de etiquetas.
+- `src/modules/unidades-medida/`: consulta del catálogo; no interpreta automáticamente cajas o unidades individuales.
+- `src/modules/picking/`: rutas, schemas, controlador, servicios, reglas, repositorios y transacción.
+- Bodegas, clientes, facturas, pagos y health conservan su organización existente.
+- `tests/unit/` y `tests/integration/`: reglas y HTTP con persistencia simulada.
+- `scripts/`: comprobaciones manuales contra la base configurada.
+
+## Picking
 
 | Archivo | Responsabilidad |
 |---|---|
-| `*.routes.js` | URL, autenticación, validación y controlador |
-| `*.schemas.js` | Entradas admitidas |
-| `*.controller.js` | Peticiones y respuestas HTTP |
-| `*.service.js` | Reglas y operaciones; no recibe `req` ni `res` |
-| `*.repository.js` | Consultas a PostgreSQL mediante Prisma |
+| `picking.routes.js` | URLs, validación y controladores |
+| `picking.schemas.js` | Entradas admitidas |
+| `picking.controller.js` | Adaptación HTTP; mantiene temporalmente errores conocidos como texto |
+| `picking.service.js` | Inicio, consulta, escaneo integrado y cierre |
+| `picking.repository.js` | Lecturas, creación, incremento de la línea validada y finalización |
+| `picking.transaction.js` | Transacción y bloqueo de sesión |
+| `picking.etiquetas.repository.js` | Consulta de asociaciones y confirmaciones |
+| `picking.etiquetas.service.js` | Resuelve una asociación única para picking |
+| `picking.etiqueta.js` | Comprueba confirmación de unidad individual y datos vigentes |
+| `picking.cantidades.js` | Comprueba producto, unidad y cantidades enteras compatibles |
 
-`picking.transaction.js` bloquea la sesión de picking dentro de una transacción para coordinar escaneo y cierre. La transacción de sincronización está en `sincronizacion.repository.js`.
+El escaneo usa un código de barras, identifica el producto, valida su confirmación y compara la unidad con las líneas de la sesión. La escritura guarda el código realmente leído. El servicio no recibe `req` ni `res` y todas las consultas del escaneo reciben la misma transacción.
 
-Bodegas, clientes, facturas y pagos mantienen sus consultas en las rutas; se separarán cuando haya que modificarlos.
-
-## Rutas y autenticación
-
-- `/health`: pública.
-- `/sync/lotes`: firma HMAC del sincronizador (`BRIDGE_SECRET`); no usa API key.
-- Las demás: API key de aplicación en `X-API-Key`.
+La búsqueda informativa de productos sigue disponible por separado. No autoriza un incremento por sí misma.
 
 ## Comandos
 
-Desde la raíz del proyecto:
-
-```powershell
+```bash
 npm run dev
 npm test
-node scripts/probar-codigo-de-barras.js 0012345678905
-node scripts/comprobar-sincronizacion.js
+node scripts/demo-picking.js
+node scripts/comprobar-picking-integrado.js
 ```
 
-- `npm test` ejecuta las pruebas del backend y del agente sin consultar una base real.
-- Los scripts de `scripts/` sí usan la base configurada en `.env`. Los de comprobación de picking y sincronización crean datos temporales y los eliminan.
-- El seed no funciona en una base nueva: el bloque de facturas y pagos quedó fuera de `main()`.
+`npm test` no consulta una base real. La entrega pasó 128 pruebas en una copia temporal.
 
-## Qué verifican las pruebas
+Los scripts de picking sí usan la base de `.env`; el usuario identificó la actual como base de pruebas. Crean datos ficticios y limpian sus registros. `scripts/helpers/datos-picking.js` centraliza esa preparación; no es un módulo de aplicación. El comando integrado ejecuta la demo y los scripts de concurrencia en procesos separados y se detiene si uno falla.
 
-`npm test`: 134 pruebas (103 del backend y 31 del agente). Cubren validación, errores, autenticación, picking, contrato de lotes, servicio de sincronización y cliente de Service Layer contra servidores simulados.
+Los scripts de concurrencia conservan sus nombres, pero sus datos fueron adaptados a etiquetas confirmadas y unidades explícitas. No usar las versiones antiguas con el nuevo contrato.
 
-No certifican el SAP real ni el comportamiento bajo carga. La concurrencia de picking y de sincronización se comprueba con los scripts contra PostgreSQL.
+## Límites
+
+No hay conversión de cajas ni autorización por nombre de unidad. La entrega de la sección 13 añade idempotencia e historial por operación; sigue pendiente identificar al operador individual. Las referencias manuales o desconocidas bloquean el escaneo; las presentaciones mezcladas del mismo producto se rechazan. La confirmación de una etiqueta se administra todavía fuera de un flujo autenticado. La creación de sesiones conserva cantidades originales del pedido; quedan pendientes elegibilidad, parciales y políticas de cambios SAP.
+
+Ver la sección 12 de la bitácora para evidencia de PostgreSQL y pendientes.
+
+
+## Reintentos e historial — entrega posterior
+
+- `picking.escaneos.repository.js`: obtiene una operación previa, guarda su resultado y pagina el historial.
+- `picking.service.js`: coordina reintento, escaneo e historial bajo el bloqueo existente; confirma el rechazo antes de responderlo.
+- `picking.schemas.js`: exige UUID en cada lectura y valida paginación.
+- `picking.controller.js` y rutas: reciben `operacionId`, usan el nombre autenticado de aplicación y exponen `GET /picking/:id/escaneos`.
+- `PickingEscaneo`: evento persistido y respuesta original; único por sesión/operación.
+- `scripts/comprobar-reintentos-picking.js`: prueba doble envío, respuesta histórica, conflicto, rechazo persistido, reversión SQL, cierre y paginación. El script integrado también lo ejecuta.
+
+La nueva entrega pasó 144 pruebas en la copia temporal y las comprobaciones PostgreSQL documentadas en la sección 13. Los scripts anteriores fueron actualizados para enviar un UUID nuevo por lectura física y limpiar sus eventos. No se añaden UUID automáticamente en el backend: el cliente debe conservarlos al reenviar.
+
+
+## Inicio y reanudación de picking
+
+`picking.pedido.js` valida el estado local del pedido. El servicio ejecuta el inicio dentro de `pickingRepository.conPedidoBloqueado`: bloquea la cabecera, comprueba elegibilidad y consulta las sesiones bloqueadas antes de crear. Los inicios del mismo pedido esperan su turno. Una activa se retoma con HTTP 200; una nueva responde 201. No se reinician avances ni se cambia el usuario guardado.
+
+Se rechazan pedidos cerrados, cancelados o con estado desconocido, múltiples sesiones activas y un nuevo inicio si solo hay sesiones finalizadas. La regla sobre finalizadas es provisional hasta definir parciales/reapertura. No hay cambio de esquema; inserciones directas ajenas al servicio no quedan protegidas por un índice único.
+
+La entrega pasa 162 pruebas. `scripts/comprobar-inicio-picking.js` verifica además el inicio concurrente, rollback y reanudación con PostgreSQL y datos temporales. El cálculo sigue basado en quantity; pendientes y cambios SAP durante una sesión quedan por implementar.
+
+
+## Recepción de productos del puente
+
+El módulo src/modules/sincronizacion separa contrato, controlador, servicio y repositorio. Sus rutas /integracion se montan antes de la autenticación de aplicaciones y llevan autenticación propia obligatoria. La configuración vincula una empresa SAP; las credenciales SAP permanecen fuera del receptor.
+
+La tabla sincronizacion_estados y el bloqueo transaccional permiten guardar catálogo y avance conjuntamente, reconocer el último lote repetido y rechazar desorden/conflictos. Detalles, instalación y límites en INTEGRACION_PUENTE.md. Entrega preparada con 190 pruebas aprobadas; falta incorporar al checkout y aplicar la migración aditiva.
+
+
+## Emisor de productos
+
+puente/ contiene configuración, clientes HTTP SAP/backend, transformación, persistencia local y coordinación del envío. Se ejecuta separado del servidor Express y no necesita conexión PostgreSQL. Comparte el contrato de productos del receptor. puente/ejecutar.js ofrece --once y --watch; el segundo no instala un servicio de Windows. Configuración y límites en PUENTE_PRODUCTOS.md. Verificación en copia preparada: 211 pruebas aprobadas, sin conexión real con SAP.

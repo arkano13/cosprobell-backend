@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
@@ -254,6 +255,7 @@ test("health informa indisponibilidad sin exponer el fallo", async (t) => {
 // --------------------------------------------------
 
 test("iniciar picking devuelve 404 si el pedido no existe", async (t) => {
+  simularInicio(t);
   const headers = {
     ...autenticar(t),
     "Content-Type": "application/json",
@@ -293,6 +295,7 @@ test("iniciar picking devuelve 404 si el pedido no existe", async (t) => {
 });
 
 test("iniciar picking rechaza un pedido sin líneas", async (t) => {
+  simularInicio(t);
   const headers = {
     ...autenticar(t),
     "Content-Type": "application/json",
@@ -303,6 +306,7 @@ test("iniciar picking rechaza un pedido sin líneas", async (t) => {
     "buscarPedidoConLineas",
     async () => ({
       docEntry: 9001,
+      documentStatus: "bost_Open", cancelled: false, cancelStatus: "csNo",
       lineas: [],
     })
   );
@@ -332,6 +336,7 @@ test("iniciar picking rechaza un pedido sin líneas", async (t) => {
 });
 
 test("iniciar picking oculta los errores de consulta", async (t) => {
+  simularInicio(t);
   const headers = {
     ...autenticar(t),
     "Content-Type": "application/json",
@@ -373,6 +378,7 @@ test("iniciar picking oculta los errores de consulta", async (t) => {
 });
 
 test("iniciar picking crea una sesión y responde 201", async (t) => {
+  simularInicio(t);
   const headers = {
     ...autenticar(t),
     "Content-Type": "application/json",
@@ -398,6 +404,7 @@ test("iniciar picking crea una sesión y responde 201", async (t) => {
     "buscarPedidoConLineas",
     async () => ({
       docEntry: 9001,
+      documentStatus: "bost_Open", cancelled: false, cancelStatus: "csNo",
       lineas: [
         {
           lineNum: 0,
@@ -420,6 +427,8 @@ test("iniciar picking crea una sesión y responde 201", async (t) => {
             pedidoLineNum: 0,
             itemCode: "PROD-001",
             cantidadPedida: 10,
+            uomEntry: null,
+            uomCode: null,
           },
         ],
       });
@@ -447,6 +456,7 @@ test("iniciar picking crea una sesión y responde 201", async (t) => {
 });
 
 test("iniciar picking oculta un fallo al guardar la sesión", async (t) => {
+  simularInicio(t);
   const headers = {
     ...autenticar(t),
     "Content-Type": "application/json",
@@ -457,6 +467,7 @@ test("iniciar picking oculta un fallo al guardar la sesión", async (t) => {
     "buscarPedidoConLineas",
     async () => ({
       docEntry: 9001,
+      documentStatus: "bost_Open", cancelled: false, cancelStatus: "csNo",
       lineas: [
         {
           lineNum: 0,
@@ -496,6 +507,7 @@ test("iniciar picking oculta un fallo al guardar la sesión", async (t) => {
 });
 
 test("consultar picking devuelve la sesión y sus líneas", async (t) => {
+  simularInicio(t);
   const headers = autenticar(t);
 
   const sesion = {
@@ -533,6 +545,7 @@ test("consultar picking devuelve la sesión y sus líneas", async (t) => {
 });
 
 test("consultar picking inexistente devuelve 404", async (t) => {
+  simularInicio(t);
   const headers = autenticar(t);
 
   t.mock.method(
@@ -552,6 +565,7 @@ test("consultar picking inexistente devuelve 404", async (t) => {
 });
 
 test("consultar picking rechaza un identificador inválido", async (t) => {
+  simularInicio(t);
   const headers = autenticar(t);
 
   const consulta = t.mock.method(
@@ -573,6 +587,7 @@ test("consultar picking rechaza un identificador inválido", async (t) => {
 });
 
 test("consultar picking oculta los fallos internos", async (t) => {
+  simularInicio(t);
   const headers = autenticar(t);
 
   t.mock.method(
@@ -595,3 +610,213 @@ test("consultar picking oculta los fallos internos", async (t) => {
     },
   });
 });
+
+// Escaneo y cierre mediante HTTP, con persistencia simulada.
+const { pickingEtiquetasRepository } = await import(
+  "../../src/modules/picking/picking.etiquetas.repository.js"
+);
+
+const { pickingEscaneosRepository } = await import("../../src/modules/picking/picking.escaneos.repository.js");
+
+function prepararEscaneoHttp(t, cambios = {}) {
+  const linea = { id: 10, pickingId: 25, itemCode: "PROD-001", uomEntry: 1,
+    cantidadPedida: 3, cantidadEscaneada: 0, ...cambios.linea };
+  const sesion = { id: 25, estado: cambios.estado ?? "en_proceso", lineas: [linea] };
+  const tx = { async $queryRaw() { return [sesion]; } };
+  const eventos = new Map();
+  t.mock.method(pickingEscaneosRepository, "buscarOperacion", async (id, operacionId, db) => {
+    assert.equal(db, tx); return eventos.get(operacionId) ?? null;
+  });
+  t.mock.method(pickingEscaneosRepository, "crear", async (datos, db) => {
+    assert.equal(db, tx);
+    const evento = { id: eventos.size + 1, ...datos };
+    eventos.set(datos.operacionId, evento);
+    return evento;
+  });
+  sustituir(t, prisma, "$transaction", async (operacion) => operacion(tx));
+  t.mock.method(pickingEtiquetasRepository, "buscarProductos", async (codigo, db) => {
+    assert.equal(db, tx);
+    assert.equal(codigo, "00123");
+    if (cambios.fallo) throw new Error("detalle privado de escaneo");
+    if (cambios.desconocida) return [];
+    return [{ itemCode: "PROD-001", codigosBarras: [{
+      id: 5, itemCode: "PROD-001", codigo, uomEntry: 1,
+      confirmacionPicking: cambios.sinConfirmar ? null : {
+        codigoBarrasId: 5, esUnidadIndividual: !cambios.caja,
+        itemCodeConfirmado: "PROD-001", codigoConfirmado: codigo, uomEntryConfirmado: 1,
+      },
+    }] }];
+  });
+  t.mock.method(pickingRepository, "buscarSesionConLineas", async (id, db) => {
+    assert.equal(db, tx); return sesion;
+  });
+  const incrementar = t.mock.method(pickingRepository, "incrementarLinea", async (datos, db) => {
+    assert.equal(db, tx);
+    assert.equal(datos.itemCode, "PROD-001");
+    assert.equal(datos.codigo, "00123");
+    return [{ ...linea, cantidadEscaneada: linea.cantidadEscaneada + 1, codigoBarrasEscaneado: datos.codigo }];
+  });
+  t.mock.method(pickingRepository, "guardarFinalizacion", async (id, estado, fechaFin, db) => {
+    assert.equal(db, tx); return { ...sesion, estado, fechaFin };
+  });
+  return incrementar;
+}
+
+async function enviarEscaneo(headers, codigo = "00123", id = "25", operacionId = randomUUID()) {
+  return fetch(`${baseUrl}/picking/${id}/escanear`, {
+    method: "POST", headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({ codigo, operacionId }),
+  });
+}
+
+test("HTTP escanear registra el código de barras y conserva ceros iniciales", async (t) => {
+  const headers = autenticar(t);
+  const incrementar = prepararEscaneoHttp(t);
+  const respuesta = await enviarEscaneo(headers, " 00123 ");
+  assert.equal(respuesta.status, 200);
+  const { data } = await respuesta.json();
+  assert.equal(data.cantidadEscaneada, 1);
+  assert.equal(data.codigoBarrasEscaneado, "00123");
+  assert.equal(incrementar.mock.callCount(), 1);
+});
+
+const rechazosHttp = [
+  { nombre: "etiqueta desconocida", cambios: { desconocida: true }, status: 404 },
+  { nombre: "caja", cambios: { caja: true }, status: 409 },
+  { nombre: "etiqueta sin confirmar", cambios: { sinConfirmar: true }, status: 409 },
+  { nombre: "unidad manual", cambios: { linea: { uomEntry: -1 } }, status: 409 },
+  { nombre: "cantidad completa", cambios: { linea: { cantidadEscaneada: 3 } }, status: 409 },
+  { nombre: "sesión cerrada", cambios: { estado: "completo" }, status: 400 },
+];
+for (const caso of rechazosHttp) {
+  test(`HTTP escanear rechaza ${caso.nombre} sin incrementar`, async (t) => {
+    const headers = autenticar(t);
+    const incrementar = prepararEscaneoHttp(t, caso.cambios);
+    const respuesta = await enviarEscaneo(headers);
+    assert.equal(respuesta.status, caso.status);
+    // Se conserva por ahora el contrato de errores del controlador.
+    assert.equal(typeof (await respuesta.json()).error, "string");
+    assert.equal(incrementar.mock.callCount(), 0);
+  });
+}
+
+test("HTTP escanear valida identificador y código antes de abrir transacción", async (t) => {
+  const headers = autenticar(t);
+  let transacciones = 0;
+  sustituir(t, prisma, "$transaction", async () => { transacciones++; });
+  assert.equal((await enviarEscaneo(headers, "00123", "abc")).status, 400);
+  assert.equal((await enviarEscaneo(headers, " ")).status, 400);
+  assert.equal(transacciones, 0);
+});
+
+test("HTTP escanear y finalizar requieren autenticación", async () => {
+  assert.equal((await enviarEscaneo({})).status, 401);
+  const respuesta = await fetch(`${baseUrl}/picking/25/finalizar`, { method: "POST" });
+  assert.equal(respuesta.status, 401);
+});
+
+test("HTTP escanear oculta errores internos", async (t) => {
+  const headers = autenticar(t);
+  const incrementar = prepararEscaneoHttp(t, { fallo: true });
+  const respuesta = await enviarEscaneo(headers);
+  assert.equal(respuesta.status, 500);
+  assert.deepEqual(await respuesta.json(), { error: {
+    code: "INTERNAL_ERROR", message: "Error interno del servidor",
+  } });
+  assert.equal(incrementar.mock.callCount(), 0);
+});
+
+for (const cantidad of [2, 3]) {
+  test(`HTTP finalizar con ${cantidad} de 3 conserva el estado correcto`, async (t) => {
+    const headers = autenticar(t);
+    prepararEscaneoHttp(t, { linea: { cantidadEscaneada: cantidad } });
+    const respuesta = await fetch(`${baseUrl}/picking/25/finalizar`, { method: "POST", headers });
+    assert.equal(respuesta.status, 200);
+    const { data } = await respuesta.json();
+    assert.equal(data.estado, cantidad === 3 ? "completo" : "con_diferencias");
+    assert.ok(data.fechaFin);
+  });
+}
+
+
+test("HTTP repetir el mismo operacionId devuelve la misma respuesta y no incrementa", async (t) => {
+  const headers = autenticar(t);
+  const incrementar = prepararEscaneoHttp(t);
+  const id = randomUUID();
+  const primera = await enviarEscaneo(headers, "00123", "25", id);
+  const segunda = await enviarEscaneo(headers, "00123", "25", id);
+  assert.equal(primera.status, 200);
+  assert.equal(segunda.status, 200);
+  assert.deepEqual(await segunda.json(), await primera.json());
+  assert.equal(incrementar.mock.callCount(), 1);
+});
+
+test("HTTP reutilizar operacionId con otro código responde 409", async (t) => {
+  const headers = autenticar(t);
+  const incrementar = prepararEscaneoHttp(t);
+  const id = randomUUID();
+  assert.equal((await enviarEscaneo(headers, "00123", "25", id)).status, 200);
+  assert.equal((await enviarEscaneo(headers, "OTRO", "25", id)).status, 409);
+  assert.equal(incrementar.mock.callCount(), 1);
+});
+
+test("HTTP exige operacionId antes de abrir una transacción", async (t) => {
+  const headers = autenticar(t);
+  let llamadas = 0;
+  sustituir(t, prisma, "$transaction", async () => { llamadas++; });
+  const respuesta = await fetch(`${baseUrl}/picking/25/escanear`, {
+    method: "POST", headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({ codigo: "00123" }),
+  });
+  assert.equal(respuesta.status, 400);
+  assert.equal(llamadas, 0);
+});
+
+test("HTTP historial requiere autenticación y pagina los eventos", async (t) => {
+  assert.equal((await fetch(`${baseUrl}/picking/25/escaneos`)).status, 401);
+  const headers = autenticar(t);
+  t.mock.method(pickingRepository, "buscarEstadoSesion", async () => ({ estado: "completo" }));
+  const consulta = t.mock.method(pickingEscaneosRepository, "listar", async (id, query) => {
+    assert.equal(id, 25);
+    assert.deepEqual(query, { limit: 1, despuesDe: 7 });
+    return [{ id: 8, resultado: "aceptado" }, { id: 9, resultado: "rechazado" }];
+  });
+  const respuesta = await fetch(`${baseUrl}/picking/25/escaneos?limit=1&despuesDe=7`, { headers });
+  assert.equal(respuesta.status, 200);
+  assert.deepEqual(await respuesta.json(), { data: [{ id: 8, resultado: "aceptado" }], siguienteCursor: 8 });
+  const invalida = await fetch(`${baseUrl}/picking/25/escaneos?limit=1000`, { headers });
+  assert.equal(invalida.status, 400);
+  assert.equal(consulta.mock.callCount(), 1);
+});
+
+test("HTTP historial inexistente devuelve 404", async (t) => {
+  const headers = autenticar(t);
+  t.mock.method(pickingRepository, "buscarEstadoSesion", async () => null);
+  assert.equal((await fetch(`${baseUrl}/picking/999/escaneos`, { headers })).status, 404);
+});
+
+function simularInicio(t, sesiones = []) {
+  t.mock.method(pickingRepository, "conPedidoBloqueado", async (_id, operacion) => operacion(prisma));
+  t.mock.method(pickingRepository, "buscarSesionesDelPedido", async () => sesiones);
+}
+
+test("iniciar picking retoma la sesión y responde 200", async (t) => {
+  const sesion = { id: 25, estado: "en_proceso", usuarioId: "anterior", lineas: [{ cantidadEscaneada: 2 }] };
+  simularInicio(t, [sesion]);
+  t.mock.method(pickingRepository, "buscarPedidoConLineas", async () => ({ documentStatus: "bost_Open", cancelled: false, lineas: [] }));
+  const crear = t.mock.method(pickingRepository, "crearSesion", async () => { throw new Error("No debe crear"); });
+  const respuesta = await fetch(`${baseUrl}/picking`, { method: "POST", headers: { ...autenticar(t), "Content-Type": "application/json" }, body: JSON.stringify({ pedidoDocEntry: 9001, usuarioId: "otro" }) });
+  assert.equal(respuesta.status, 200);
+  assert.deepEqual(await respuesta.json(), { data: sesion });
+  assert.equal(crear.mock.callCount(), 0);
+});
+
+for (const estado of ["bost_Close", null]) {
+  test(`HTTP rechaza inicio con estado ${estado}`, async (t) => {
+    simularInicio(t);
+    t.mock.method(pickingRepository, "buscarPedidoConLineas", async () => ({ documentStatus: estado, cancelled: false, lineas: [] }));
+    const respuesta = await fetch(`${baseUrl}/picking`, { method: "POST", headers: { ...autenticar(t), "Content-Type": "application/json" }, body: JSON.stringify({ pedidoDocEntry: 9001 }) });
+    assert.equal(respuesta.status, 409);
+    assert.equal(typeof (await respuesta.json()).error, "string");
+  });
+}

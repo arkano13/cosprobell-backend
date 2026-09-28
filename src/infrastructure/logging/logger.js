@@ -1,9 +1,5 @@
 import pino from "pino";
 
 export const logger = pino({
-  redact: [
-    "req.headers.authorization",
-    "req.headers['x-api-key']",
-    "req.headers['x-bridge-signature']",
-  ],
+  redact: ["req.headers.authorization", "req.headers['x-api-key']"],
 });

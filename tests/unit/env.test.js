@@ -73,25 +73,6 @@ test("rechaza un entorno desconocido", () => {
   );
 });
 
-test("el secreto del sincronizador es opcional pero debe ser largo", () => {
-  assert.equal(parseEnv({ DATABASE_URL: databaseUrl }).bridgeSecret, undefined);
-
-  const secreto = "x".repeat(32);
-  assert.equal(
-    parseEnv({ DATABASE_URL: databaseUrl, BRIDGE_SECRET: secreto }).bridgeSecret,
-    secreto
-  );
-
-  assert.throws(
-    () => parseEnv({ DATABASE_URL: databaseUrl, BRIDGE_SECRET: "corto-secreto" }),
-    (error) => {
-      assert.match(error.message, /BRIDGE_SECRET/);
-      assert.equal(error.message.includes("corto-secreto"), false);
-      return true;
-    }
-  );
-});
-
 test("el mensaje de error no revela credenciales", () => {
   const secreto = "CLAVE_QUE_NO_DEBE_APARECER";
 
