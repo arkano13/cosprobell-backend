@@ -133,13 +133,16 @@ model ProductoExistencia {
 }
 
 // Vacia en la muestra actual (ItemBarCodeCollection sin registros).
-// Se deja lista para cuando la carga completa traiga datos reales.
+// uomEntry conserva la unidad de SAP asociada al codigo; todavia no se interpreta.
 model ProductoCodigoBarras {
   id       Int      @id @default(autoincrement())
   producto Producto @relation(fields: [itemCode], references: [itemCode])
   itemCode String
   codigo   String
+  uomEntry Int?
 
+  @@index([codigo])
+  @@index([itemCode])
   @@map("productos_codigos_barras")
 }
 
@@ -523,7 +526,7 @@ model TrasladoInventarioLinea {
 
 model Sincronizacion {
   id              Int      @id @default(autoincrement())
-  entidad         String
+  entidad         String   @unique
   cursor          String?
   ultimaEjecucion DateTime @default(now())
   estado          String
