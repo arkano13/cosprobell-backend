@@ -3,6 +3,7 @@ import { abrirEstado } from "./estado.js";
 import { crearClienteSap } from "./sap.client.js";
 import { crearClienteBackend } from "./backend.client.js";
 import { sincronizar } from "./sincronizar.js";
+import { ErrorPuente } from "./http.js";
 
 let parar = false, despertar;
 for (const senal of ["SIGINT", "SIGTERM"]) process.on(senal, () => { parar = true; despertar?.(); });
@@ -28,7 +29,9 @@ try {
       await esperar(config.intervaloMs);
     } catch (error) {
       // No imprimir cuerpos HTTP, cookies, claves, URLs ni errores del driver.
-      console.error(JSON.stringify({ evento: "fallo", codigo: error.code ?? "ERROR_LOCAL", temporal: error.temporal === true }));
+      // El detalle solo viene de ErrorPuente: código de producto y campo, sin valores.
+      const detalle = error instanceof ErrorPuente ? error.detalle : undefined;
+      console.error(JSON.stringify({ evento: "fallo", codigo: error.code ?? "ERROR_LOCAL", temporal: error.temporal === true, detalle }));
       if (!continuo || !error.temporal) { process.exitCode = 1; break; }
       fallos++; await esperar(Math.min(60000, 1000 * 2 ** Math.min(fallos, 6)));
     }

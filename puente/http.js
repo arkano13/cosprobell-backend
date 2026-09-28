@@ -1,5 +1,8 @@
 export class ErrorPuente extends Error {
-  constructor(codigo, temporal = false) { super(codigo); this.code = codigo; this.temporal = temporal; }
+  // detalle solo lleva datos no secretos que ayudan a corregir el origen (código de producto y campo).
+  constructor(codigo, temporal = false, detalle = undefined) {
+    super(codigo); this.code = codigo; this.temporal = temporal; this.detalle = detalle;
+  }
 }
 export async function solicitar(url, opciones = {}, fetchImpl = fetch) {
   let respuesta;

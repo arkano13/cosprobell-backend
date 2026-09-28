@@ -14,14 +14,16 @@ export function crearClienteSap(config, fetchImpl = fetch) {
   }
   return {
     async pagina(cursor) {
-      const parametros = new URLSearchParams({
-        "$select": "ItemCode,ItemName,BarCode,Valid,Frozen", "$orderby": "ItemCode asc", "$top": "50",
-      });
-      if (cursor !== null) parametros.set("$filter", `ItemCode gt '${cursor.replaceAll("'", "''")}'`);
+      // Misma forma que acepta Service Layer desde el navegador: "$" literal y espacios como %20.
+      // URLSearchParams enviaría %24select y "+", que no están confirmados con el SAP real.
+      const filtro = cursor === null ? "" : `&$filter=${encodeURIComponent(`ItemCode gt '${cursor.replaceAll("'", "''")}'`)}`;
+      const consulta = `$select=ItemCode,ItemName,BarCode,Valid,Frozen&$orderby=${encodeURIComponent("ItemCode asc")}&$top=50${filtro}`;
       if (!cookie) await login();
       for (let intento = 0; intento < 2; intento++) {
         try {
-          const respuesta = await solicitar(`${config.sapUrl}/Items?${parametros}`, { headers: { Cookie: cookie } }, fetchImpl);
+          // Sin Prefer, Service Layer devuelve 20 por página aunque $top pida 50.
+          const respuesta = await solicitar(`${config.sapUrl}/Items?${consulta}`,
+            { headers: { Cookie: cookie, Prefer: "odata.maxpagesize=50" } }, fetchImpl);
           const datos = await leerJson(respuesta);
           if (!Array.isArray(datos.value) || datos.value.length > 50) throw new ErrorPuente("PAGINA_SAP_INVALIDA");
           return datos.value;
