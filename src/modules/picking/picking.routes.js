@@ -1,99 +1,113 @@
 import { Router } from "express";
-import { z } from "zod";
 import { prisma } from "../../infrastructure/database/prisma.js";
 import { validate } from "../../middleware/validate.js";
-import { safeString } from "../../shared/validation/safeString.js";
+
+import {
+  iniciarBodySchema,
+  idParamsSchema,
+  escanearBodySchema,
+} from "./picking.schemas.js";
+
+import { pickingRepository } from "./picking.repository.js";
 
 const router = Router();
 
-const iniciarBodySchema = z.object({
-  pedidoDocEntry: z.coerce.number().int().positive(),
-  usuarioId: safeString(1).optional(),
-});
+// Iniciar una sesión de verificación.
+router.post(
+  "/picking",
+  validate({ body: iniciarBodySchema }),
+  async (req, res, next) => {
+    try {
+      const { pedidoDocEntry, usuarioId } = req.body;
 
-router.post("/picking", validate({ body: iniciarBodySchema }), async (req, res, next) => {
-  try {
-    const { pedidoDocEntry, usuarioId } = req.body;
+      const pedido =
+        await pickingRepository.buscarPedidoConLineas(pedidoDocEntry);
 
-    const pedido = await prisma.pedido.findUnique({
-      where: { docEntry: pedidoDocEntry },
-      include: { lineas: true },
-    });
+      if (!pedido) {
+        return res.status(404).json({
+          error: "Pedido no encontrado",
+        });
+      }
 
-    if (!pedido) {
-      return res.status(404).json({ error: "Pedido no encontrado" });
-    }
-
-    if (pedido.lineas.length === 0) {
-      return res.status(400).json({ error: "El pedido no tiene lineas" });
-    }
-
-    const picking = await prisma.pickingPedido.create({
-      data: {
+      if (pedido.lineas.length === 0) {
+        return res.status(400).json({
+          error: "El pedido no tiene lineas",
+        });
+      }
+      const picking = await pickingRepository.crearSesion({
         pedidoDocEntry: pedido.docEntry,
-        usuarioId: usuarioId || null,
-        estado: "en_proceso",
-        lineas: {
-          create: pedido.lineas.map((linea) => ({
-            pedidoLineNum: linea.lineNum,
-            itemCode: linea.itemCode,
-            cantidadPedida: linea.quantity,
-          })),
-        },
-      },
-      include: { lineas: true },
-    });
+        usuarioId,
+        lineas: pedido.lineas.map((linea) => ({
+          pedidoLineNum: linea.lineNum,
+          itemCode: linea.itemCode,
+          cantidadPedida: linea.quantity,
+        })),
+      });
 
-    res.status(201).json({ data: picking });
-  } catch (err) {
-    next(err);
-  }
-});
-
-const idParamsSchema = z.object({
-  id: z.coerce.number().int().positive(),
-});
-
-router.get("/picking/:id", validate({ params: idParamsSchema }), async (req, res, next) => {
-  try {
-    const picking = await prisma.pickingPedido.findUnique({
-      where: { id: req.params.id },
-      include: { lineas: true },
-    });
-
-    if (!picking) {
-      return res.status(404).json({ error: "Sesion de picking no encontrada" });
+      return res.status(201).json({
+        data: picking,
+      });
+    } catch (error) {
+      next(error);
     }
+  },
+);
 
-    res.json({ data: picking });
-  } catch (err) {
-    next(err);
-  }
-});
+// Consultar una sesión de verificación.
+router.get(
+  "/picking/:id",
+  validate({ params: idParamsSchema }),
+  async (req, res, next) => {
+    try {
+    const picking =
+  await pickingRepository.buscarSesionConLineas(req.params.id);
 
-const escanearBodySchema = z.object({
-  codigo: safeString(1),
-});
+      if (!picking) {
+        return res.status(404).json({
+          error: "Sesion de picking no encontrada",
+        });
+      }
+
+      return res.json({
+        data: picking,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
 
 router.post(
   "/picking/:id/escanear",
-  validate({ params: idParamsSchema, body: escanearBodySchema }),
+  validate({
+    params: idParamsSchema,
+    body: escanearBodySchema,
+  }),
   async (req, res, next) => {
     try {
       const pickingId = req.params.id;
       const { codigo } = req.body;
 
       const picking = await prisma.pickingPedido.findUnique({
-        where: { id: pickingId },
-        select: { estado: true },
+        where: {
+          id: pickingId,
+        },
+        select: {
+          estado: true,
+        },
       });
 
       if (!picking) {
-        return res.status(404).json({ error: "Sesion de picking no encontrada" });
+        return res.status(404).json({
+          error: "Sesion de picking no encontrada",
+        });
       }
 
       if (picking.estado !== "en_proceso") {
-        return res.status(400).json({ error: `El picking ya esta en estado '${picking.estado}'` });
+        return res.status(400).json({
+          error: `El picking ya esta en estado '${picking.estado}'`,
+        });
       }
 
       const filas = await prisma.$queryRaw`
@@ -102,7 +116,8 @@ router.post(
             "codigoBarrasEscaneado" = ${codigo},
             "timestampEscaneo" = now()
         WHERE id = (
-          SELECT id FROM picking_pedidos_lineas
+          SELECT id
+          FROM picking_pedidos_lineas
           WHERE "pickingId" = ${pickingId}
             AND "itemCode" = ${codigo}
             AND "cantidadEscaneada" < "cantidadPedida"
@@ -115,49 +130,77 @@ router.post(
 
       if (filas.length === 0) {
         const lineaExistente = await prisma.pickingPedidoLinea.findFirst({
-          where: { pickingId, itemCode: codigo },
+          where: {
+            pickingId,
+            itemCode: codigo,
+          },
         });
+
         const mensaje = lineaExistente
           ? "Ese producto ya completo su cantidad pedida"
           : "Ese producto no pertenece a este pedido";
-        return res.status(409).json({ error: mensaje });
+
+        return res.status(409).json({
+          error: mensaje,
+        });
       }
 
-      res.json({ data: filas[0] });
-    } catch (err) {
-      next(err);
+      return res.json({
+        data: filas[0],
+      });
+    } catch (error) {
+      next(error);
     }
-  }
+  },
 );
 
-router.post("/picking/:id/finalizar", validate({ params: idParamsSchema }), async (req, res, next) => {
-  try {
-    const pickingId = req.params.id;
+// Finalizar una sesión de verificación.
+router.post(
+  "/picking/:id/finalizar",
+  validate({ params: idParamsSchema }),
+  async (req, res, next) => {
+    try {
+      const pickingId = req.params.id;
 
-    const picking = await prisma.pickingPedido.findUnique({
-      where: { id: pickingId },
-      include: { lineas: true },
-    });
+      const picking = await prisma.pickingPedido.findUnique({
+        where: {
+          id: pickingId,
+        },
+        include: {
+          lineas: true,
+        },
+      });
 
-    if (!picking) {
-      return res.status(404).json({ error: "Sesion de picking no encontrada" });
+      if (!picking) {
+        return res.status(404).json({
+          error: "Sesion de picking no encontrada",
+        });
+      }
+
+      const hayDiferencias = picking.lineas.some(
+        (linea) => linea.cantidadEscaneada !== linea.cantidadPedida,
+      );
+
+      const pickingFinal = await prisma.pickingPedido.update({
+        where: {
+          id: pickingId,
+        },
+        data: {
+          estado: hayDiferencias ? "con_diferencias" : "completo",
+          fechaFin: new Date(),
+        },
+        include: {
+          lineas: true,
+        },
+      });
+
+      return res.json({
+        data: pickingFinal,
+      });
+    } catch (error) {
+      next(error);
     }
-
-    const hayDiferencias = picking.lineas.some((l) => l.cantidadEscaneada !== l.cantidadPedida);
-
-    const pickingFinal = await prisma.pickingPedido.update({
-      where: { id: pickingId },
-      data: {
-        estado: hayDiferencias ? "con_diferencias" : "completo",
-        fechaFin: new Date(),
-      },
-      include: { lineas: true },
-    });
-
-    res.json({ data: pickingFinal });
-  } catch (err) {
-    next(err);
-  }
-});
+  },
+);
 
 export default router;

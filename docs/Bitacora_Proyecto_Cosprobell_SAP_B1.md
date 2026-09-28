@@ -22,12 +22,13 @@ Documentos de referencia:
 | Revisión de metadatos y muestras | ZIP revisado: XML de metadatos y 13 archivos JSON |
 | Contexto funcional | Bodega y consulta por WhatsApp para los dueños definidos; quedan reglas operativas pendientes |
 | Organización del código | Redistribución autorizada y aplicada; productos separado por capas |
-| Pruebas automatizadas | 24 pruebas aprobadas, confirmadas por el usuario; incluyen reglas, middleware y HTTP con persistencia simulada |
-| Búsqueda por código de barras | Búsqueda exitosa y código desconocido comprobados manualmente por el usuario contra su base configurada |
+| Pruebas automatizadas | 30 aprobadas expresamente por el usuario; cierre ordenado añadió 5 y recibió confirmación general de funcionamiento, sin salida completa de 35 compartida |
+| Búsqueda por código de barras | Código principal, adicional, inexistente y ambiguo comprobados manualmente por el usuario contra su base configurada |
 | Conexión de búsqueda con escaneo | Pendiente; picking todavía compara el código recibido con `itemCode` y suma uno |
 | Errores con `AppError` | Clase y manejador central implementados y probados; falta migrar las respuestas directas de las rutas |
 | Validación de peticiones | Distingue errores de Zod de fallos internos; 4 pruebas adicionales aprobadas |
-| Validación de configuración | Siguiente módulo guiado; todavía pendiente de copiar y probar |
+| Validación de configuración | Implementada en `env.schema.js`, utilizada por `env.js` y Prisma; seis pruebas adicionales aprobadas por el usuario |
+| Cierre ordenado | Implementado en `shutdown.js`, con cinco casos de prueba; confirmación general del usuario, sin verificación manual de señales reportada |
 | Integración real con SAP | Pendiente de accesos, infraestructura, reglas y construcción del sincronizador |
 | WhatsApp | Alcance definido, integración no implementada |
 
@@ -79,7 +80,7 @@ Productos tiene cinco capas/archivos: rutas, schemas, controlador, servicio y re
 
 Se añadió `src/infrastructure/logging/logger.js` y se mantuvo la ocultación de encabezados de autenticación. Se actualizaron los scripts y el seed para utilizar las nuevas rutas.
 
-No se modificaron el esquema Prisma, las migraciones ni la base de datos durante la redistribución. La configuración estricta de entorno, el cierre ordenado y el nuevo formato de errores siguen pendientes.
+No se modificaron el esquema Prisma, las migraciones ni la base de datos durante la redistribución. La configuración estricta, el cierre ordenado y el manejador de errores se implementaron posteriormente en el trabajo guiado descrito en la sección 8.
 
 ## 6. Búsqueda por código de barras
 
@@ -100,8 +101,18 @@ Script: `scripts/probar-codigo-de-barras.js`.
 |---|---|
 | `node scripts/probar-codigo-de-barras.js 0012345678905` | `encontrado`: `PROD-001`, Agua embotellada 600ml |
 | `node scripts/probar-codigo-de-barras.js CODIGO-INEXISTENTE` | `no_encontrado` |
+| `node scripts/probar-codigo-de-barras.js 0098765432105` | `encontrado`: código adicional asociado a `PROD-001` |
+| `node scripts/probar-codigo-de-barras.js TEST-AMBIGUO-001` | `codigo_ambiguo`: etiqueta ficticia asociada a `PROD-001` y `PROD-002` |
 
-Estas salidas confirman los dos casos ejecutados contra la base configurada por el usuario. No constituyen una prueba de conexión con SAP.
+Estas salidas confirman los cuatro casos ejecutados contra la base configurada por el usuario. No constituyen una prueba de conexión con SAP.
+
+**Incidencia al preparar los datos:** inicialmente no había códigos adicionales persistidos para `PROD-001`, confirmado por una consulta de lectura. Studio mostró `Failed to fetch`; no se estableció su causa. Al continuar en HeidiSQL, la tabla no aparecía porque esa sesión usaba la base `postgres`, mientras el programa usaba `railway`. Tras corregir la conexión y preparar el registro, la búsqueda adicional funcionó. No se atribuye el fallo de Studio a la conexión de HeidiSQL sin evidencia.
+
+Se entregó SQL limitado al código ficticio `TEST-AMBIGUO-001` para retirar las asociaciones de la prueba. El usuario respondió «listo» después de esa instrucción; no se ejecutó una consulta independiente para verificar la limpieza.
+
+**Seguridad:** se compartió una credencial de conexión en la conversación y se indicó rotarla y actualizar las conexiones. No se reproduce aquí; la rotación no está confirmada.
+
+**Conclusión funcional:** varios códigos pueden identificar un producto. Un código que identifica productos distintos debe producir ambigüedad. El modelo actual no distingue presentaciones del mismo producto: esta prueba no demuestra identificación de cajas ni conversiones correctas.
 
 **Pendiente manual:** ejecutar el script sin argumento y confirmar que muestra el mensaje de uso. No se ha recibido esa salida. La validación de entradas vacías de la función sí se cubrió con una prueba automatizada, pero es una comprobación distinta del script completo.
 
@@ -140,16 +151,38 @@ Se corrigieron durante el aprendizaje el nombre de archivo `AppErrors.js`, el no
 
 El formato estructurado de errores ya se aplica a los errores enviados al manejador central. Autenticación, validación y algunas rutas todavía responden directamente con su formato anterior; su uniformización es progresiva. Las pruebas no prueban conexión con SAP ni las condiciones reales de concurrencia de bodega.
 
-### Método de colaboración
+### Avance posterior: configuración y cierre
+
+- `src/config/env.schema.js`: validación de entorno, puerto y URL PostgreSQL mediante una función comprobable sin leer secretos reales. Mensajes de error limitados a nombres de variables.
+- `src/config/env.js`: carga y valida la configuración; Prisma utiliza `env.databaseUrl`.
+- `tests/unit/env.test.js`: seis pruebas nuevas. El usuario confirmó explícitamente 30 pruebas aprobadas.
+- `src/infrastructure/shutdown.js`: evita cierres duplicados, espera el cierre HTTP, desconecta Prisma y establece un tiempo máximo.
+- `src/server.js`: conecta el cierre a las señales y al error del servidor.
+- `tests/unit/shutdown.test.js`: cinco pruebas nuevas. El usuario respondió que todo funcionaba; no compartió la salida completa de 35 pruebas ni el resultado manual de Ctrl+C. No confundir pruebas simuladas con validación del cierre bajo carga real.
+
+### Método de colaboración y criterio técnico
 
 El usuario quiere aprender y construir módulo por módulo: explicación breve, código para copiar y pegar, casos correctos y errores, con resultados esperados. La autorización para redistribuir el proyecto fue explícita; no se interpreta como una solicitud de implementar autónomamente todas las funcionalidades futuras.
 
 Cada módulo debe documentar lo que valida, cómo trata fallos y qué queda pendiente. Un comportamiento no se declara comprobado solo porque se entregó el código.
 
+El usuario pide conservar orden y escalabilidad, y evaluar sus propuestas con criterio técnico independiente. Se explicarán los desacuerdos, sus motivos y una alternativa concreta cuando corresponda.
+
+Principios de trabajo:
+
+- Mantener el monolito modular y separar HTTP, reglas de negocio y persistencia conforme se trabaja cada módulo.
+- Crear abstracciones cuando resuelvan una necesidad concreta; no añadir infraestructura por una expectativa genérica de crecimiento.
+- Aplicar cambios pequeños, con pruebas de errores y compatibilidad relevantes para el cambio.
+- Diferenciar identificación de producto, presentación y cantidad. No asumir que una etiqueta adicional representa una caja ni que cada escaneo suma uno.
+- Las decisiones desconocidas de SAP u operación quedan explícitas; no se sustituyen por reglas inventadas.
+- Revisar integridad, concurrencia, reintentos y transacciones al conectar operaciones que modifican el estado de picking.
+- Mantener documentación y código alineados, sin registrar secretos y distinguiendo evidencia observada de resultados reportados.
+
 ## 9. Próxima acción
 
-1. Construir de forma guiada la validación de variables de entorno y usarla en la conexión Prisma. Comprobar configuración válida, valores faltantes y valores inválidos sin revelar secretos.
-2. Implementar cierre ordenado del servidor y conexiones.
-3. Aplicar progresivamente `AppError` a las rutas y continuar con códigos de barras/picking.
-4. Confirmar la prueba manual del script sin argumento; sigue sin una salida reportada y no bloquea este avance.
-5. Retomar la reunión con el administrador de SAP a partir del contexto y las dudas concretas, especialmente unidades, parciales y acceso a datos.
+1. Separar el módulo de picking por responsabilidades, preservando primero el comportamiento existente y agregando pruebas de regresión. No conectar todavía la búsqueda suponiendo equivalencias desconocidas.
+2. Definir el contrato del escaneo: código, producto resuelto, presentación, cantidad e identificador de operación para controlar reintentos. Para un piloto de unidades, exigir una configuración explícita y rechazar presentaciones no resueltas.
+3. Confirmar con Cosprobell unidades/cajas, equivalencias, documento operativo y parciales; integrar después las reglas correspondientes.
+4. Conectar búsqueda y escaneo con errores coherentes; comprobar cierre simultáneo, cantidades excedidas y duplicados antes de dar el flujo por validado.
+5. Mantener pendientes la prueba manual del script sin argumento, cierre por señal y rotación de credencial; no marcarlos como completados sin evidencia.
+6. Retomar la reunión sobre acceso a SAP y muestras conectadas a partir de las dudas documentadas. La preparación de esa reunión no depende de terminar toda la aplicación.
