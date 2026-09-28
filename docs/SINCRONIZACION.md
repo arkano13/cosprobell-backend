@@ -1,6 +1,6 @@
 # Sincronización con SAP Business One
 
-Primera versión: carga completa de catálogos (grupos, bodegas y productos con códigos de barras y existencias). Probada con un Service Layer simulado y PostgreSQL real; **todavía no se ejecutó contra el SAP de Cosprobell**.
+Primera versión: carga completa de catálogos (grupos, bodegas y productos con códigos de barras y existencias). Validada contra los metadatos y las muestras reales del ZIP de Cosprobell, y probada con un Service Layer simulado y PostgreSQL real; **todavía no se ejecutó contra el SAP de Cosprobell**.
 
 ## Cómo funciona
 
@@ -23,6 +23,8 @@ SAP B1 ── Service Layer ── sincronizador/ ──HTTPS──► POST /syn
 | `Items` | `productos` | Alta o actualización por `ItemCode` |
 | `ItemBarCodeCollection` | `productos_codigos_barras` | Se reemplaza la colección completa del producto; conserva `uomEntry` (unidad de SAP) sin interpretarla todavía |
 | `ItemWarehouseInfoCollection` | `productos_existencias` | Se reemplaza la colección completa; las bodegas con existencia, comprometido y pedido en cero no se guardan (sin fila = cero) |
+
+Los códigos (`Number`, `WarehouseCode`, `ItemCode`) son obligatorios; los nombres pueden llegar vacíos desde SAP y se guardan como nulos.
 
 El orden es obligatorio: grupos → bodegas → productos. Si un producto referencia una bodega o un grupo que no existe en la base, el lote se rechaza con `DEPENDENCIAS_FALTANTES`; no se inventan bodegas.
 
@@ -63,11 +65,22 @@ Requisitos: Node.js 20.6 o superior, acceso a Service Layer y salida HTTPS hacia
 
 Conviene ejecutar primero el diagnóstico: informa conteos de bodegas, artículos, códigos de barras, unidades y órdenes abiertas, muestra las últimas órdenes y artículos con sus códigos por unidad, y advierte si faltan códigos o no hay órdenes abiertas.
 
+## Validación contra los datos reales de Cosprobell
+
+Contrastado con `response.xml` y las muestras JSON del ZIP (Service Layer v1, SAP B1 10.0 FP 2111):
+
+- Los 26 campos que pide el agente (20 principales y 6 dentro de las colecciones) existen en los metadatos con el tipo esperado. `BoYesNoEnum` es `tNO`/`tYES` y las fechas llegan como `2024-04-25`.
+- Las muestras reales de grupos, bodegas y productos pasan la validación del backend. Filtrar campos reduce los productos de 808 KB a 32 KB.
+- Una bodega real tiene el nombre vacío: por eso los nombres son opcionales.
+- Los catálogos del ZIP están cortados en 20 registros: los productos referencian 80 bodegas y 2 grupos que no vinieron. El agente recorre todas las páginas; con catálogos completos la carga de productos entra entera. Con catálogos incompletos, el backend la rechaza con `DEPENDENCIAS_FALTANTES` en vez de inventar datos.
+- De 498 filas de existencias de los 5 productos, 6 tienen movimiento y se guardan.
+- Los 5 productos usan el grupo de unidades `-1` (Manual): factores de venta y compra 1, sin empaque definido y sin códigos de barras. En ellos SAP no registra hoy una equivalencia entre caja y unidad.
+
 ## Verificación realizada
 
 | Prueba | Resultado |
 |---|---|
-| `npm test` (backend y agente) | 133 aprobadas |
+| `npm test` (backend y agente) | 134 aprobadas |
 | `scripts/comprobar-sincronizacion.js` contra PostgreSQL | 5 de 5: carga, duplicado, envío simultáneo, dependencia faltante, reemplazo de colecciones |
 | Punta a punta: SAP simulado (30 grupos, 100 bodegas, 250 productos) → agente → backend → PostgreSQL | Datos completos; productos divididos en 3 lotes por tamaño; segunda ejecución sin cambios en los datos |
 | Secreto equivocado / contraseña SAP equivocada / configuración incompleta | Errores claros sin revelar secretos |

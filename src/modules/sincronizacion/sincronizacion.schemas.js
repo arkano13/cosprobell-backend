@@ -40,10 +40,12 @@ const fechaSap = z
     return new Date(valor.endsWith("Z") ? valor : `${valor}Z`);
   });
 
+// Los códigos son obligatorios; los nombres pueden llegar vacíos desde SAP
+// (en la muestra real una bodega tiene WarehouseName nulo).
 const grupoSapSchema = z
   .object({
     Number: z.number().int(),
-    GroupName: safeString(1),
+    GroupName: textoOpcional,
   })
   .transform((grupo) => ({
     number: grupo.Number,
@@ -53,7 +55,7 @@ const grupoSapSchema = z
 const bodegaSapSchema = z
   .object({
     WarehouseCode: safeString(1),
-    WarehouseName: safeString(1),
+    WarehouseName: textoOpcional,
     City: textoOpcional,
     Country: textoOpcional,
     Inactive: siNo,
@@ -81,7 +83,7 @@ const codigoBarrasSapSchema = z.object({
 const productoSapSchema = z
   .object({
     ItemCode: safeString(1),
-    ItemName: safeString(1),
+    ItemName: textoOpcional,
     ItemsGroupCode: z.number().int().nullish(),
     BarCode: textoOpcional,
     Valid: siNo,

@@ -1,4 +1,13 @@
 -- AlterTable
+ALTER TABLE "bodegas" ALTER COLUMN "warehouseName" DROP NOT NULL;
+
+-- AlterTable
+ALTER TABLE "grupos_productos" ALTER COLUMN "groupName" DROP NOT NULL;
+
+-- AlterTable
+ALTER TABLE "productos" ALTER COLUMN "itemName" DROP NOT NULL;
+
+-- AlterTable
 ALTER TABLE "productos_codigos_barras" ADD COLUMN     "uomEntry" INTEGER;
 
 -- CreateIndex

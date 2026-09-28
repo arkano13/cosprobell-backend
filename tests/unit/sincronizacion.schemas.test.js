@@ -91,6 +91,24 @@ test("convierte bodegas y normaliza textos vacíos", () => {
   ]);
 });
 
+test("acepta nombres vacíos de SAP pero exige los códigos", () => {
+  const bodegas = loteSchema.safeParse(lote("Warehouses", [bodegaSap({ WarehouseName: null })]));
+  const productos = loteSchema.safeParse(lote("Items", [productoSap({ ItemName: null })]));
+  const grupos = loteSchema.safeParse(lote("ItemGroups", [{ Number: 1, GroupName: null }]));
+
+  assert.equal(bodegas.data.registros[0].warehouseName, null);
+  assert.equal(productos.data.registros[0].producto.itemName, null);
+  assert.equal(grupos.data.registros[0].groupName, null);
+
+  for (const caso of [
+    lote("Warehouses", [bodegaSap({ WarehouseCode: null })]),
+    lote("Items", [productoSap({ ItemCode: null })]),
+    lote("ItemGroups", [{ Number: null, GroupName: "Sin número" }]),
+  ]) {
+    assert.equal(loteSchema.safeParse(caso).success, false, caso.entidad);
+  }
+});
+
 test("convierte productos con existencias y códigos de barras", () => {
   const resultado = loteSchema.safeParse(lote("Items", [productoSap()]));
 

@@ -31,7 +31,7 @@ datasource db {
 
 model GrupoProducto {
   number    Int        @id
-  groupName String
+  groupName String?
   productos Producto[]
 
   @@map("grupos_productos")
@@ -39,7 +39,7 @@ model GrupoProducto {
 
 model Bodega {
   warehouseCode String                @id
-  warehouseName String
+  warehouseName String?
   city          String?
   country       String?
   inactive      Boolean               @default(false)
@@ -83,7 +83,7 @@ model Proveedor {
 
 model Producto {
   itemCode                   String   @id
-  itemName                   String
+  itemName                   String?
   itemsGroupCode             Int?
   grupo                      GrupoProducto? @relation(fields: [itemsGroupCode], references: [number])
   barCode                    String?

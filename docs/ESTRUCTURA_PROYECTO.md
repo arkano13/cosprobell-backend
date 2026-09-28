@@ -74,6 +74,6 @@ node scripts/comprobar-sincronizacion.js
 
 ## Qué verifican las pruebas
 
-`npm test`: 133 pruebas (102 del backend y 31 del agente). Cubren validación, errores, autenticación, picking, contrato de lotes, servicio de sincronización y cliente de Service Layer contra servidores simulados.
+`npm test`: 134 pruebas (103 del backend y 31 del agente). Cubren validación, errores, autenticación, picking, contrato de lotes, servicio de sincronización y cliente de Service Layer contra servidores simulados.
 
 No certifican el SAP real ni el comportamiento bajo carga. La concurrencia de picking y de sincronización se comprueba con los scripts contra PostgreSQL.
