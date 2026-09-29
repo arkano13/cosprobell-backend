@@ -16,7 +16,7 @@ Programa Node.js separado en puente/. Requiere Node 22 o superior (verificado co
 
 ## Instalación y configuración
 
-En el equipo donde se ejecutará el puente debe existir Node 22 o superior, las dependencias del proyecto y acceso de red a SAP y al backend. Este paquete usa puente/ y src/modules/sincronizacion/productos.schemas.js; no copiar únicamente puente/ a otro equipo sin ese contrato y zod. El empaquetado como servicio de Windows se hará después de validar la conexión.
+En el equipo donde se ejecutará el puente debe existir Node 22 o superior, las dependencias del proyecto y acceso de red a SAP y al backend. Este paquete usa puente/ y src/modules/sincronizacion/productos.schemas.js; no copiar únicamente puente/ a otro equipo sin ese contrato y zod. Para instalarlo en Windows sin copiar el proyecto completo: `npm run empaquetar:puente` y la guía `INSTALAR_PUENTE_WINDOWS.md` (tarea programada cada 15 minutos con `--once`).
 
 Copiar .env.puente.example a .env.puente sin sobrescribir una configuración existente. Completar localmente:
 
