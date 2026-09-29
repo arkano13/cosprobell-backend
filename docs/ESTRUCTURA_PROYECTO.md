@@ -104,3 +104,7 @@ puente/ contiene configuración, clientes HTTP SAP/backend, transformación, per
 - docs/PRUEBAS_PEDIDOS_SCANNER.md: alcance, rutas, comandos y casos pendientes de aceptación.
 
 La suite actual tiene 275 pruebas aprobadas. La instalación y las pruebas reales están pendientes; no hay nueva migración en este bloque.
+
+## Pantalla de bodega
+
+`public/bodega/` contiene la pantalla del escáner: HTML, CSS y módulos JavaScript sin compilación (`js/api.js`, `js/lecturas.js`, `js/uuid.js`, `js/iconos.js`, `js/app.js`) y las fuentes en `fuentes/` (SIL OFL 1.1). `src/app.js` la sirve en `/bodega/` antes de la autenticación: los archivos son públicos y los datos se piden con la API key del equipo. `js/lecturas.js` y `js/api.js` no dependen del navegador y se prueban con `node --test`. Guía de uso en `PANTALLA_BODEGA.md`; datos ficticios con `scripts/datos-demo-bodega.js`.

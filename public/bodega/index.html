@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#362f44">
+  <meta name="color-scheme" content="light">
+  <link rel="preload" href="fuentes/barlow-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fuentes/barlow-condensed-latin-800-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <title>Bodega · Cosprobell</title>
+  <link rel="stylesheet" href="estilos.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <header class="barra">
+    <button id="btn-inicio" class="barra__titulo" type="button">
+      <span class="barra__logo"><span data-icono="escaner"></span></span>
+      <span class="barra__nombre">Bodega <span class="barra__empresa">Cosprobell</span></span>
+    </button>
+    <span id="estado-conexion" class="chip chip--alerta" hidden><span data-icono="sinRed"></span>Sin conexión</span>
+    <span id="operador" class="barra__operador" hidden></span>
+    <button id="btn-menu" class="boton boton--barra" type="button"><span data-icono="menu"></span>Menú</button>
+  </header>
+  <main id="vista" class="contenido">
+    <p class="cargando">Cargando…</p>
+  </main>
+  <dialog id="dialogo" class="dialogo"></dialog>
+  <noscript><p class="aviso aviso--error contenido">Esta pantalla necesita JavaScript activado.</p></noscript>
+</body>
+</html>

@@ -492,3 +492,28 @@ El puente muestra ahora el código de error del backend (`detalle.codigoBackend`
 **Confirmación de etiquetas.** Nuevo módulo `src/modules/etiquetas`: `GET /etiquetas` (pendientes, confirmadas o todas, con estado `sin_confirmar`, `desactualizada`, `unidad_individual` o `no_es_unidad`) y `PUT`/`DELETE /etiquetas/:id/confirmacion`. Confirmar bloquea la fila del código durante la transacción y guarda la foto actual, la hora y la aplicación (`confirmadaPor`). Solo pueden confirmar las API keys listadas en `ETIQUETAS_APPS_AUTORIZADAS`; sin configurar, la función queda cerrada. No se confirma como unidad un código con unidad Manual o sin unidad.
 
 Recorrido completo con PostgreSQL y SAP simulado: códigos y pedidos importados por el puente → el supervisor confirmó un código (el escáner recibió 403) → se inició el picking de un pedido abierto → el código confirmado sumó 1 unidad, uno sin confirmar respondió `ETIQUETA_SIN_CONFIRMAR` y uno retirado en SAP no se encontró → al cambiar el código en SAP, la etiqueta volvió a pendientes como `desactualizada` y el escaneo respondió `CONFIRMACION_DESACTUALIZADA`. 301 pruebas aprobadas.
+
+
+## 21. Pantalla de bodega
+
+Página web servida por el backend en `/bodega/` (archivos en `public/bodega/`, sin compilación). Funciona en PC con lector USB y en Android con lector integrado. Flujo: configurar el equipo (API key y nombre del operador, guardados en el navegador), pedidos abiertos, detalle con diagnóstico de preparación, escaneo con resultado grande en verde o rojo, sonido y vibración, historial de lecturas y finalización con o sin diferencias. El detalle de pedido agrega el nombre de cada producto (`pedidosRepository.obtener`).
+
+Lecturas: cola en orden, de a una; cada lectura recibe su `operacionId` al escanearse y lo conserva en los reintentos. Sin respuesta se reintenta con el mismo identificador; sin red se guarda en el equipo y se envía al volver la conexión o tras recargar la página. El foco vuelve de inmediato al campo de lectura para que el Enter del lector no active un botón. `crypto.randomUUID` no se usa porque no existe en HTTP de red interna.
+
+Verificación: 310 pruebas (incluye cola, cliente de la API y servicio estático). Prueba en Chromium real contra PostgreSQL con `scripts/datos-demo-bodega.js`: lecturas válidas y rechazadas, respuesta perdida sin doble conteo, corte de red, recarga con lecturas pendientes, exceso, historial, vista de celular y finalización con diferencias, sin errores de página ni de CSP. La prueba encontró y se corrigieron: el mensaje de error que no llegaba a la pantalla, el foco que tardaba en volver y elementos que el estilo mostraba aunque estuvieran ocultos. No probado con lector físico ni equipos Android reales.
+
+### 2026-09-29 — Rediseño morado de la pantalla
+
+Nuevo diseño a pedido de Cosprobell, con el morado de referencia **#362F44** (medido de la imagen enviada) en la barra superior y violeta **#5B3FA0** en las acciones. Íconos SVG (Lucide, ISC) en lugar de los caracteres ✓/✗; el resultado de cada lectura ocupa un recuadro sólido verde o rojo con ícono y un destello breve, para notar dos rechazos iguales seguidos. En PC la lectura queda fija a la izquierda y las líneas a la derecha; en celular, el botón de teclado es solo ícono y en PC con mouse no aparece. Sin cambios de funcionamiento ni de API.
+
+Verificación: 310 pruebas; prueba completa en Chromium (PC 1280 px y celular 375 px) y auditoría axe-core WCAG 2.2 A/AA de todas las vistas, sin problemas detectados. Contrastes calculados: texto blanco sobre la barra 12.7:1, sobre los botones 7.9:1, texto secundario 6.2:1.
+
+### 2026-09-29 — Identidad "etiqueta de despacho"
+
+El primer rediseño se sentía genérico. Se le dio identidad propia a partir del trabajo en bodega: tinta morada sobre papel con sombras sólidas, pedidos como etiquetas de envío (perforado y código de barras decorativo), panel oscuro del lector con indicador de foco, una casilla por unidad, sellos "Listo", "Completo" y "Con faltantes", y cinta de advertencia en las alertas. Tipografías Barlow, Barlow Condensed y JetBrains Mono alojadas en el servidor (SIL OFL 1.1, unos 200 KB). No se encontró un logo ni colores oficiales publicados de Cosprobell; se mantiene el morado de referencia enviado.
+
+Verificación: 310 pruebas; prueba completa en Chromium (PC y celular) y auditoría axe-core WCAG 2.2 A/AA de todas las vistas, sin problemas detectados.
+
+### 2026-09-29 — Tono formal
+
+A pedido de Cosprobell, la identidad se llevó a un tono más serio: se quitaron los sellos rotados, las sombras sólidas desplazadas, la trama de puntos, las muescas y el código de barras decorativo de las tarjetas y la cinta de advertencia. Se conservan el morado, el panel oscuro del lector, las letras y las casillas por unidad. El cierre pasa a ser un resumen con estado, unidades preparadas, líneas completas, operador y horas de inicio y fin. Verificación: 310 pruebas, prueba completa en Chromium y auditoría axe-core sin problemas.

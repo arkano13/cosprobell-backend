@@ -107,6 +107,6 @@ Revisar el log de las tres entidades y consultar `GET /integracion/pedidos/estad
 
 ## Límites que siguen abiertos
 
-La pantalla de bodega aún no forma parte de este backend. Falta completar la importación de asociaciones de códigos/unidades para un catálogo real y su proceso de confirmación. También quedan pendientes la política de datos desactualizados, revisión supervisada, entregas parciales y validación final del despacho.
+La pantalla de bodega se sirve en `/bodega/` (ver PANTALLA_BODEGA.md). Los códigos de barras y unidades se importan de SAP y se confirman con `/etiquetas`. Quedan pendientes la política de datos desactualizados, revisión supervisada, entregas parciales y validación final del despacho.
 
 Se recorren solo los pedidos abiertos, uno por solicitud, más una consulta por clave por cada pedido que se cerró o canceló desde el recorrido anterior. En la prueba simulada, con 20 pedidos históricos cerrados y 10 abiertos, el primer ciclo hizo 11 consultas de listado y ninguna por clave; el historial no se consulta. Medir duración y volumen de pedidos abiertos antes de fijar el intervalo definitivo. Un pedido de más de 1000 líneas, un estado desconocido o un cliente ausente detiene ese avance con error; no se omite silenciosamente. La proyección `DocumentLines` y su entrega completa deben confirmarse en el Service Layer instalado.
