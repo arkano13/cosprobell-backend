@@ -56,9 +56,11 @@ Crea la carpeta `dist\puente-cosprobell` con el puente, sus contratos, `zod` y l
    | Resultado | Qué hacer |
    |---|---|
    | `Confiable aquí: sí` | Nada |
-   | `DEPTH_ZERO_SELF_SIGNED_CERT` y `Guardado: certificado/service-layer.pem` | Nada más: `ejecutar-puente.cmd` usa ese archivo |
-   | `Falta la raíz` | Pedir a sistemas el certificado de esa autoridad y guardarlo como `certificado\service-layer.pem` |
+   | Certificado autofirmado o autoridad desconocida | Pedir a sistemas el certificado/CA aprobado o confirmar su huella SHA-256 por un canal independiente. El script no guarda ni instala certificados |
+   | Cadena de confianza pendiente | Instalar en `certificado\service-layer.pem` únicamente el PEM aprobado por sistemas |
    | `ERR_TLS_CERT_ALTNAME_INVALID` | Usar en `SAP_SERVICE_LAYER_URL` uno de los "Nombres válidos" |
+
+   Si una versión anterior del diagnóstico guardó un certificado automáticamente, confirmar su procedencia con sistemas antes de usarlo. La existencia del archivo no demuestra que sea confiable.
 
    Nunca desactivar la validación TLS: el puente se niega a arrancar con `NODE_TLS_REJECT_UNAUTHORIZED=0`.
 
@@ -107,7 +109,7 @@ Sin el script, desde el Programador de tareas: Crear tarea → "Ejecutar tanto s
 
 ## 6. Actualizar a una versión nueva
 
-1. `.\desinstalar-tarea.cmd` (o deshabilitar la tarea) y esperar a que no haya un ciclo en curso.
+1. `.\desinstalar-tarea.cmd` (o deshabilitar la tarea) y esperar a que no haya un ciclo en curso. No ejecutar versiones antiguas y nuevas simultáneamente: las antiguas no respetan la guardia de recuperación.
 2. Reemplazar los archivos con los del paquete nuevo, **conservando** `.env.puente`, `.bridge-state\`, `certificado\` y `logs\`.
 3. `.\ejecutar-puente.cmd` una vez y revisar el registro.
 4. `instalar-tarea.cmd` como administrador.
@@ -125,7 +127,7 @@ Cada error aparece en el registro como `{"evento":"fallo","entidad":...,"codigo"
 | `HTTP_403` | `SAP_COMPANY_DB` distinta de la configurada en el backend | Igualar la empresa en ambos lados |
 | `HTTP_503` | El backend no tiene configurado el puente | Configurar `SAP_COMPANY_DB` y `BRIDGE_API_KEY` en el backend |
 | `CLIENTE_SAP_INVALIDO`, `PRODUCTO_SAP_INVALIDO` | Un registro de SAP no cumple el contrato; `detalle` indica código y campo | Corregir ese dato en SAP; las demás entidades siguen sincronizándose |
-| `PUENTE_YA_BLOQUEADO` | Otro ciclo en curso, o candado sin PID | Esperar; si persiste y no hay otro `node` del puente, borrar solo `.bridge-state\ejecucion.lock` |
+| `PUENTE_YA_BLOQUEADO` | Otro ciclo en curso, candado incompleto o guardia de recuperación abandonada | Deshabilitar la tarea y verificar que no hay procesos del puente. Solo entonces retirar `ejecucion.lock.guard` y, si corresponde, `ejecucion.lock`. Conservar todos los JSON de avance |
 | `REQUIERE_RECONCILIACION` | El avance local no coincide con el del backend (se borró `.bridge-state` o se restauró la base) | No borrar nada más: revisar ambos lados antes de continuar |
 | `inicio_fallido` / `REVISAR_CONFIGURACION` | Falta una variable o tiene un valor inválido | Revisar `.env.puente` |
 

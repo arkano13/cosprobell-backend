@@ -67,9 +67,12 @@ Cada página se valida y se guarda como lote pendiente ANTES de enviar. Si se pi
 
 El archivo se vincula a empresa, URL SAP y URL backend, sin guardar contraseñas ni cookies. Al arrancar se compara la secuencia local con la remota; discrepancias inesperadas requieren reconciliación. No borrar el archivo para forzar el inicio ni adoptar automáticamente la secuencia remota. Si se cambia la dirección, restauran bases o pierde estado, detener y revisar ambos extremos.
 
-ejecucion.lock contiene un archivo pid con el proceso que lo tomó. Ante interrupción normal se retira. Si una terminación forzada o un apagón lo deja, la siguiente ejecución comprueba ese PID: si el proceso ya no existe, aparta el candado huérfano (renombrado atómico con verificación) y continúa sin intervención. Si el proceso existe, responde PUENTE_YA_BLOQUEADO.
+ejecucion.lock contiene pid y token de adquisición. candado.js serializa su creación, recuperación y liberación mediante una carpeta ejecucion.lock.guard creada atómicamente. Ninguna ejecución que use esta versión modifica el candado sin esa guardia. El cierre comprueba PID y token y es idempotente, para no retirar una adquisición posterior del mismo proceso.
 
-Casos que siguen requiriendo al administrador, todos poco frecuentes: un candado sin archivo pid (versión anterior del puente o corte justo entre crear la carpeta y escribir el PID) y un PID reutilizado por otro programa después de reiniciar el equipo. En ambos, verificar que no haya otro proceso del puente y retirar ÚNICAMENTE ejecucion.lock; conservar productos.json. `node scripts/comprobar-candado-puente.js` comprueba con procesos reales el cierre forzado y varias recuperaciones simultáneas; conviene ejecutarlo una vez en el equipo Windows del puente. El registro como servicio y el reinicio supervisado quedan para endurecimiento de despliegue.
+Si un proceso termina durante la sincronización, la siguiente ejecución recupera su candado cuando confirma que el PID ya no existe. Un candado sin PID válido, un PID reutilizado o un apagón DURANTE la operación de guardia requieren revisión manual. La guardia no se recupera automáticamente porque se reintroduciría la misma carrera. Ante esos casos: deshabilitar la tarea, comprobar que no hay procesos del puente y retirar únicamente los candados necesarios; conservar clientes.json y productos.json. No ejecutar versiones antiguas y nuevas al mismo tiempo.
+
+La suite incluye una regresión determinista con tres intentos y recuperación pausada, además de token de propiedad, guardia abandonada y errores de disco. La comprobación con procesos reales de Windows aprobó cierre forzado y 10 rondas de 6 procesos. La instalación de la tarea en el servidor de Cosprobell sigue pendiente.
+
 
 Errores de conexión y HTTP 408/429/500/502/503/504 se reintentan en modo periódico con espera creciente hasta 60 segundos. Errores de datos, credenciales, configuración, disco o conflictos detienen el proceso con código de salida 1. Un producto que no cumple el contrato se informa con su código y el campo SAP, sin el valor: `{"evento":"fallo","codigo":"PRODUCTO_SAP_INVALIDO","temporal":false,"detalle":{"itemCode":"A-100","campo":"ItemName"}}`. Hay que corregirlo en SAP; mientras tanto, los productos posteriores de ese recorrido no se actualizan. No se imprimen respuestas remotas, cookies ni credenciales. Los errores de conexión/certificado se agrupan como CONEXION_O_TLS y requieren diagnóstico del administrador si persisten. No hay alertas externas ni rotación de registros configuradas aún.
 
@@ -84,3 +87,10 @@ Conservar el estado en disco evita pérdidas comunes por reinicio, pero no susti
 217/217 pruebas automatizadas aprobadas. Incluyen configuración, detalle del producto inválido, recuperación del candado huérfano, forma exacta de la consulta, transformación, estado persistente, candado, archivo corrupto, fallo de disco antes del envío, recuperación tras respuesta perdida, sesión SAP vencida, escape OData, confirmación incorrecta y recorrido HTTP con servidores locales simulados. No se contactó SAP ni se usaron credenciales reales.
 
 Referencia de sesiones: [guía oficial SAP](https://help.sap.com/doc/fc2f5477516c404c8bf9ad1315a17238/10.0/en-US/Working_with_SAP_Business_One_Service_Layer.pdf). Se usa el flujo clásico Login/B1SESSION disponible en la versión acordada; no se incorporan funciones recientes como webhooks.
+
+
+## Diagnóstico del certificado actualizado
+
+scripts/ver-certificado.js solo muestra identidad, estado de validación y huella SHA-256. No guarda ni sobrescribe archivos de confianza. La CA/certificado debe obtenerse o confirmarse con sistemas antes de colocarlo en certificado/service-layer.pem. No confiar automáticamente en archivos guardados por versiones anteriores del diagnóstico.
+
+Verificación posterior a estas correcciones: 237/237 pruebas aprobadas. No se contactó SAP ni se cambió la confianza TLS del entorno.

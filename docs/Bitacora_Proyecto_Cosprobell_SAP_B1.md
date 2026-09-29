@@ -446,3 +446,14 @@ El emisor recorre clientes y luego productos en cada ciclo, con un archivo de es
 **Instalación.** `npm run empaquetar:puente` arma una carpeta autónoma; `ejecutar-puente.cmd` aplica el certificado de `certificado\service-layer.pem`, guarda registros diarios y conserva 30 días; `instalar-tarea.cmd` programa `--once` cada 15 minutos con `schtasks`. Se comprobó que `NODE_EXTRA_CA_CERTS` dentro de `--env-file` no tiene efecto en Node 22: debe definirse en el entorno antes de iniciar Node. `scripts/ver-certificado.js` lee el certificado del Service Layer configurado y guarda la raíz.
 
 **Verificación.** 232 pruebas; comprobación real del receptor; punta a punta con PostgreSQL y Service Layer simulado (65 clientes y 75 productos, proveedores excluidos, un cliente inválido identificado sin frenar productos); el paquete copiado fuera del proyecto sincronizó ambas entidades y pasó la comprobación del candado. Los `.cmd` no se ejecutaron en Windows. Pendiente: pedidos abiertos con sus líneas, códigos de barras con unidad, bodegas y existencias.
+
+
+## Corrección de concurrencia del candado y diagnóstico TLS
+
+El usuario pidió continuar sin depender del encargado de SAP. Se corrigió directamente el checkout, conservando el cambio preexistente en package-lock.json. Nuevo módulo puente/candado.js: guardia atómica durante creación/recuperación/liberación, PID y token de propiedad por adquisición, cierre idempotente y tratamiento conservador de errores. estado.js conserva la persistencia de lotes y delega el candado.
+
+Una regresión determinista pausa la recuperación mientras otros dos intentos compiten y comprueba que ninguno puede entrar. Suite completa: 237/237 aprobadas. Script de procesos reales ejecutado en Windows: recuperación tras cierre forzado y 10 rondas con 6 procesos aprobadas. La carpeta temporal se eliminó.
+
+Límite explícito: si hay apagón mientras se mantiene ejecucion.lock.guard, se requiere deshabilitar la tarea y verificar ausencia de procesos antes de retirar la guardia. No se intenta recuperarla automáticamente. Conservar archivos JSON. Desplegar sin procesos de versiones anteriores ejecutándose.
+
+scripts/ver-certificado.js ahora es exclusivamente diagnóstico: muestra huella SHA-256 sin instalar ni sobrescribir confianza. Prueba con TLS simulado confirma conservación de un PEM existente. No se contactó SAP, no se utilizaron credenciales y no se registró una tarea en el servidor. El certificado aprobado sigue pendiente del administrador.

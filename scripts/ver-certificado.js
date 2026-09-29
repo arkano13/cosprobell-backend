@@ -1,10 +1,8 @@
-// Muestra el certificado del Service Layer configurado en SAP_SERVICE_LAYER_URL y, si encuentra la raíz,
-// la guarda en certificado/service-layer.pem para que ejecutar-puente.cmd la use.
+// Inspecciona el certificado de Service Layer sin instalarlo ni modificar la confianza.
 // Solo lee el certificado: no inicia sesión en SAP ni envía usuario o contraseña.
 // Uso: node --env-file=.env.puente scripts/ver-certificado.js
 import tls from "node:tls";
 import net from "node:net";
-import { mkdirSync, writeFileSync } from "node:fs";
 
 let url;
 try { url = new URL(process.env.SAP_SERVICE_LAYER_URL); } catch {
@@ -24,16 +22,9 @@ const socket = tls.connect({ host, port, servername: net.isIP(host) ? undefined 
   console.log("Vence:            ", cert.valid_to);
   console.log("Confiable aquí:   ", socket.authorized ? "sí" : `no (${socket.authorizationError})`);
 
-  let raiz = cert;
-  while (raiz.issuerCertificate && raiz.issuerCertificate !== raiz) raiz = raiz.issuerCertificate;
-  if (raiz.issuerCertificate === raiz) {
-    const base64 = raiz.raw.toString("base64").match(/.{1,64}/g).join("\n");
-    mkdirSync("certificado", { recursive: true });
-    writeFileSync("certificado/service-layer.pem", `-----BEGIN CERTIFICATE-----\n${base64}\n-----END CERTIFICATE-----\n`);
-    console.log("Guardado:          certificado/service-layer.pem (raíz:", raiz.subject?.CN + ")");
-  } else {
-    console.log(`Falta la raíz: pedir a sistemas el certificado de "${raiz.issuer?.CN}" y guardarlo como certificado/service-layer.pem.`);
-  }
+  console.log("Huella SHA-256:   ", cert.fingerprint256 ?? "(no disponible)");
+  console.log("Solo diagnóstico: no se guardó ni se instaló ningún certificado.");
+  console.log("Pedir a sistemas la cadena de confianza o confirmar la huella por un canal independiente.");
   socket.end();
 });
 socket.setTimeout(15000, () => { console.error("Sin respuesta del servidor en 15 segundos."); socket.destroy(); process.exitCode = 1; });
