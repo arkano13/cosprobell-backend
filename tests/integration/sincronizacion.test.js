@@ -7,8 +7,10 @@ process.env.SAP_COMPANY_DB = "XPRUEBAS2026";
 const { default: app } = await import("../../src/app.js");
 const { logger } = await import("../../src/infrastructure/logging/logger.js");
 const { prisma } = await import("../../src/infrastructure/database/prisma.js");
-const { sincronizacionProductosRepository: repo } = await import("../../src/modules/sincronizacion/productos.repository.js");
-const { recibirProductos, consultarEstadoProductos } = await import("../../src/modules/sincronizacion/productos.service.js");
+const { sincronizacionRepository: repo } = await import("../../src/modules/sincronizacion/sincronizacion.repository.js");
+const { recibirLote, consultarEstadoLote } = await import("../../src/modules/sincronizacion/sincronizacion.service.js");
+const recibirProductos = (lote, empresa) => recibirLote("productos", lote, empresa);
+const consultarEstadoProductos = (empresa) => consultarEstadoLote("productos", empresa);
 const { crearAutenticacionPuente } = await import("../../src/middleware/bridgeAuth.js");
 logger.level = "silent";
 let server, url;
@@ -24,6 +26,7 @@ function preparar(t) {
     try { return await fn(tx); } catch (e) { productos.clear(); for (const [k,v] of copia) productos.set(k,v); estado = anterior; throw e; }
   });
   t.mock.method(repo, "consultarEstado", async () => estado);
+  t.mock.method(repo, "existeOtraEmpresa", async () => false);
   t.mock.method(repo, "guardarProducto", async (p, db) => { assert.equal(db, tx); escrituras++; productos.set(p.itemCode, { ...p }); });
   t.mock.method(repo, "guardarEstado", async (e, db) => { assert.equal(db, tx); estado = { ...e, actualizadoEn: new Date() }; });
   return { productos, estado: () => estado, escrituras: () => escrituras };
@@ -118,3 +121,47 @@ for (const [nombre, body, status, code] of [
     assert.equal(r.status, status); assert.equal((await r.json()).error.code, code);
   });
 }
+
+const cliente = { cardCode: "C0001", cardName: "Cliente de prueba", valid: true, frozen: false };
+const loteClientes = (extra = {}) => ({ version: 1, empresa, secuencia: 1, clientes: [{ ...cliente }], ...extra });
+const enviarA = (entidad, body) => fetch(`${url}/integracion/${entidad}`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.BRIDGE_API_KEY}` }, body: JSON.stringify(body) });
+function prepararClientes(t) {
+  const f = preparar(t); const clientes = new Map();
+  t.mock.method(repo, "guardarCliente", async (c) => { clientes.set(c.cardCode, { ...c }); });
+  return { ...f, clientes };
+}
+test("HTTP recibe clientes con su propia secuencia y reintento sin duplicar", async (t) => {
+  const f = prepararClientes(t);
+  const r = await enviarA("clientes", loteClientes()); assert.equal(r.status, 200);
+  assert.deepEqual(await r.json(), { data: { secuencia: 1, recibidos: 1, repetido: false } });
+  assert.equal((await (await enviarA("clientes", loteClientes())).json()).data.repetido, true);
+  assert.deepEqual(f.clientes.get("C0001"), cliente); assert.equal(f.estado().entidad, "clientes");
+  const estado = await fetch(`${url}/integracion/clientes/estado`, { headers: { Authorization: `Bearer ${process.env.BRIDGE_API_KEY}` } });
+  assert.equal((await estado.json()).data.ultimaSecuencia, 1);
+});
+for (const [nombre, cambio] of [
+  ["cliente repetido", { clientes: [cliente, cliente] }],
+  ["campos de otra entidad", { clientes: [{ ...cliente, itemCode: "P1" }] }],
+  ["nombre vacío", { clientes: [{ ...cliente, cardName: "  " }] }],
+  ["código con espacios", { clientes: [{ ...cliente, cardCode: " C0001" }] }],
+  ["lote con productos", { clientes: undefined, productos: [producto] }],
+]) {
+  test(`HTTP rechaza clientes: ${nombre}`, async (t) => {
+    const f = prepararClientes(t); assert.equal((await enviarA("clientes", loteClientes(cambio))).status, 400); assert.equal(f.clientes.size, 0);
+  });
+}
+test("una base vinculada a otra empresa rechaza cualquier entidad", async (t) => {
+  prepararClientes(t); t.mock.method(repo, "existeOtraEmpresa", async () => true);
+  await assert.rejects(recibirLote("clientes", loteClientes(), empresa), { code: "ORIGEN_INCOMPATIBLE" });
+  await assert.rejects(consultarEstadoLote("clientes", empresa), { code: "ORIGEN_INCOMPATIBLE" });
+});
+test("entidad sin contrato no tiene ruta y el servicio la rechaza", async (t) => {
+  prepararClientes(t);
+  assert.equal((await enviarA("pedidos", { version: 1 })).status, 404);
+  await assert.rejects(recibirLote("constructor", loteClientes(), empresa), { code: "ENTIDAD_DESCONOCIDA" });
+});
+test("repositorio de clientes solo actualiza campos del contrato", async () => {
+  let consulta; await repo.guardarCliente(cliente, { cliente: { upsert: async (args) => { consulta = args; } } });
+  assert.deepEqual(Object.keys(consulta.update).sort(), [...Object.keys(cliente), "sincronizadoEn"].sort());
+  assert.deepEqual(consulta.where, { cardCode: "C0001" });
+});

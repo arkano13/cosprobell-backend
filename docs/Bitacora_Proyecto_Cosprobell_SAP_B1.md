@@ -435,3 +435,14 @@ Revisión del commit 7f7f814 con PostgreSQL real y un Service Layer simulado (12
 - Consulta a Service Layer: `$` literal, espacios `%20` y `Prefer: odata.maxpagesize=50`. URLSearchParams enviaba `%24select` y `+`, forma no confirmada con el SAP real; sin Prefer las páginas eran de 20.
 
 Suite: **217 de 217 aprobadas**. No se conectó a SAP ni se aplicaron migraciones fuera de bases temporales, que se eliminaron junto con las muestras del ZIP. Pendiente sin cambios: reconciliación asistida cuando la secuencia local y la remota no coinciden, carga incremental, códigos adicionales, unidades, existencias y pedidos.
+
+
+## 19. Clientes y paquete del puente para Windows
+
+**Clientes.** El receptor pasó a ser genérico por entidad (`sincronizacion.service/repository/controller`, `lote.schemas.js`) con rutas fijas `/integracion/productos` y `/integracion/clientes`; cada entidad lleva su propia secuencia y la base admite una sola empresa SAP para todas. Contrato mínimo de clientes: `cardCode`, `cardName`, `valid`, `frozen`, desde `BusinessPartners` con `CardType eq 'cCustomer'` (campos y valores verificados en `response.xml` y en las 5 muestras del ZIP). Saldos, contactos y datos personales quedan fuera hasta que una función los requiera. Motivo del orden: los pedidos (próximo contrato) exigen un cliente existente.
+
+El emisor recorre clientes y luego productos en cada ciclo, con un archivo de estado por entidad y un solo candado. Un error de datos en una entidad se registra con su código y campo y no frena a las demás; un error de conexión corta el ciclo. Sin migraciones nuevas.
+
+**Instalación.** `npm run empaquetar:puente` arma una carpeta autónoma; `ejecutar-puente.cmd` aplica el certificado de `certificado\service-layer.pem`, guarda registros diarios y conserva 30 días; `instalar-tarea.cmd` programa `--once` cada 15 minutos con `schtasks`. Se comprobó que `NODE_EXTRA_CA_CERTS` dentro de `--env-file` no tiene efecto en Node 22: debe definirse en el entorno antes de iniciar Node. `scripts/ver-certificado.js` lee el certificado del Service Layer configurado y guarda la raíz.
+
+**Verificación.** 232 pruebas; comprobación real del receptor; punta a punta con PostgreSQL y Service Layer simulado (65 clientes y 75 productos, proveedores excluidos, un cliente inválido identificado sin frenar productos); el paquete copiado fuera del proyecto sincronizó ambas entidades y pasó la comprobación del candado. Los `.cmd` no se ejecutaron en Windows. Pendiente: pedidos abiertos con sus líneas, códigos de barras con unidad, bodegas y existencias.

@@ -89,3 +89,7 @@ La tabla sincronizacion_estados y el bloqueo transaccional permiten guardar cat�
 ## Emisor de productos
 
 puente/ contiene configuración, clientes HTTP SAP/backend, transformación, persistencia local y coordinación del envío. Se ejecuta separado del servidor Express y no necesita conexión PostgreSQL. Comparte el contrato de productos del receptor. puente/ejecutar.js ofrece --once y --watch; el segundo no instala un servicio de Windows. Configuración y límites en PUENTE_PRODUCTOS.md. Verificación en copia preparada: 211 pruebas aprobadas, sin conexión real con SAP. Mejoras posteriores (detalle del producto inválido, candado con PID y consulta con página de 50): 217 pruebas y `scripts/comprobar-candado-puente.js` con procesos reales.
+
+## Instalación del puente en Windows
+
+`npm run empaquetar:puente` arma `dist/puente-cosprobell` (ignorado por Git): puente, contratos `*.schemas.js`, zod, scripts de Windows (`puente/windows/*.cmd`) y `scripts/ver-certificado.js`. El paquete se comprueba solo al armarse (carga sin el resto del proyecto). Pasos en `INSTALAR_PUENTE_WINDOWS.md`. Los `.cmd` se guardan con CRLF (`.gitattributes`).
