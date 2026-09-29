@@ -40,6 +40,8 @@ function hace(fechaIso) {
 }
 // Las fechas de SAP son de calendario (sin hora): se muestran en UTC para no correrse un día.
 const fecha = (iso) => (iso ? new Date(iso).toLocaleDateString("es-HN", { timeZone: "UTC" }) : "—");
+// Las horas de la preparación sí son momentos exactos: se muestran en la hora del equipo.
+const fechaHora = (iso) => new Date(iso).toLocaleString("es-HN", { dateStyle: "short", timeStyle: "short" });
 const pendientesTexto = (n) => (n === 0 ? "Todas las líneas completas" : n === 1 ? "1 línea pendiente" : `${n} líneas pendientes`);
 const cantidad = (valor) => (Number.isFinite(Number(valor)) ? Number(valor).toLocaleString("es-HN") : "—");
 // Aviso (no bloqueo) cuando los datos del pedido tienen más de una hora: la regla definitiva está pendiente.
@@ -224,13 +226,13 @@ async function vistaPedidos() {
     const visibles = pedidos.filter((p) => !filtro || String(p.docNum).includes(filtro) || (p.cliente?.cardName ?? "").toLowerCase().includes(filtro));
     lista.replaceChildren(...visibles.map((p) => h("li", {},
       h("button", { class: "pedido", type: "button", onclick: () => vistaPedido(p.docEntry) },
-        h("div", { class: "pedido__numero" }, h("span", { class: "rotulo" }, "Pedido"), " ", String(p.docNum)),
-        icono("siguiente", "icono pedido__flecha"),
-        h("div", { class: "pedido__corte", "aria-hidden": "true" }),
-        h("div", { class: "pedido__cliente" }, p.cliente?.cardName ?? p.cardCode),
-        h("div", { class: "pedido__meta" }, `Fecha ${fecha(p.docDate)} · Entrega ${fecha(p.docDueDate)}`),
-        h("div", { class: "pedido__meta" }, `Datos de SAP ${hace(p.sincronizadoEn)}`),
-        h("span", { class: "pedido__barras", "aria-hidden": "true" })))));
+        h("div", { class: "pedido__cabeza" },
+          h("div", { class: "pedido__numero" }, h("span", { class: "rotulo" }, "Pedido"), " ", String(p.docNum)),
+          icono("siguiente", "icono pedido__flecha")),
+        h("div", { class: "pedido__cuerpo" },
+          h("div", { class: "pedido__cliente" }, p.cliente?.cardName ?? p.cardCode),
+          h("div", { class: "pedido__meta" }, `Fecha ${fecha(p.docDate)} · Entrega ${fecha(p.docDueDate)}`),
+          h("div", { class: "pedido__meta" }, `Datos de SAP ${hace(p.sincronizadoEn)}`))))));
     contador.textContent = `${pedidos.length}${cursor === null ? "" : "+"}`;
     contador.setAttribute("aria-label", `${contador.textContent} pedidos cargados`);
     vacio.textContent = pedidos.length ? (visibles.length ? "" : "Ningún pedido coincide con la búsqueda.") : "No hay pedidos abiertos.";
@@ -276,7 +278,7 @@ function tarjetaLinea(linea, nombre, { pedida, escaneada = null, reciente = fals
       [nombre.uomCode && `Unidad ${nombre.uomCode}`, nombre.warehouseCode && `Bodega ${nombre.warehouseCode}`].filter(Boolean).join(" · ")),
     h("div", { class: "linea__cantidad" },
       escaneada === null ? cantidad(pedida) : [cantidad(escaneada), h("span", { class: "linea__total" }, ` / ${cantidad(pedida)}`)],
-      completa ? h("small", { class: "sello" }, "Listo")
+      completa ? h("span", { class: "insignia insignia--ok" }, icono("completa"), "Completa")
         : h("small", {}, escaneada === null ? "a preparar" : `faltan ${cantidad(pedida - escaneada)}`)),
     casillas);
 }
@@ -540,11 +542,25 @@ function vistaResumen(sesion, pedido) {
   const lineasPedido = new Map(pedido.lineas.map((l) => [l.lineNum, l]));
   const faltantes = sesion.lineas.filter((l) => l.cantidadEscaneada < l.cantidadPedida);
   const completo = sesion.estado === "completo";
+  const pedidas = sesion.lineas.reduce((s, l) => s + l.cantidadPedida, 0);
+  const preparadas = sesion.lineas.reduce((s, l) => s + Math.min(l.cantidadEscaneada, l.cantidadPedida), 0);
+  const dato = (titulo, valor, cifra = false) => h("div", {}, h("dt", {}, titulo), h("dd", { class: cifra ? "datos__cifra" : null }, valor));
   mostrar(
-    h("div", { class: "encabezado" }, tituloPedido(pedido.docNum)),
-    h("div", { class: `tarjeta cierre ${completo ? "cierre--completo" : "cierre--diferencias"}` },
-      h("div", { class: "sello", "aria-hidden": "true" }, completo ? "Completo" : "Con faltantes"),
-      h("p", {}, completo ? "Preparación completa." : "Preparación finalizada con diferencias.")),
+    h("div", { class: "encabezado" }, h("div", {}, tituloPedido(pedido.docNum),
+      h("div", { class: "encabezado__sub" }, pedido.cliente?.cardName ?? pedido.cardCode))),
+    h("section", { class: `tarjeta cierre ${completo ? "cierre--completo" : "cierre--diferencias"}`, "aria-label": "Resumen de la preparación" },
+      h("div", { class: "cierre__cabeza" },
+        h("div", { class: "cierre__icono" }, icono(completo ? "aceptada" : "alerta")),
+        h("div", {},
+          h("div", { class: "cierre__estado" }, h("span", { class: "rotulo" }, "Estado de la preparación"),
+            h("span", { class: `insignia ${completo ? "insignia--ok" : "insignia--alerta"}` }, completo ? "Completa" : "Con diferencias")),
+          h("p", { class: "cierre__titulo" }, completo ? "Preparación completa." : "Preparación finalizada con diferencias."))),
+      h("dl", { class: "datos" },
+        dato("Unidades preparadas", `${cantidad(preparadas)} de ${cantidad(pedidas)}`, true),
+        dato("Líneas completas", `${sesion.lineas.length - faltantes.length} de ${sesion.lineas.length}`, true),
+        sesion.usuarioId && dato("Operador", sesion.usuarioId),
+        sesion.fechaInicio && dato("Inicio", fechaHora(sesion.fechaInicio)),
+        sesion.fechaFin && dato("Fin", fechaHora(sesion.fechaFin)))),
     faltantes.length > 0 && h("div", { class: "tarjeta" }, h("h2", {}, "Faltantes"),
       h("ul", { class: "lineas" }, faltantes.map((l) => tarjetaLinea(l.pedidoLineNum,
         { ...lineasPedido.get(l.pedidoLineNum), itemCode: l.itemCode, uomCode: l.uomCode },

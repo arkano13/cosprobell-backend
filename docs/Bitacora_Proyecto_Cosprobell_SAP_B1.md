@@ -513,3 +513,7 @@ Verificación: 310 pruebas; prueba completa en Chromium (PC 1280 px y celular 37
 El primer rediseño se sentía genérico. Se le dio identidad propia a partir del trabajo en bodega: tinta morada sobre papel con sombras sólidas, pedidos como etiquetas de envío (perforado y código de barras decorativo), panel oscuro del lector con indicador de foco, una casilla por unidad, sellos "Listo", "Completo" y "Con faltantes", y cinta de advertencia en las alertas. Tipografías Barlow, Barlow Condensed y JetBrains Mono alojadas en el servidor (SIL OFL 1.1, unos 200 KB). No se encontró un logo ni colores oficiales publicados de Cosprobell; se mantiene el morado de referencia enviado.
 
 Verificación: 310 pruebas; prueba completa en Chromium (PC y celular) y auditoría axe-core WCAG 2.2 A/AA de todas las vistas, sin problemas detectados.
+
+### 2026-09-29 — Tono formal
+
+A pedido de Cosprobell, la identidad se llevó a un tono más serio: se quitaron los sellos rotados, las sombras sólidas desplazadas, la trama de puntos, las muescas y el código de barras decorativo de las tarjetas y la cinta de advertencia. Se conservan el morado, el panel oscuro del lector, las letras y las casillas por unidad. El cierre pasa a ser un resumen con estado, unidades preparadas, líneas completas, operador y horas de inicio y fin. Verificación: 310 pruebas, prueba completa en Chromium y auditoría axe-core sin problemas.
