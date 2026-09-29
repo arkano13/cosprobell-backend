@@ -109,6 +109,15 @@ test("sesión cerrada impide escanear y volver a finalizar", async (t) => {
   assert.equal(mocks.finalizar.mock.callCount(), 0);
 });
 
+test("cambio de SAP bloquea escaneo y finalización sin perder cantidades", async (t) => {
+  const mocks = preparar(t, { sesion: { id: 25, estado: "requiere_revision" } });
+  await assert.rejects(escanearPicking(25, "00123", randomUUID()), errorEsperado("PEDIDO_REQUIERE_REVISION"));
+  await assert.rejects(finalizarPicking(25), errorEsperado("PEDIDO_REQUIERE_REVISION"));
+  assert.equal(mocks.incrementar.mock.callCount(), 0);
+  assert.equal(mocks.finalizar.mock.callCount(), 0);
+  assert.equal(pickingEscaneosRepository.crear.mock.calls[0].arguments[0].resultado, "rechazado");
+});
+
 const rechazos = [
   { nombre: "código desconocido", code: "ETIQUETA_NO_ENCONTRADA", status: 404, preparar: () => ({ productos: [] }) },
   { nombre: "producto ambiguo", code: "CODIGO_AMBIGUO", preparar: () => ({ productos: [producto(), { itemCode: "OTRO", codigosBarras: [] }] }) },

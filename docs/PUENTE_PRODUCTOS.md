@@ -94,3 +94,7 @@ Referencia de sesiones: [guía oficial SAP](https://help.sap.com/doc/fc2f5477516
 scripts/ver-certificado.js solo muestra identidad, estado de validación y huella SHA-256. No guarda ni sobrescribe archivos de confianza. La CA/certificado debe obtenerse o confirmarse con sistemas antes de colocarlo en certificado/service-layer.pem. No confiar automáticamente en archivos guardados por versiones anteriores del diagnóstico.
 
 Verificación posterior a estas correcciones: 237/237 pruebas aprobadas. No se contactó SAP ni se cambió la confianza TLS del entorno.
+
+## Ampliación: pedidos (2026-09-28)
+
+El ciclo actual es clientes -> productos -> pedidos. Orders utiliza un cursor DocEntry numérico y un documento completo por lote; el estado se conserva en pedidos.json. La guía actual de alcance y pruebas está en PRUEBAS_PEDIDOS_SCANNER.md. El código de pedidos está integrado y probado con simulaciones; la compatibilidad con el Service Layer instalado sigue pendiente de la prueba real.

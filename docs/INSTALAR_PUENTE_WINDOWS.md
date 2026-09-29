@@ -1,6 +1,6 @@
 # Instalar y ejecutar el puente en Windows
 
-El puente es un programa pequeño que corre **dentro de la red de Cosprobell**. Cada 15 minutos lee clientes y productos del Service Layer de SAP (solo lectura) y los envía al backend por HTTPS. No abre puertos ni expone SAP a internet.
+El puente es un programa pequeño que corre **dentro de la red de Cosprobell**. Cada 15 minutos lee clientes, productos y pedidos de artículos del Service Layer de SAP (solo lectura) y los envía al backend por HTTPS. No abre puertos ni expone SAP a internet. Antes de programarlo, completar la guía `PRUEBAS_PEDIDOS_SCANNER.md` y medir la duración del recorrido.
 
 ```text
 Red de Cosprobell                                        Internet
@@ -82,6 +82,7 @@ Una ejecución correcta termina así:
 ```json
 {"evento":"ciclo","entidad":"clientes","completo":true,"lotes":2,"ultimaSecuencia":2}
 {"evento":"ciclo","entidad":"productos","completo":true,"lotes":3,"ultimaSecuencia":3}
+{"evento":"ciclo","entidad":"pedidos","completo":true,"lotes":5,"ultimaSecuencia":5}
 {"evento":"fin","codigo":0,"hora":"..."}
 ```
 

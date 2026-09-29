@@ -35,7 +35,9 @@ export async function abrirAlmacen(config, entidad) {
     await guardar(estado);
   }
   if (estado.version !== 1 || estado.origen !== config.origen || !Number.isSafeInteger(estado.secuencia) || estado.secuencia < 0 ||
-      !(estado.cursor === null || typeof estado.cursor === "string")) throw new ErrorPuente("ESTADO_LOCAL_INCOMPATIBLE");
+      !(estado.cursor === null || (entidad.claveNumerica
+        ? Number.isInteger(estado.cursor) && estado.cursor >= 0 && estado.cursor <= 2147483647
+        : typeof estado.cursor === "string"))) throw new ErrorPuente("ESTADO_LOCAL_INCOMPATIBLE");
   if (estado.pendiente !== null) {
     const p = estado.pendiente;
     const valido = entidad.schema.safeParse(p?.lote);

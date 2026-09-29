@@ -22,6 +22,10 @@ export async function sincronizar({ config, almacen, sap, backend, entidad = PRO
     const lote = entidad.construirLote(filas, config.empresa, estado.secuencia + 1);
     const registros = lote[entidad.nombre];
     const cursor = registros.at(-1)[entidad.claveLocal];
+    if (entidad.claveNumerica && registros.some((r, i) =>
+      r[entidad.claveLocal] <= (i ? registros[i - 1][entidad.claveLocal] : estado.cursor ?? -1))) {
+      throw new ErrorPuente("PAGINACION_SIN_AVANCE");
+    }
     if (cursor === estado.cursor || registros.some((r) => r[entidad.claveLocal] === estado.cursor)) throw new ErrorPuente("PAGINACION_SIN_AVANCE");
     const siguiente = { ...estado, pendiente: { lote, cursor } };
     await almacen.guardar(siguiente); almacen.estado = estado = siguiente;

@@ -457,3 +457,25 @@ Una regresión determinista pausa la recuperación mientras otros dos intentos c
 Límite explícito: si hay apagón mientras se mantiene ejecucion.lock.guard, se requiere deshabilitar la tarea y verificar ausencia de procesos antes de retirar la guardia. No se intenta recuperarla automáticamente. Conservar archivos JSON. Desplegar sin procesos de versiones anteriores ejecutándose.
 
 scripts/ver-certificado.js ahora es exclusivamente diagnóstico: muestra huella SHA-256 sin instalar ni sobrescribir confianza. Prueba con TLS simulado confirma conservación de un PEM existente. No se contactó SAP, no se utilizaron credenciales y no se registró una tarea en el servidor. El certificado aprobado sigue pendiente del administrador.
+
+### 2026-09-28 — Contrato de pedidos para el puente
+
+- Revisados los metadatos locales y los cinco documentos de Orders.json. Los cinco están cerrados; no sirven como validación de un despacho abierto real.
+- Añadidos pedidos.schemas.js y puente/pedidos.js: contrato estricto y conversión de cabecera y líneas de SAP. Conserva cantidades de venta e inventario por separado, pendientes nulos y unidades Manual sin inferir equivalencias.
+- Rechaza estados desconocidos, fechas inválidas, cantidades negativas y números de línea/documentos duplicados. Ordena las líneas sin modificar el documento original.
+- Verificación: npm test, 243/243 aprobadas (seis nuevas); los cinco pedidos del archivo de referencia pasan la conversión. Sin conexiones a SAP ni escrituras en la base.
+- Alcance: contrato preparado, todavía NO registrado en el ciclo del puente ni en las rutas receptoras. No requiere migración. Tampoco modifica las reglas de picking.
+- Sigue: receptor transaccional de cabecera y líneas, paginación por DocEntry numérico y activación del emisor. Antes de habilitar pedidos para picking, tratar líneas cerradas, cantidades pendientes, documentos de servicio y cambios de SAP durante sesiones activas. Las pruebas reales con Service Layer quedan pendientes para cuando se tenga acceso.
+
+### 2026-09-28 — Pedidos conectados al puente y preparación de pruebas del escáner
+
+- Activada la entidad pedidos después de clientes y productos. Consulta Orders de artículos con DocEntry numérico, incluye cerrados/cancelados y conserva todas las líneas. Un pedido por lote; máximo 1000 líneas y sin paginación anidada de líneas.
+- Receptor transaccional: cabecera, líneas y checkpoint se confirman juntos. Exige cliente existente, conserva identificadores de líneas y retira únicamente líneas ausentes del espejo SAP. No elimina historial ni cantidades de picking.
+- Actualizaciones operativas de SAP bloquean sesiones activas como requiere_revision. Se bloquea primero el pedido y después sus sesiones; escaneo/finalización ya bloquean la sesión. La recepción idéntica también detecta sesiones antiguas preparadas con cantidades distintas. Esta coordinación aún debe comprobarse con conexiones PostgreSQL reales.
+- Inicio de picking usa cantidades pendientes de líneas abiertas. Exige tipo artículo, unidad conocida y equivalencia uno a uno entre cantidades de venta e inventario. Manual, cantidades ambiguas o fraccionarias quedan bloqueadas. Retomar verifica que la sesión coincida con los datos actuales.
+- Nuevo módulo pedidos con rutas, schemas, controlador, servicio y repositorio. GET /pedidos pagina por DocEntry; GET /pedidos/:docEntry muestra detalle y diagnóstico local. Ambas rutas requieren autenticación de aplicación.
+- Verificación final: npm test, 275/275 aprobadas. Incluye recuperación de un lote cuya respuesta se perdió, cursor numérico, recepción HTTP, filtros, cambios operativos, revisión y conservación de comportamiento previo. git diff --check sin errores de espacios.
+- Paquete autónomo generado y comprobado en dist/puente-cosprobell. No contiene credenciales ni fue instalado en Windows Server. No se conectó a SAP ni a PostgreSQL real.
+- Preparados docs/PRUEBAS_PEDIDOS_SCANNER.md y scripts/comprobar-recepcion-pedidos.js. Este último queda SIN EJECUTAR hasta retomar pruebas; usa datos sintéticos y ROLLBACK. La sintaxis fue comprobada con node --check.
+- No requiere nueva migración. Desplegar primero backend y luego puente, conservando estados locales y secretos.
+- Pendiente: validar proyección DocumentLines y certificado en SAP real, pruebas de persistencia y concurrencia real, importación de asociaciones de barras/unidades y confirmación de etiquetas, pantalla de bodega, lector físico, política de antigüedad de datos y revisión supervisada. No se declara el escáner listo para producción.

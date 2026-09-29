@@ -1,6 +1,8 @@
 import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import { pedidoSap } from "../fixtures/pedido.js";
+import { construirLotePedidos } from "../../puente/pedidos.js";
 process.env.DATABASE_URL = "postgresql://test:test@127.0.0.1:1/test";
 process.env.BRIDGE_API_KEY = "clave-ficticia-de-integracion-123456789";
 process.env.SAP_COMPANY_DB = "XPRUEBAS2026";
@@ -19,6 +21,28 @@ after(async () => { await new Promise((resolve) => { server.close(resolve); serv
 const producto = { itemCode: "P1", itemName: "Champú", barCode: "001234", valid: true, frozen: false };
 const lote = (extra = {}) => ({ version: 1, empresa: "XPRUEBAS2026", secuencia: 1, productos: [{ ...producto }], ...extra });
 const empresa = "XPRUEBAS2026";
+
+test("HTTP recibe pedidos, confirma reintento y rechaza otra empresa o contrato incompleto", async (t) => {
+  preparar(t);
+  let guardados = 0;
+  t.mock.method(repo, "guardarPedido", async () => { guardados++; });
+  const lote = construirLotePedidos([pedidoSap()], empresa, 1);
+  assert.equal((await enviarA("pedidos", lote)).status, 200);
+  const repetir = await enviarA("pedidos", lote);
+  assert.equal((await repetir.json()).data.repetido, true);
+  assert.equal(guardados, 1);
+  assert.equal((await enviarA("pedidos", { ...lote, empresa: "OTRA" })).status, 403);
+  const incompleto = structuredClone(lote); delete incompleto.pedidos[0].lineas;
+  assert.equal((await enviarA("pedidos", incompleto)).status, 400);
+  assert.equal(guardados, 1);
+});
+test("fallo del receptor de pedidos no avanza secuencia", async (t) => {
+  const f = preparar(t);
+  t.mock.method(repo, "guardarPedido", async () => { throw new Error("fallo privado"); });
+  const r = await enviarA("pedidos", construirLotePedidos([pedidoSap()], empresa, 1));
+  assert.equal(r.status, 500); assert.equal(f.estado(), null);
+  assert.ok(!(await r.text()).includes("privado"));
+});
 function preparar(t) {
   let estado = null; const productos = new Map(); const tx = {}; let escrituras = 0;
   t.mock.method(repo, "conBloqueo", async (fn) => {
@@ -157,7 +181,7 @@ test("una base vinculada a otra empresa rechaza cualquier entidad", async (t) =>
 });
 test("entidad sin contrato no tiene ruta y el servicio la rechaza", async (t) => {
   prepararClientes(t);
-  assert.equal((await enviarA("pedidos", { version: 1 })).status, 404);
+  assert.equal((await enviarA("sin-contrato", { version: 1 })).status, 404);
   await assert.rejects(recibirLote("constructor", loteClientes(), empresa), { code: "ENTIDAD_DESCONOCIDA" });
 });
 test("repositorio de clientes solo actualiza campos del contrato", async () => {

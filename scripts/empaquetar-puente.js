@@ -25,6 +25,7 @@ await copiar("node_modules/zod");
 for (const archivo of ["ejecutar-puente.cmd", "instalar-tarea.cmd", "desinstalar-tarea.cmd"]) await copiar(join("puente/windows", archivo), archivo);
 for (const archivo of ["scripts/ver-certificado.js", "scripts/comprobar-candado-puente.js", ".env.puente.example"]) await copiar(archivo);
 await copiar("docs/INSTALAR_PUENTE_WINDOWS.md", "LEEME.md");
+await copiar("docs/PRUEBAS_PEDIDOS_SCANNER.md", "PRUEBAS_PEDIDOS_SCANNER.md");
 
 const { version } = JSON.parse(await readFile(join(raiz, "package.json"), "utf8"));
 await writeFile(join(destino, "package.json"), JSON.stringify({

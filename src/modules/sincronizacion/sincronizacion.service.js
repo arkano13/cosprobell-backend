@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { AppError } from "../../shared/errors/AppError.js";
 import { loteProductosSchema } from "./productos.schemas.js";
 import { loteClientesSchema } from "./clientes.schemas.js";
+import { lotePedidosSchema } from "./pedidos.schemas.js";
 import { sincronizacionRepository as repo } from "./sincronizacion.repository.js";
 const conflicto = (code, message) => new AppError({ code, message, statusCode: 409 });
 const origenIncompatible = () => conflicto("ORIGEN_INCOMPATIBLE", "Esta base ya recibió datos de otra empresa SAP");
@@ -11,6 +12,7 @@ const origenIncompatible = () => conflicto("ORIGEN_INCOMPATIBLE", "Esta base ya 
 const DEFINICIONES = {
   productos: { schema: loteProductosSchema, clave: "itemCode", guardar: (r, tx) => repo.guardarProducto(r, tx) },
   clientes: { schema: loteClientesSchema, clave: "cardCode", guardar: (r, tx) => repo.guardarCliente(r, tx) },
+  pedidos: { schema: lotePedidosSchema, clave: "docEntry", guardar: (r, tx) => repo.guardarPedido(r, tx) },
 };
 export const ENTIDADES_SINCRONIZABLES = Object.keys(DEFINICIONES);
 
@@ -33,6 +35,7 @@ export async function recibirLote(entidad, entrada, empresaAutorizada) {
   }
   // Mismo contenido con distinto orden conserva la identidad del lote.
   lote[entidad].sort((a, b) => a[clave] < b[clave] ? -1 : a[clave] > b[clave] ? 1 : 0);
+  if (entidad === "pedidos") for (const pedido of lote.pedidos) pedido.lineas.sort((a, b) => a.lineNum - b.lineNum);
   const hash = createHash("sha256").update(JSON.stringify(lote)).digest("hex");
   return repo.conBloqueo(async (tx) => {
     // Una sola empresa SAP por base local, sin importar la entidad que llegue primero.

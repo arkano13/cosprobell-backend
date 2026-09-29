@@ -93,3 +93,14 @@ puente/ contiene configuración, clientes HTTP SAP/backend, transformación, per
 ## Instalación del puente en Windows
 
 `npm run empaquetar:puente` arma `dist/puente-cosprobell` (ignorado por Git): puente, contratos `*.schemas.js`, zod, scripts de Windows (`puente/windows/*.cmd`) y `scripts/ver-certificado.js`. El paquete se comprueba solo al armarse (carga sin el resto del proyecto). Pasos en `INSTALAR_PUENTE_WINDOWS.md`. Los `.cmd` se guardan con CRLF (`.gitattributes`).
+
+## Pedidos y preparación de pruebas (2026-09-28)
+
+- src/modules/pedidos: consulta paginada y detalle, separado en rutas, schemas, controlador, servicio y repositorio.
+- src/modules/sincronizacion/pedidos.schemas.js: contrato compartido de la instantánea del pedido.
+- src/modules/sincronizacion/pedidos.repository.js: persistencia transaccional y coordinación de cambios con sesiones activas.
+- puente/pedidos.js: conversión de Orders; entidades.js incorpora pedidos después de clientes y productos.
+- src/modules/picking/picking.pedido.js: elegibilidad, líneas pendientes y comparación con la sesión guardada.
+- docs/PRUEBAS_PEDIDOS_SCANNER.md: alcance, rutas, comandos y casos pendientes de aceptación.
+
+La suite actual tiene 275 pruebas aprobadas. La instalación y las pruebas reales están pendientes; no hay nueva migración en este bloque.

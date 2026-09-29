@@ -1,4 +1,4 @@
-import { comprobarPedidoElegible } from "./picking.pedido.js";
+import { comprobarPedidoElegible, lineasParaPreparar, sesionCoincideConPedido } from "./picking.pedido.js";
 import { pickingEscaneosRepository } from "./picking.escaneos.repository.js";
 import { escanearBodySchema, historialQuerySchema } from "./picking.schemas.js";
 import { resolverEtiquetaParaPicking } from "./picking.etiquetas.service.js";
@@ -21,6 +21,8 @@ function comprobarSesionActiva(sesion) {
   }
 
   if (sesion.estado !== "en_proceso") {
+    if (sesion.estado === "requiere_revision") throw new AppError({ code: "PEDIDO_REQUIERE_REVISION",
+      message: "SAP modificó el pedido; revise la preparación antes de continuar", statusCode: 409 });
     throw new AppError({
       code: "PICKING_NO_ACTIVO",
       message: `El picking ya esta en estado '${sesion.estado}'`,
@@ -35,11 +37,17 @@ export async function iniciarPicking({ pedidoDocEntry, usuarioId }) {
     comprobarPedidoElegible(pedido);
 
     const sesiones = await pickingRepository.buscarSesionesDelPedido(pedidoDocEntry, tx);
+    if (sesiones.some(s => s.estado === "requiere_revision")) throw new AppError({ code: "PEDIDO_REQUIERE_REVISION",
+      message: "El pedido tiene una preparación pendiente de revisión", statusCode: 409 });
     const activas = sesiones.filter((sesion) => sesion.estado === "en_proceso");
     if (activas.length > 1) {
       throw new AppError({ code: "SESIONES_DUPLICADAS", message: "El pedido tiene varias sesiones activas; requiere revisión", statusCode: 409 });
     }
-    if (activas.length === 1) return { picking: activas[0], creada: false };
+    if (activas.length === 1) {
+      if (!sesionCoincideConPedido(activas[0], pedido)) throw new AppError({ code: "PEDIDO_REQUIERE_REVISION",
+        message: "La preparación guardada no coincide con el pedido actual", statusCode: 409 });
+      return { picking: activas[0], creada: false };
+    }
     if (sesiones.length > 0) {
       throw new AppError({ code: "PEDIDO_CON_PICKING_FINALIZADO", message: "El pedido ya tiene un picking finalizado; requiere revisión antes de iniciar otro", statusCode: 409 });
     }
@@ -49,13 +57,7 @@ export async function iniciarPicking({ pedidoDocEntry, usuarioId }) {
     const picking = await pickingRepository.crearSesion({
       pedidoDocEntry: pedido.docEntry,
       usuarioId,
-      lineas: pedido.lineas.map((linea) => ({
-        pedidoLineNum: linea.lineNum,
-        itemCode: linea.itemCode,
-        cantidadPedida: linea.quantity,
-        uomEntry: linea.uomEntry ?? null,
-        uomCode: linea.uomCode ?? null,
-      })),
+      lineas: lineasParaPreparar(pedido),
     }, tx);
     return { picking, creada: true };
   });

@@ -5,7 +5,8 @@ const { comprobarPedidoElegible } = await import("../../src/modules/picking/pick
 const { iniciarPicking } = await import("../../src/modules/picking/picking.service.js");
 const { pickingRepository: repo } = await import("../../src/modules/picking/picking.repository.js");
 const { prisma } = await import("../../src/infrastructure/database/prisma.js");
-const pedido = { docEntry: 1, documentStatus: "bost_Open", cancelled: false, cancelStatus: "csNo", lineas: [{ lineNum: 0, itemCode: "A", quantity: 3 }] };
+const pedido = { docEntry: 1, docType: "dDocument_Items", documentStatus: "bost_Open", cancelled: false, cancelStatus: "csNo", lineas: [{ lineNum: 0, itemCode: "A", quantity: 3,
+  lineStatus: "bost_Open", remainingOpenQuantity: 3, inventoryQuantity: 3, remainingOpenInventoryQuantity: 3, uomEntry: 1 }] };
 for (const [nombre, cambios, codigo] of [
   ["cerrado", { documentStatus: "bost_Close" }, "PEDIDO_CERRADO"],
   ["cancelado", { cancelled: true }, "PEDIDO_CANCELADO"],
@@ -32,6 +33,7 @@ for (const [nombre, sesiones, codigo] of [
   ["duplicadas", [{ estado: "en_proceso" }, { estado: "en_proceso" }], "SESIONES_DUPLICADAS"],
   ["completo", [{ estado: "completo" }], "PEDIDO_CON_PICKING_FINALIZADO"],
   ["con diferencias", [{ estado: "con_diferencias" }], "PEDIDO_CON_PICKING_FINALIZADO"],
+  ["requiere revisión", [{ estado: "requiere_revision" }], "PEDIDO_REQUIERE_REVISION"],
 ]) {
   test(`no crea otra sesión con historial ${nombre}`, async (t) => {
     t.mock.method(repo, "conPedidoBloqueado", async (_id, fn) => fn({}));
@@ -58,4 +60,13 @@ test("fallo del bloqueo no ejecuta el inicio y se propaga", async (t) => {
   let ejecuciones = 0;
   await assert.rejects(repo.conPedidoBloqueado(1, async () => { ejecuciones++; }), /timeout/);
   assert.equal(ejecuciones, 0);
+});
+
+test("retomar no acepta cantidades de una versión anterior del pedido", async (t) => {
+  t.mock.method(repo, "conPedidoBloqueado", async (_id, fn) => fn({}));
+  t.mock.method(repo, "buscarPedidoConLineas", async () => pedido);
+  t.mock.method(repo, "buscarSesionesDelPedido", async () => [{ estado: "en_proceso", lineas: [
+    { pedidoLineNum: 0, itemCode: "A", cantidadPedida: 5, uomEntry: 1, uomCode: null },
+  ] }]);
+  await assert.rejects(iniciarPicking({ pedidoDocEntry: 1 }), { code: "PEDIDO_REQUIERE_REVISION" });
 });

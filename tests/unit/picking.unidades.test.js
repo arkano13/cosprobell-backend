@@ -23,12 +23,12 @@ const casos = [
     esperado: { uomEntry: 1, uomCode: "UN" },
   },
   {
-    nombre: "conserva la referencia manual sin interpretarla",
+    nombre: "rechaza iniciar con referencia manual sin interpretarla",
     entrada: { uomEntry: -1, uomCode: "Manual" },
     esperado: { uomEntry: -1, uomCode: "Manual" },
   },
   {
-    nombre: "guarda null cuando el pedido no informa su unidad",
+    nombre: "rechaza iniciar cuando el pedido no informa su unidad",
     entrada: {},
     esperado: { uomEntry: null, uomCode: null },
   },
@@ -42,11 +42,13 @@ for (const caso of casos) {
       lineNum: 0,
       itemCode: "PROD-001",
       quantity: 3,
+      lineStatus: "bost_Open", remainingOpenQuantity: 3, inventoryQuantity: 3, remainingOpenInventoryQuantity: 3,
       ...caso.entrada,
     };
 
     const pedido = {
       docEntry: 9001,
+      docType: "dDocument_Items",
       documentStatus: "bost_Open", cancelled: false,
       lineas: [lineaPedido],
     };
@@ -73,6 +75,12 @@ for (const caso of casos) {
       prisma.pickingPedido.create = crearOriginal;
     });
 
+    if (caso.entrada.uomEntry === undefined || caso.entrada.uomEntry < 0) {
+      await assert.rejects(iniciarPicking({ pedidoDocEntry: 9001 }), { code: "UNIDAD_NO_DEFINIDA" });
+      assert.equal(datosGuardados, undefined);
+      assert.deepEqual(pedido, original);
+      return;
+    }
     await iniciarPicking({
       pedidoDocEntry: 9001,
       usuarioId: "operador-demo",

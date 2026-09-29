@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import { pedidoSap } from "../fixtures/pedido.js";
+import { construirLotePedidos } from "../../puente/pedidos.js";
 
 // URL ficticia: las consultas de estas pruebas están simuladas.
 process.env.DATABASE_URL =
@@ -20,6 +22,7 @@ const { productosRepository } = await import(
 const { pickingRepository } = await import(
   "../../src/modules/picking/picking.repository.js"
 );
+const { pedidosRepository } = await import("../../src/modules/pedidos/pedidos.repository.js");
 
 const { logger } = await import(
   "../../src/infrastructure/logging/logger.js"
@@ -306,7 +309,7 @@ test("iniciar picking rechaza un pedido sin líneas", async (t) => {
     "buscarPedidoConLineas",
     async () => ({
       docEntry: 9001,
-      documentStatus: "bost_Open", cancelled: false, cancelStatus: "csNo",
+      docType: "dDocument_Items", documentStatus: "bost_Open", cancelled: false, cancelStatus: "csNo",
       lineas: [],
     })
   );
@@ -404,12 +407,12 @@ test("iniciar picking crea una sesión y responde 201", async (t) => {
     "buscarPedidoConLineas",
     async () => ({
       docEntry: 9001,
-      documentStatus: "bost_Open", cancelled: false, cancelStatus: "csNo",
+      docType: "dDocument_Items", documentStatus: "bost_Open", cancelled: false, cancelStatus: "csNo",
       lineas: [
         {
           lineNum: 0,
           itemCode: "PROD-001",
-          quantity: 10,
+          quantity: 10, lineStatus: "bost_Open", remainingOpenQuantity: 10, inventoryQuantity: 10, remainingOpenInventoryQuantity: 10, uomEntry: 1,
         },
       ],
     })
@@ -427,7 +430,7 @@ test("iniciar picking crea una sesión y responde 201", async (t) => {
             pedidoLineNum: 0,
             itemCode: "PROD-001",
             cantidadPedida: 10,
-            uomEntry: null,
+            uomEntry: 1,
             uomCode: null,
           },
         ],
@@ -467,12 +470,12 @@ test("iniciar picking oculta un fallo al guardar la sesión", async (t) => {
     "buscarPedidoConLineas",
     async () => ({
       docEntry: 9001,
-      documentStatus: "bost_Open", cancelled: false, cancelStatus: "csNo",
+      docType: "dDocument_Items", documentStatus: "bost_Open", cancelled: false, cancelStatus: "csNo",
       lineas: [
         {
           lineNum: 0,
           itemCode: "PROD-001",
-          quantity: 10,
+          quantity: 10, lineStatus: "bost_Open", remainingOpenQuantity: 10, inventoryQuantity: 10, remainingOpenInventoryQuantity: 10, uomEntry: 1,
         },
       ],
     })
@@ -800,10 +803,43 @@ function simularInicio(t, sesiones = []) {
   t.mock.method(pickingRepository, "buscarSesionesDelPedido", async () => sesiones);
 }
 
+test("HTTP pedidos exige autenticación y valida paginación antes de consultar", async (t) => {
+  assert.equal((await fetch(`${baseUrl}/pedidos`)).status, 401);
+  const listar = t.mock.method(pedidosRepository, "listar", async () => assert.fail("No debe consultar"));
+  assert.equal((await fetch(`${baseUrl}/pedidos?limit=101`, { headers: autenticar(t) })).status, 400);
+  assert.equal(listar.mock.callCount(), 0);
+});
+test("HTTP pedidos lista con cursor sin perder la fila siguiente", async (t) => {
+  t.mock.method(pedidosRepository, "listar", async q => {
+    assert.deepEqual(q, { limit: 1, cursor: 8, estado: "abiertos" });
+    return [{ docEntry: 9 }, { docEntry: 10 }];
+  });
+  const r = await fetch(`${baseUrl}/pedidos?limit=1&cursor=8`, { headers: autenticar(t) });
+  assert.equal(r.status, 200); assert.deepEqual(await r.json(), { data: [{ docEntry: 9 }], siguienteCursor: 9 });
+});
+test("HTTP detalle de pedido informa pendientes y bloqueos locales", async (t) => {
+  const pedido = construirLotePedidos([pedidoSap()], "TEST", 1).pedidos[0];
+  t.mock.method(pedidosRepository, "obtener", async id => { assert.equal(id, 9); return pedido; });
+  const headers = autenticar(t);
+  const r = await fetch(`${baseUrl}/pedidos/9`, { headers });
+  assert.equal(r.status, 200); assert.equal((await r.json()).preparacion.lineas[0].cantidadPedida, 3);
+  pedido.cancelled = true;
+  const cerrado = await fetch(`${baseUrl}/pedidos/9`, { headers });
+  assert.equal((await cerrado.json()).preparacion.code, "PEDIDO_CANCELADO");
+});
+test("HTTP detalle devuelve 404 y oculta fallos de base", async (t) => {
+  const headers = autenticar(t);
+  t.mock.method(pedidosRepository, "obtener", async () => null);
+  assert.equal((await fetch(`${baseUrl}/pedidos/9`, { headers })).status, 404);
+  t.mock.method(pedidosRepository, "obtener", async () => { throw new Error("privado"); });
+  const r = await fetch(`${baseUrl}/pedidos/9`, { headers });
+  assert.equal(r.status, 500); assert.ok(!(await r.text()).includes("privado"));
+});
+
 test("iniciar picking retoma la sesión y responde 200", async (t) => {
-  const sesion = { id: 25, estado: "en_proceso", usuarioId: "anterior", lineas: [{ cantidadEscaneada: 2 }] };
+  const sesion = { id: 25, estado: "en_proceso", usuarioId: "anterior", lineas: [{ pedidoLineNum: 0, itemCode: "P1", cantidadPedida: 3, cantidadEscaneada: 2, uomEntry: 1, uomCode: "UN" }] };
   simularInicio(t, [sesion]);
-  t.mock.method(pickingRepository, "buscarPedidoConLineas", async () => ({ documentStatus: "bost_Open", cancelled: false, lineas: [] }));
+  t.mock.method(pickingRepository, "buscarPedidoConLineas", async () => construirLotePedidos([pedidoSap()], "TEST", 1).pedidos[0]);
   const crear = t.mock.method(pickingRepository, "crearSesion", async () => { throw new Error("No debe crear"); });
   const respuesta = await fetch(`${baseUrl}/picking`, { method: "POST", headers: { ...autenticar(t), "Content-Type": "application/json" }, body: JSON.stringify({ pedidoDocEntry: 9001, usuarioId: "otro" }) });
   assert.equal(respuesta.status, 200);

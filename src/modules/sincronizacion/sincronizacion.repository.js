@@ -1,5 +1,7 @@
 import { prisma } from "../../infrastructure/database/prisma.js";
+import { guardarPedido } from "./pedidos.repository.js";
 export const sincronizacionRepository = {
+  guardarPedido,
   conBloqueo(operacion, db = prisma) {
     return db.$transaction(async (tx) => {
       // Una sola empresa por base local. Coordina incluso el primer lote de cada entidad.
