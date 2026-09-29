@@ -112,3 +112,7 @@ La pantalla del escáner es una app de escritorio para Windows (Electron) en su 
 ## Despliegue en Railway
 
 `railway.json` define el despliegue: migraciones antes de arrancar (`npx prisma migrate deploy`), `npm start` y comprobación en `/health`. `prisma` es dependencia de ejecución y `npm install` genera el cliente (`postinstall`). Pasos y variables en [DESPLEGAR_RAILWAY.md](DESPLEGAR_RAILWAY.md).
+
+## Ingreso de operadores
+
+`src/modules/operadores/`: lista de operadores, inicio de sesión con PIN de 4 números (bloqueo por intentos) y cierre de sesión en `/ingreso`. `src/middleware/authenticate.js` acepta API keys (alcance `completo`) o sesiones de operador (`Authorization: Bearer`); una sesión de operador solo llega a pedidos y picking (`soloAplicaciones`). PIN con scrypt en `src/shared/security/pin.js`. El supervisor administra operadores con `scripts/operadores.js`. Guía en [INGRESO_OPERADORES.md](INGRESO_OPERADORES.md).

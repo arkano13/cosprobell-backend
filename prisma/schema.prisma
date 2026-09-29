@@ -679,10 +679,44 @@ model ApiKey {
   nombre    String // ej. "app-escaner-bodega1", "app-reportes"
   claveHash String    @unique
   activa    Boolean   @default(true)
+  // "completo": acceso a la API de aplicaciones. "ingreso": solo lista de operadores e inicio de sesión con PIN
+  // (la clave que viaja dentro de la app de escritorio).
+  alcance   String    @default("completo")
   creadaEn  DateTime  @default(now())
   ultimoUso DateTime?
 
   @@map("api_keys")
+}
+
+// Personas de bodega que ingresan a la app con su nombre y un PIN de 4 números asignado por el supervisor.
+model Operador {
+  id               Int              @id @default(autoincrement())
+  nombre           String           @unique
+  pinHash          String
+  activo           Boolean          @default(true)
+  // PIN incorrectos seguidos. A los 5 se bloquea 15 minutos; a los 10, hasta que el supervisor lo desbloquee.
+  intentosFallidos Int              @default(0)
+  bloqueadoHasta   DateTime?
+  creadoEn         DateTime         @default(now())
+  actualizadoEn    DateTime         @updatedAt
+  sesiones         SesionOperador[]
+
+  @@map("operadores")
+}
+
+// Sesión de un operador en la app: el token solo se guarda como hash y vence al final del turno.
+model SesionOperador {
+  id         Int       @id @default(autoincrement())
+  operadorId Int
+  operador   Operador  @relation(fields: [operadorId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
+  aplicacion String?
+  creadaEn   DateTime  @default(now())
+  expiraEn   DateTime
+  cerradaEn  DateTime?
+
+  @@index([operadorId])
+  @@map("sesiones_operador")
 }
 
 // NOTA: evaluaciones_credito se disena intencionalmente en la fase final del
