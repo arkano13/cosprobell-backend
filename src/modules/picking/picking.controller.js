@@ -23,9 +23,14 @@ function responderError(error, res, next) {
   return next(error);
 }
 
+// Con ingreso de operador, quien prepara es el operador de la sesión, no lo que diga el cuerpo.
+export function datosInicio(req) {
+  return req.operador ? { ...req.body, usuarioId: req.operador.nombre } : req.body;
+}
+
 export async function iniciar(req, res, next) {
   try {
-    const { picking, creada } = await iniciarPicking(req.body);
+    const { picking, creada } = await iniciarPicking(datosInicio(req));
 
     return res.status(creada ? 201 : 200).json({
       data: picking,

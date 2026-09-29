@@ -36,15 +36,18 @@ El backend corre en Railway como un servicio web, junto al servicio de PostgreSQ
 
 Solo con una base **de pruebas**: los datos de demostración son ficticios.
 
-Desde la PC, en la carpeta del backend con `main` actualizado y `npm install`. La dirección se toma de **servicio Postgres → Variables → `DATABASE_PUBLIC_URL`** (la interna solo funciona dentro de Railway). Se usa como variable de la ventana de PowerShell para no guardar la contraseña en un archivo:
+Desde la PC, en la carpeta del backend con `main` actualizado y `npm install`. La dirección se toma de **servicio Postgres → Variables → `DATABASE_PUBLIC_URL`** (la interna solo funciona dentro de Railway). Se usa como variable de la terminal, para no guardar la contraseña en un archivo.
+
+En PowerShell:
 
 ```powershell
 $env:DATABASE_URL = "valor de DATABASE_PUBLIC_URL"
 node scripts/datos-demo-bodega.js
-node scripts/crear-api-key.js escaner-bodega-1
 ```
 
-La clave aparece una sola vez. En la app de escritorio: dirección del servidor `https://<dominio>`, esa clave y el nombre de quien escanea. `node scripts/datos-demo-bodega.js --borrar` elimina los datos de demostración.
+En la terminal de Git (Git Bash), para que la dirección no quede en el historial: `read -rs DATABASE_URL` (pegar y Enter, no se ve) y luego `export DATABASE_URL`.
+
+Para ingresar a la app hacen falta operadores con PIN y la clave de solo ingreso de la app: ver [INGRESO_OPERADORES.md](INGRESO_OPERADORES.md). `node scripts/datos-demo-bodega.js --borrar` elimina los datos de demostración.
 
 ## Si algo falla
 

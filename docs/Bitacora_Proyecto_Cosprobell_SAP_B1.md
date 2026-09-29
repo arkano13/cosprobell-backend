@@ -542,3 +542,14 @@ Observaciones:
 - Un error 503 de `/integracion` sin configurar llega al cliente como `INTERNAL_ERROR` genérico, porque el manejador de errores oculta los 5xx; el motivo solo se ve en el registro. Revisar cuando se retome el puente.
 - Se compartió por chat una dirección de la base de pruebas con su contraseña. Se recomendó regenerarla en Railway (Postgres → Database → Credentials) y volver a desplegar el backend. No se registra el valor.
 - En discusión, sin implementar: dirección del servidor fija dentro de la app de escritorio e ingreso de cada bodeguero con un PIN de 4 números elegido por él.
+
+## 24. Ingreso de operadores con PIN
+
+Decisión de Cosprobell: cada persona de bodega ingresa con su nombre y un PIN de 4 números que asigna el supervisor; la app ya no pide dirección ni clave. El backend quedó desplegado en Railway (`cosprobell-backend-production.up.railway.app`) sin el puente.
+
+- Modelos `Operador` y `SesionOperador` y columna `alcance` en `api_keys` (migración `20260929170000_operadores_pin`, solo agrega; las claves existentes quedan con alcance `completo`).
+- Rutas `/ingreso`: lista de operadores y sesión con PIN usando una clave de alcance `ingreso`, que viaja dentro de la app y no ve datos. La sesión dura 12 horas y solo llega a pedidos y picking; el preparador es el operador de la sesión.
+- PIN con scrypt y sal; token de sesión guardado como hash. Cada 5 PIN incorrectos, pausa de 15 minutos (sin evaluar ningún PIN); a los 10, bloqueo hasta que el supervisor lo quite. Cambiar el PIN o desactivar cierra las sesiones.
+- `scripts/operadores.js` (listar, crear, pin, desbloquear, desactivar, activar) y `crear-api-key.js --solo-ingreso`. Guía en `INGRESO_OPERADORES.md`.
+
+Verificación: 316 pruebas (PIN, bloqueo con reloj controlado, sesiones, rutas por alcance). Contra PostgreSQL: comandos del supervisor, lista con la clave de ingreso (y 403 en pedidos), PIN incorrecto, sesión, pedidos con sesión, productos 403, preparación iniciada a nombre del operador, cierre de sesión (401 después), pausa al quinto error, desbloqueo y cambio de PIN. Falta la parte de la app de escritorio y probar en Railway.
