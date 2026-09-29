@@ -17,7 +17,9 @@ export const PEDIDOS = { nombre: "pedidos", recurso: "Orders", claveSap: "DocEnt
   claveNumerica: true, tamanoPagina: 1,
   campos: ["DocEntry", "DocNum", "DocType", "CardCode", "DocDate", "DocDueDate", "DocTotal",
     "DocumentStatus", "Cancelled", "CancelStatus", "DocumentLines"],
-  filtro: "DocType eq 'dDocument_Items'", schema: lotePedidosSchema, construirLote: construirLotePedidos };
+  filtro: "DocType eq 'dDocument_Items' and DocumentStatus eq 'bost_Open'", revisarCierres: true,
+  schema: lotePedidosSchema, construirLote: construirLotePedidos };
 // Una orden por lote limita el tamaño del cuerpo, sin dividir sus líneas.
-// Incluimos órdenes cerradas y canceladas para detectar cambios en preparación.
+// El recorrido trae solo órdenes abiertas: su costo depende de las órdenes activas, no del historial.
+// Las que se cierran o cancelan dejan de aparecer; revisarCierres las pide por clave al final (ver sincronizar.js).
 export const ENTIDADES = [CLIENTES, PRODUCTOS, PEDIDOS];

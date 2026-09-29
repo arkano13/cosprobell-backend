@@ -6,6 +6,14 @@ El puente recorre clientes, productos y pedidos de artículos, en ese orden. Lee
 
 Cada pedido incluye cabecera y todas sus líneas en una transacción, junto al avance de sincronización. Las líneas retiradas se eliminan únicamente del espejo de SAP; los escaneos y las líneas de picking se conservan. No se eliminan pedidos ausentes del recorrido.
 
+El recorrido trae solo pedidos **abiertos** (`DocumentStatus eq 'bost_Open'`): su costo depende de los pedidos activos, no del historial. Para detectar los que se cierran o cancelan:
+
+1. Al empezar el recorrido, el puente anota la hora del backend (`GET /integracion/pedidos/abiertos` devuelve `ahora`).
+2. Al terminarlo, vuelve a consultar esa ruta: los pedidos que el backend tiene abiertos y no se actualizaron desde esa hora ya no figuran abiertos en SAP.
+3. Pide cada uno por su clave (`Orders(DocEntry)`) y lo envía como cualquier lote. El backend registra su estado real y, si cambió, marca sus sesiones como `requiere_revision`.
+
+Ambas horas son del reloj del backend, así que la comparación no depende del reloj del equipo del puente. La revisión pendiente se guarda en `pedidos.json` (`inicioRecorrido`, `porRevisar`): si se interrumpe, continúa donde quedó. Un pedido que SAP ya no tiene responde `REGISTRO_NO_ENCONTRADO_EN_SAP` con su `docEntry` y detiene la entidad para revisión.
+
 Una actualización que cambie cliente, estado, cancelación, producto, bodega, cantidades o unidades de un pedido marca sus sesiones activas como `requiere_revision`. El bloqueo usa el mismo orden que iniciar picking: cabecera y después sesiones. Un escaneo simultáneo termina antes de la actualización o encuentra la sesión bloqueada después. La confirmación de un escaneo ya registrado sigue siendo recuperable con el mismo `operacionId`.
 
 No hay una función para reanudar automáticamente una sesión en revisión. Tampoco se reinicia un pedido finalizado: conservar esa restricción hasta definir entregas parciales y revisión supervisada.
@@ -89,4 +97,4 @@ Revisar el log de las tres entidades y consultar `GET /integracion/pedidos/estad
 
 La pantalla de bodega aún no forma parte de este backend. Falta completar la importación de asociaciones de códigos/unidades para un catálogo real y su proceso de confirmación. También quedan pendientes la política de datos desactualizados, revisión supervisada, entregas parciales y validación final del despacho.
 
-Los pedidos se recorren completos, uno por solicitud, incluyendo cerrados y cancelados. Es un punto de partida verificable; medir duración y volumen antes de programar el intervalo definitivo o diseñar la sincronización incremental. Un pedido de más de 1000 líneas, un estado desconocido o un cliente ausente detiene ese avance con error; no se omite silenciosamente. La proyección `DocumentLines` y su entrega completa deben confirmarse en el Service Layer instalado.
+Se recorren solo los pedidos abiertos, uno por solicitud, más una consulta por clave por cada pedido que se cerró o canceló desde el recorrido anterior. En la prueba simulada, con 20 pedidos históricos cerrados y 10 abiertos, el primer ciclo hizo 11 consultas de listado y ninguna por clave; el historial no se consulta. Medir duración y volumen de pedidos abiertos antes de fijar el intervalo definitivo. Un pedido de más de 1000 líneas, un estado desconocido o un cliente ausente detiene ese avance con error; no se omite silenciosamente. La proyección `DocumentLines` y su entrega completa deben confirmarse en el Service Layer instalado.

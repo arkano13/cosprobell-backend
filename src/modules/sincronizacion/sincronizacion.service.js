@@ -64,3 +64,13 @@ export async function consultarEstadoLote(entidad, empresaAutorizada) {
   return { empresa: empresaAutorizada, ultimaSecuencia: estado?.secuencia ?? 0,
     ultimaRecepcion: estado?.actualizadoEn ?? null };
 }
+
+// Pedidos abiertos en esta base y su última actualización. El puente compara esas fechas con la hora de
+// inicio de su recorrido (ambas de este reloj) para pedir a SAP los que dejaron de estar abiertos.
+export async function consultarPedidosAbiertos(empresaAutorizada) {
+  exigirEmpresa(empresaAutorizada);
+  const ahora = new Date().toISOString();
+  if (await repo.existeOtraEmpresa(empresaAutorizada)) throw origenIncompatible();
+  const pedidos = await repo.listarPedidosAbiertos();
+  return { ahora, pedidos: pedidos.map((p) => ({ docEntry: p.docEntry, sincronizadoEn: p.sincronizadoEn.toISOString() })) };
+}

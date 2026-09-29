@@ -189,3 +189,17 @@ test("repositorio de clientes solo actualiza campos del contrato", async () => {
   assert.deepEqual(Object.keys(consulta.update).sort(), [...Object.keys(cliente), "sincronizadoEn"].sort());
   assert.deepEqual(consulta.where, { cardCode: "C0001" });
 });
+test("HTTP informa los pedidos abiertos con la hora del backend y exige la credencial del puente", async (t) => {
+  preparar(t);
+  const en = new Date("2026-09-28T10:00:00.000Z");
+  t.mock.method(repo, "listarPedidosAbiertos", async () => [{ docEntry: 7, sincronizadoEn: en }]);
+  const antes = Date.now();
+  const r = await fetch(`${url}/integracion/pedidos/abiertos`, { headers: { Authorization: `Bearer ${process.env.BRIDGE_API_KEY}` } });
+  assert.equal(r.status, 200);
+  const { data } = await r.json();
+  assert.deepEqual(data.pedidos, [{ docEntry: 7, sincronizadoEn: en.toISOString() }]);
+  assert.ok(Date.parse(data.ahora) >= antes - 1000 && Date.parse(data.ahora) <= Date.now());
+  assert.equal((await fetch(`${url}/integracion/pedidos/abiertos`)).status, 401);
+  t.mock.method(repo, "existeOtraEmpresa", async () => true);
+  assert.equal((await fetch(`${url}/integracion/pedidos/abiertos`, { headers: { Authorization: `Bearer ${process.env.BRIDGE_API_KEY}` } })).status, 409);
+});

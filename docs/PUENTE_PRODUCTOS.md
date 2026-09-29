@@ -97,4 +97,4 @@ Verificación posterior a estas correcciones: 237/237 pruebas aprobadas. No se c
 
 ## Ampliación: pedidos (2026-09-28)
 
-El ciclo actual es clientes -> productos -> pedidos. Orders utiliza un cursor DocEntry numérico y un documento completo por lote; el estado se conserva en pedidos.json. La guía actual de alcance y pruebas está en PRUEBAS_PEDIDOS_SCANNER.md. El código de pedidos está integrado y probado con simulaciones; la compatibilidad con el Service Layer instalado sigue pendiente de la prueba real.
+El ciclo actual es clientes -> productos -> pedidos. Orders utiliza un cursor DocEntry numérico y un documento completo por lote; el estado se conserva en pedidos.json. Solo se recorren pedidos abiertos; los que se cierran o cancelan se detectan al final del recorrido y se piden por clave (detalle en PRUEBAS_PEDIDOS_SCANNER.md). La guía actual de alcance y pruebas está en PRUEBAS_PEDIDOS_SCANNER.md. El código de pedidos está integrado y probado con simulaciones; la compatibilidad con el Service Layer instalado sigue pendiente de la prueba real.

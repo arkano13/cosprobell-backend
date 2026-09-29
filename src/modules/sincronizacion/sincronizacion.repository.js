@@ -9,6 +9,9 @@ export const sincronizacionRepository = {
       return operacion(tx);
     }, { isolationLevel: "ReadCommitted", maxWait: 10000, timeout: 30000 });
   },
+  listarPedidosAbiertos(db = prisma) {
+    return db.pedido.findMany({ where: { documentStatus: "bost_Open" }, select: { docEntry: true, sincronizadoEn: true }, orderBy: { docEntry: "asc" } });
+  },
   async existeOtraEmpresa(empresa, db = prisma) {
     const filas = await db.$queryRaw`SELECT 1 FROM sincronizacion_estados WHERE empresa <> ${empresa} LIMIT 1`;
     return filas.length > 0;
