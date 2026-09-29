@@ -37,7 +37,7 @@ export const productosRepository = {
       where: {
         OR: [
           { barCode: codigo },
-          { codigosBarras: { some: { codigo } } },
+          { codigosBarras: { some: { codigo, retiradoEnSap: false } } },
         ],
       },
       select: { itemCode: true, itemName: true },

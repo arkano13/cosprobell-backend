@@ -73,6 +73,18 @@ POST /integracion/clientes y GET /integracion/clientes/estado, con la misma cred
 
 Los cuatro campos son obligatorios. Inserta o actualiza por cardCode y solo toca esos campos: no modifica pedidos, facturas ni otros datos del cliente. El puente consulta únicamente socios de negocio con CardType = cCustomer. Saldos, contactos y demás datos personales no se sincronizan hasta que una función concreta los requiera. Existe para que los pedidos, próximo contrato, encuentren a su cliente.
 
+## Contratos de unidades y códigos de barras v1
+
+`POST /integracion/unidades` recibe el catálogo `UnitOfMeasurements`: `{ "absEntry": 1, "code": "UN", "name": "Unidad" }` (`name` admite null). Inserta o actualiza `unidades_medida` por `absEntry`. "Manual" (-1) no forma parte del catálogo.
+
+`POST /integracion/codigosBarras` recibe `BarCodes`: `{ "absEntry": 9, "itemCode": "P1", "codigo": "7401234567890", "uomEntry": 1 }`. Reglas:
+
+- Se identifica por `absEntry` (`sapAbsEntry`, único). Si cambia el código, el producto o la unidad, se actualiza la misma fila: su confirmación de picking se conserva y el picking la detecta como `CONFIRMACION_DESACTUALIZADA` hasta que se vuelva a confirmar.
+- Una asociación creada a mano (sin `absEntry`) con el mismo producto, código y unidad se vincula a SAP en lugar de duplicarse, y conserva su confirmación.
+- El producto debe estar sincronizado: si no, `409 PRODUCTO_NO_SINCRONIZADO` (el puente lo muestra en `detalle.codigoBackend`).
+
+Códigos retirados: el puente pide `GET /integracion/hora` al empezar un recorrido completo de `BarCodes` y, al terminarlo, `POST /integracion/codigosBarras/retirados` con `{ "antesDe": "<hora de inicio>" }`. Los códigos de SAP no recibidos desde esa hora se marcan `retiradoEnSap = true`: no identifican productos ni sirven para picking, pero no se borran ni pierden su confirmación. Si vuelven a aparecer en SAP se reactivan. Repetir la llamada no cambia el resultado; `antesDe` no puede ser futura.
+
 ## Orden y recuperación
 
 GET /integracion/productos/estado utiliza la misma credencial y devuelve empresa, ultimaSecuencia y ultimaRecepcion. Antes de recibir datos devuelve 0 y null. ultimaRecepcion es la fecha del backend: no demuestra que los datos estuvieran actualizados en SAP.
@@ -87,7 +99,7 @@ El número de secuencia y la empresa se almacenan junto con los productos en una
 
 - middleware/bridgeAuth.js: verifica la credencial independiente y vincula la empresa desde configuración confiable.
 - lote.schemas.js: estructura común de un lote (versión, empresa, secuencia, 1 a 100 registros sin claves repetidas).
-- productos.schemas.js y clientes.schemas.js: contrato de cada entidad.
+- productos, clientes, pedidos, unidades y codigosBarras `.schemas.js`: contrato de cada entidad.
 - sincronizacion.service.js: comprueba empresa, secuencia y contenido de cualquier entidad registrada; coordina guardado.
 - sincronizacion.repository.js: transacción, bloqueo y persistencia.
 - sincronizacion.controller.js y sincronizacion.routes.js: publican una ruta fija por entidad.

@@ -6,6 +6,14 @@ El puente recorre clientes, productos y pedidos de artículos, en ese orden. Lee
 
 Cada pedido incluye cabecera y todas sus líneas en una transacción, junto al avance de sincronización. Las líneas retiradas se eliminan únicamente del espejo de SAP; los escaneos y las líneas de picking se conservan. No se eliminan pedidos ausentes del recorrido.
 
+El recorrido trae solo pedidos **abiertos** (`DocumentStatus eq 'bost_Open'`): su costo depende de los pedidos activos, no del historial. Para detectar los que se cierran o cancelan:
+
+1. Al empezar el recorrido, el puente anota la hora del backend (`GET /integracion/pedidos/abiertos` devuelve `ahora`).
+2. Al terminarlo, vuelve a consultar esa ruta: los pedidos que el backend tiene abiertos y no se actualizaron desde esa hora ya no figuran abiertos en SAP.
+3. Pide cada uno por su clave (`Orders(DocEntry)`) y lo envía como cualquier lote. El backend registra su estado real y, si cambió, marca sus sesiones como `requiere_revision`.
+
+Ambas horas son del reloj del backend, así que la comparación no depende del reloj del equipo del puente. La revisión pendiente se guarda en `pedidos.json` (`inicioRecorrido`, `porRevisar`): si se interrumpe, continúa donde quedó. Un pedido que SAP ya no tiene responde `REGISTRO_NO_ENCONTRADO_EN_SAP` con su `docEntry` y detiene la entidad para revisión.
+
 Una actualización que cambie cliente, estado, cancelación, producto, bodega, cantidades o unidades de un pedido marca sus sesiones activas como `requiere_revision`. El bloqueo usa el mismo orden que iniciar picking: cabecera y después sesiones. Un escaneo simultáneo termina antes de la actualización o encuentra la sesión bloqueada después. La confirmación de un escaneo ya registrado sigue siendo recuperable con el mismo `operacionId`.
 
 No hay una función para reanudar automáticamente una sesión en revisión. Tampoco se reinicia un pedido finalizado: conservar esa restricción hasta definir entregas parciales y revisión supervisada.
@@ -36,6 +44,18 @@ Todas requieren `X-API-Key` de la aplicación; la clave del puente no sirve para
 | `POST /picking/:id/escanear` | `{ "codigo": "00123", "operacionId": "UUID" }` |
 | `GET /picking/:id/escaneos` | Historial paginado |
 | `POST /picking/:id/finalizar` | Finalización con o sin diferencias |
+| `GET /etiquetas?estado=pendientes&limit=50` | Códigos por confirmar: sin confirmar o desactualizados (cambiaron en SAP). También `estado=confirmadas` o `todas`, `itemCode=` y `cursor=` |
+| `PUT /etiquetas/:id/confirmacion` | `{ "esUnidadIndividual": true, "observacion": "opcional" }`. Solo aplicaciones de `ETIQUETAS_APPS_AUTORIZADAS` |
+| `DELETE /etiquetas/:id/confirmacion` | Revoca la confirmación. Mismo permiso |
+
+### Confirmación de etiquetas
+
+Un código importado de SAP no sirve para picking hasta que alguien confirme que corresponde a **una unidad individual** del producto y de la unidad de medida indicados. La confirmación guarda una foto (producto, código, unidad), la hora y la aplicación que confirmó. Si después SAP cambia ese código, la etiqueta pasa a `desactualizada`, vuelve a aparecer entre las pendientes y el escaneo responde `CONFIRMACION_DESACTUALIZADA` hasta confirmarla de nuevo.
+
+- Estados en `GET /etiquetas`: `sin_confirmar`, `desactualizada`, `unidad_individual` y `no_es_unidad`. Se muestran el producto, el código y la unidad (`code` y nombre del catálogo de SAP).
+- No se confirma como unidad individual un código con unidad "Manual" (-1) o sin unidad (`UNIDAD_NO_DEFINIDA`); sí se puede marcar como "no es unidad".
+- Los códigos retirados en SAP no aparecen ni se pueden confirmar (`ETIQUETA_RETIRADA`).
+- Permiso: variable `ETIQUETAS_APPS_AUTORIZADAS` del backend, con los nombres de las API keys autorizadas separados por coma (por ejemplo `supervisor-etiquetas`). Si está vacía, nadie puede confirmar (`FUNCION_NO_HABILITADA`). Conviene que el escáner de bodega use otra API key sin este permiso. La API key identifica la aplicación, no a la persona.
 
 `preparacion.datosValidos` comprueba datos del pedido, no permisos de despacho ni disponibilidad de etiquetas ni sesiones previas. El inicio y el escaneo realizan sus propias comprobaciones.
 
@@ -48,7 +68,7 @@ Mostrar `sincronizadoEn`: corresponde a la recepción local, no garantiza que SA
 1. Desplegar esta versión del backend antes de actualizar el puente. Este cambio no añade migraciones.
 2. Confirmar `SAP_COMPANY_DB=XPRUEBAS2026`, URL del backend de pruebas y credencial compartida del puente. Mantener separados los secretos SAP y la API key de la app.
 3. Resolver el certificado con sistemas y probar desde la red de Cosprobell. No desactivar TLS.
-4. Confirmar datos de códigos de barras, catálogo de unidades y asociaciones locales. El puente actual sincroniza datos básicos de productos, no importa automáticamente las asociaciones de barras ni confirma etiquetas como individuales.
+4. Revisar los códigos de barras y el catálogo de unidades importados de SAP (`BarCodes` y `UnitOfMeasurements`). La importación no confirma etiquetas: cada código que se use en picking debe confirmarse como unidad individual.
 5. Preparar en la sociedad de pruebas un pedido abierto de artículos con cliente, líneas y unidades válidas. No editar producción para esta prueba.
 6. Detener la tarea anterior antes de cambiar su paquete. Conservar `.bridge-state`, `.env.puente` y el certificado aprobado; no sustituirlos por archivos de ejemplo.
 
@@ -89,4 +109,4 @@ Revisar el log de las tres entidades y consultar `GET /integracion/pedidos/estad
 
 La pantalla de bodega aún no forma parte de este backend. Falta completar la importación de asociaciones de códigos/unidades para un catálogo real y su proceso de confirmación. También quedan pendientes la política de datos desactualizados, revisión supervisada, entregas parciales y validación final del despacho.
 
-Los pedidos se recorren completos, uno por solicitud, incluyendo cerrados y cancelados. Es un punto de partida verificable; medir duración y volumen antes de programar el intervalo definitivo o diseñar la sincronización incremental. Un pedido de más de 1000 líneas, un estado desconocido o un cliente ausente detiene ese avance con error; no se omite silenciosamente. La proyección `DocumentLines` y su entrega completa deben confirmarse en el Service Layer instalado.
+Se recorren solo los pedidos abiertos, uno por solicitud, más una consulta por clave por cada pedido que se cerró o canceló desde el recorrido anterior. En la prueba simulada, con 20 pedidos históricos cerrados y 10 abiertos, el primer ciclo hizo 11 consultas de listado y ninguna por clave; el historial no se consulta. Medir duración y volumen de pedidos abiertos antes de fijar el intervalo definitivo. Un pedido de más de 1000 líneas, un estado desconocido o un cliente ausente detiene ese avance con error; no se omite silenciosamente. La proyección `DocumentLines` y su entrega completa deben confirmarse en el Service Layer instalado.

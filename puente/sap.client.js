@@ -13,6 +13,18 @@ export function crearClienteSap(config, fetchImpl = fetch) {
     if (!cookies.some((v) => /^B1SESSION=.+/.test(v))) throw new ErrorPuente("SESION_SAP_INVALIDA");
     cookie = cookies.join("; ");
   }
+  // GET con la sesión vigente; ante 401 renueva la sesión una sola vez.
+  async function obtener(ruta, cabeceras = {}) {
+    if (!cookie) await login();
+    for (let intento = 0; ; intento++) {
+      try {
+        return await leerJson(await solicitar(`${config.sapUrl}/${ruta}`, { headers: { Cookie: cookie, ...cabeceras } }, fetchImpl));
+      } catch (error) {
+        if (error.code !== "HTTP_401" || intento === 1) throw error;
+        cookie = null; await login();
+      }
+    }
+  }
   return {
     async pagina(cursor, entidad = PRODUCTOS) {
       // Misma forma que acepta Service Layer desde el navegador: "$" literal y espacios como %20.
@@ -25,19 +37,24 @@ export function crearClienteSap(config, fetchImpl = fetch) {
       const tamano = entidad.tamanoPagina ?? 50;
       const filtro = condiciones.length ? `&$filter=${encodeURIComponent(condiciones.join(" and "))}` : "";
       const consulta = `$select=${entidad.campos.join(",")}&$orderby=${encodeURIComponent(`${entidad.claveSap} asc`)}&$top=${tamano}${filtro}`;
-      if (!cookie) await login();
-      for (let intento = 0; intento < 2; intento++) {
-        try {
-          // Sin Prefer, Service Layer devuelve 20 por página aunque $top pida 50.
-          const respuesta = await solicitar(`${config.sapUrl}/${entidad.recurso}?${consulta}`,
-            { headers: { Cookie: cookie, Prefer: `odata.maxpagesize=${tamano}` } }, fetchImpl);
-          const datos = await leerJson(respuesta);
-          if (!Array.isArray(datos.value) || datos.value.length > tamano) throw new ErrorPuente("PAGINA_SAP_INVALIDA");
-          return datos.value;
-        } catch (error) {
-          if (error.code !== "HTTP_401" || intento === 1) throw error;
-          cookie = null; await login();
-        }
+      // Sin Prefer, Service Layer devuelve 20 por página aunque $top pida 50.
+      const datos = await obtener(`${entidad.recurso}?${consulta}`, { Prefer: `odata.maxpagesize=${tamano}` });
+      if (!Array.isArray(datos.value) || datos.value.length > tamano) throw new ErrorPuente("PAGINA_SAP_INVALIDA");
+      return datos.value;
+    },
+    // Un registro por su clave, con los mismos campos que el recorrido. Lo usa la revisión de pedidos cerrados.
+    async documento(clave, entidad) {
+      if (entidad.claveNumerica ? !Number.isInteger(clave) || clave < 0 || clave > 2147483647 : typeof clave !== "string") {
+        throw new ErrorPuente("CURSOR_INVALIDO");
+      }
+      const literal = entidad.claveNumerica ? clave : `'${encodeURIComponent(clave.replaceAll("'", "''"))}'`;
+      try {
+        const datos = await obtener(`${entidad.recurso}(${literal})?$select=${entidad.campos.join(",")}`);
+        if (!datos || typeof datos !== "object" || Array.isArray(datos)) throw new ErrorPuente("PAGINA_SAP_INVALIDA");
+        return datos;
+      } catch (error) {
+        if (error.code === "HTTP_404") throw new ErrorPuente("REGISTRO_NO_ENCONTRADO_EN_SAP", false, { [entidad.claveLocal]: clave });
+        throw error;
       }
     },
     async cerrar() {

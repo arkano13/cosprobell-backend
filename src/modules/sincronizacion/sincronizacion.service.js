@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
+import { z } from "zod";
 import { AppError } from "../../shared/errors/AppError.js";
 import { loteProductosSchema } from "./productos.schemas.js";
 import { loteClientesSchema } from "./clientes.schemas.js";
 import { lotePedidosSchema } from "./pedidos.schemas.js";
+import { loteUnidadesSchema } from "./unidades.schemas.js";
+import { loteCodigosBarrasSchema } from "./codigosBarras.schemas.js";
 import { sincronizacionRepository as repo } from "./sincronizacion.repository.js";
 const conflicto = (code, message) => new AppError({ code, message, statusCode: 409 });
 const origenIncompatible = () => conflicto("ORIGEN_INCOMPATIBLE", "Esta base ya recibió datos de otra empresa SAP");
@@ -13,6 +16,8 @@ const DEFINICIONES = {
   productos: { schema: loteProductosSchema, clave: "itemCode", guardar: (r, tx) => repo.guardarProducto(r, tx) },
   clientes: { schema: loteClientesSchema, clave: "cardCode", guardar: (r, tx) => repo.guardarCliente(r, tx) },
   pedidos: { schema: lotePedidosSchema, clave: "docEntry", guardar: (r, tx) => repo.guardarPedido(r, tx) },
+  unidades: { schema: loteUnidadesSchema, clave: "absEntry", guardar: (r, tx) => repo.guardarUnidad(r, tx) },
+  codigosBarras: { schema: loteCodigosBarrasSchema, clave: "absEntry", guardar: (r, tx) => repo.guardarCodigoBarras(r, tx) },
 };
 export const ENTIDADES_SINCRONIZABLES = Object.keys(DEFINICIONES);
 
@@ -63,4 +68,35 @@ export async function consultarEstadoLote(entidad, empresaAutorizada) {
   if (estado && estado.empresa !== empresaAutorizada) throw origenIncompatible();
   return { empresa: empresaAutorizada, ultimaSecuencia: estado?.secuencia ?? 0,
     ultimaRecepcion: estado?.actualizadoEn ?? null };
+}
+
+// Pedidos abiertos en esta base y su última actualización. El puente compara esas fechas con la hora de
+// inicio de su recorrido (ambas de este reloj) para pedir a SAP los que dejaron de estar abiertos.
+export async function consultarPedidosAbiertos(empresaAutorizada) {
+  exigirEmpresa(empresaAutorizada);
+  const ahora = new Date().toISOString();
+  if (await repo.existeOtraEmpresa(empresaAutorizada)) throw origenIncompatible();
+  const pedidos = await repo.listarPedidosAbiertos();
+  return { ahora, pedidos: pedidos.map((p) => ({ docEntry: p.docEntry, sincronizadoEn: p.sincronizadoEn.toISOString() })) };
+}
+
+// Hora del backend: el puente la usa como inicio de un recorrido completo.
+export async function consultarHora(empresaAutorizada) {
+  exigirEmpresa(empresaAutorizada);
+  if (await repo.existeOtraEmpresa(empresaAutorizada)) throw origenIncompatible();
+  return { ahora: new Date().toISOString() };
+}
+
+// Al terminar un recorrido completo de BarCodes, los códigos de SAP no recibidos desde su inicio
+// ya no existen en SAP: se marcan como retirados. Repetir la llamada no cambia el resultado.
+export async function retirarCodigosNoListados(entrada, empresaAutorizada) {
+  exigirEmpresa(empresaAutorizada);
+  const validacion = z.object({ antesDe: z.iso.datetime() }).strict().safeParse(entrada);
+  if (!validacion.success) throw new AppError({ code: "SOLICITUD_INVALIDA", message: "Se requiere antesDe con fecha y hora ISO", statusCode: 400 });
+  const antesDe = new Date(validacion.data.antesDe);
+  if (antesDe.getTime() > Date.now()) throw new AppError({ code: "FECHA_FUTURA", message: "antesDe no puede ser posterior a la hora del backend", statusCode: 400 });
+  return repo.conBloqueo(async (tx) => {
+    if (await repo.existeOtraEmpresa(empresaAutorizada, tx)) throw origenIncompatible();
+    return { retirados: await repo.marcarCodigosRetirados(antesDe, tx) };
+  });
 }

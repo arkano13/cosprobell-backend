@@ -9,7 +9,7 @@ Programa Node.js separado en puente/. Requiere Node 22 o superior (verificado co
 - productos.js: convierte ItemCode, ItemName, BarCode, Valid y Frozen al contrato del backend. Solo tYES/tNO se interpretan como booleanos. Código de barras vacío pasa a null; datos faltantes o inválidos detienen el envío.
 - backend.client.js: consulta el avance y envía lotes con la credencial Bearer del puente. Comprueba la confirmación.
 - estado.js: archivo local de avance y lote pendiente, escritura mediante archivo temporal + fsync + rename; candado con el PID del proceso para impedir dos ejecuciones usando la misma carpeta y recuperarse solo tras un cierre forzado.
-- entidades.js: qué consulta y envía cada entidad (recurso SAP, campos, clave, filtro) y en qué orden: clientes y luego productos.
+- entidades.js: qué consulta y envía cada entidad (recurso SAP, campos, clave, filtro) y en qué orden: clientes, productos, unidades, códigos de barras y pedidos.
 - clientes.js y lote.js: conversión de BusinessPartners (solo clientes) y armado común de lotes con detalle del registro inválido.
 - sincronizar.js: persiste antes de enviar, confirma después de respuesta y recupera pendientes al reiniciar. Se ejecuta una vez por entidad en cada ciclo.
 - ejecutar.js: ejecución única o periódica, espera creciente ante errores temporales y parada por señales.
@@ -52,7 +52,7 @@ El modo periódico sigue siendo un proceso de consola; no está registrado en el
 
 ## Varias entidades
 
-Cada ciclo recorre clientes y luego productos. Cada entidad tiene su archivo de estado (clientes.json, productos.json) y su secuencia en el backend; el candado ejecucion.lock es uno solo para el proceso. Un error de datos en una entidad se registra con `"entidad"` y no impide sincronizar las demás; el proceso termina con código 1. Un error de conexión corta el ciclo completo.
+Cada ciclo recorre clientes, productos, unidades, códigos de barras y pedidos, en ese orden. Cada entidad tiene su archivo de estado (clientes.json, productos.json, unidades.json, codigosBarras.json, pedidos.json) y su secuencia en el backend; el candado ejecucion.lock es uno solo para el proceso. Un error de datos en una entidad se registra con `"entidad"` y no impide sincronizar las demás; el proceso termina con código 1. Un error de conexión corta el ciclo completo.
 
 ```json
 {"evento":"ciclo","entidad":"clientes","completo":true,"lotes":2,"ultimaSecuencia":2}
@@ -97,4 +97,4 @@ Verificación posterior a estas correcciones: 237/237 pruebas aprobadas. No se c
 
 ## Ampliación: pedidos (2026-09-28)
 
-El ciclo actual es clientes -> productos -> pedidos. Orders utiliza un cursor DocEntry numérico y un documento completo por lote; el estado se conserva en pedidos.json. La guía actual de alcance y pruebas está en PRUEBAS_PEDIDOS_SCANNER.md. El código de pedidos está integrado y probado con simulaciones; la compatibilidad con el Service Layer instalado sigue pendiente de la prueba real.
+El ciclo actual es clientes -> productos -> pedidos. Orders utiliza un cursor DocEntry numérico y un documento completo por lote; el estado se conserva en pedidos.json. Solo se recorren pedidos abiertos; los que se cierran o cancelan se detectan al final del recorrido y se piden por clave (detalle en PRUEBAS_PEDIDOS_SCANNER.md). La guía actual de alcance y pruebas está en PRUEBAS_PEDIDOS_SCANNER.md. El código de pedidos está integrado y probado con simulaciones; la compatibilidad con el Service Layer instalado sigue pendiente de la prueba real.

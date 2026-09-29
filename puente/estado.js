@@ -38,6 +38,11 @@ export async function abrirAlmacen(config, entidad) {
       !(estado.cursor === null || (entidad.claveNumerica
         ? Number.isInteger(estado.cursor) && estado.cursor >= 0 && estado.cursor <= 2147483647
         : typeof estado.cursor === "string"))) throw new ErrorPuente("ESTADO_LOCAL_INCOMPATIBLE");
+  // Revisión de cierres (solo pedidos): hora de inicio del recorrido y claves pendientes de revisar.
+  const { inicioRecorrido = null, porRevisar = null } = estado;
+  const claveValida = (c) => entidad.claveNumerica ? Number.isSafeInteger(c) && c >= 0 : typeof c === "string";
+  if (!(inicioRecorrido === null || (typeof inicioRecorrido === "string" && Number.isFinite(Date.parse(inicioRecorrido)))) ||
+      !(porRevisar === null || (Array.isArray(porRevisar) && porRevisar.every(claveValida)))) throw new ErrorPuente("ESTADO_LOCAL_INCOMPATIBLE");
   if (estado.pendiente !== null) {
     const p = estado.pendiente;
     const valido = entidad.schema.safeParse(p?.lote);

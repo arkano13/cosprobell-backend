@@ -6,13 +6,13 @@ export const pickingEtiquetasRepository = {
       where: {
         OR: [
           { barCode: codigo },
-          { codigosBarras: { some: { codigo } } },
+          { codigosBarras: { some: { codigo, retiradoEnSap: false } } },
         ],
       },
       select: {
         itemCode: true,
         codigosBarras: {
-          where: { codigo },
+          where: { codigo, retiradoEnSap: false },
           select: {
             id: true,
             itemCode: true,
