@@ -517,3 +517,9 @@ Verificación: 310 pruebas; prueba completa en Chromium (PC y celular) y auditor
 ### 2026-09-29 — Tono formal
 
 A pedido de Cosprobell, la identidad se llevó a un tono más serio: se quitaron los sellos rotados, las sombras sólidas desplazadas, la trama de puntos, las muescas y el código de barras decorativo de las tarjetas y la cinta de advertencia. Se conservan el morado, el panel oscuro del lector, las letras y las casillas por unidad. El cierre pasa a ser un resumen con estado, unidades preparadas, líneas completas, operador y horas de inicio y fin. Verificación: 310 pruebas, prueba completa en Chromium y auditoría axe-core sin problemas.
+
+## 22. Pantalla de bodega como app de escritorio
+
+La pantalla se usará en PC, no en celulares. Se convirtió en una app de Windows (Electron) en un repositorio aparte, `cosprobell-bodega-escritorio`, y se quitó de este backend: ya no existen `public/bodega/` ni la ruta `/bodega`. Sus pruebas y su guía se movieron a ese repositorio. Se conservan aquí el nombre de producto en el detalle del pedido y `scripts/datos-demo-bodega.js`.
+
+La app trae la pantalla dentro y se conecta por HTTPS a la dirección del servidor configurada en cada equipo, desde el origen `app://bodega`. Depende de que `cors()` siga aceptando sus solicitudes; la seguridad sigue estando en la API key de cada equipo. Cambios en la pantalla ahora requieren publicar una versión nueva del instalador.
