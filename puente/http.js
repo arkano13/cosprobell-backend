@@ -4,13 +4,15 @@ export class ErrorPuente extends Error {
     super(codigo); this.code = codigo; this.temporal = temporal; this.detalle = detalle;
   }
 }
-export async function solicitar(url, opciones = {}, fetchImpl = fetch) {
+// leerDetalle (opcional) extrae datos no secretos de una respuesta de error; solo lo usa el cliente del backend.
+export async function solicitar(url, opciones = {}, fetchImpl = fetch, leerDetalle = null) {
   let respuesta;
   try { respuesta = await fetchImpl(url, { ...opciones, redirect: "error", signal: AbortSignal.timeout(30000) }); }
   catch { throw new ErrorPuente("CONEXION_O_TLS", true); }
   if (!respuesta.ok) {
-    await respuesta.body?.cancel();
-    throw new ErrorPuente(`HTTP_${respuesta.status}`, [408, 429, 500, 502, 503, 504].includes(respuesta.status));
+    const detalle = leerDetalle ? await leerDetalle(respuesta).catch(() => undefined) : undefined;
+    await respuesta.body?.cancel().catch(() => {});
+    throw new ErrorPuente(`HTTP_${respuesta.status}`, [408, 429, 500, 502, 503, 504].includes(respuesta.status), detalle);
   }
   return respuesta;
 }

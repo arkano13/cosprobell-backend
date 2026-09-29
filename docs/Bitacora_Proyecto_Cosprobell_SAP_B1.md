@@ -479,3 +479,12 @@ scripts/ver-certificado.js ahora es exclusivamente diagnóstico: muestra huella 
 - Preparados docs/PRUEBAS_PEDIDOS_SCANNER.md y scripts/comprobar-recepcion-pedidos.js. Este último queda SIN EJECUTAR hasta retomar pruebas; usa datos sintéticos y ROLLBACK. La sintaxis fue comprobada con node --check.
 - No requiere nueva migración. Desplegar primero backend y luego puente, conservando estados locales y secretos.
 - Pendiente: validar proyección DocumentLines y certificado en SAP real, pruebas de persistencia y concurrencia real, importación de asociaciones de barras/unidades y confirmación de etiquetas, pantalla de bodega, lector físico, política de antigüedad de datos y revisión supervisada. No se declara el escáner listo para producción.
+
+
+## 20. Pedidos solo abiertos; códigos de barras y unidades desde SAP
+
+**Pedidos.** La versión anterior recorría todo el historial de Orders en cada ciclo, una consulta por pedido. Ahora el recorrido filtra `DocumentStatus eq 'bost_Open'`. Al empezar se anota la hora del backend; al terminar, los pedidos que el backend tiene abiertos y no se actualizaron desde esa hora se piden por clave (`Orders(DocEntry)`) para registrar su cierre o cancelación. Nueva ruta `GET /integracion/pedidos/abiertos`. Punta a punta con PostgreSQL y SAP simulado: con 20 pedidos históricos y 10 abiertos, el historial no se consulta; al cerrar pedidos en SAP solo esos se piden por clave y sus sesiones pasan a `requiere_revision`, sin afectar sesiones de pedidos sin cambios.
+
+**Códigos de barras y unidades.** Nuevas entidades `unidades` (UnitOfMeasurements) y `codigosBarras` (BarCodes), campos verificados en `response.xml`. Migración aditiva `20260929090000_codigos_barras_sap`: `sapAbsEntry` único, `sincronizadoEn`, `retiradoEnSap`, índice por `codigo` y `confirmadaPor` en confirmaciones. Los códigos se actualizan por `AbsEntry` sin borrar confirmaciones; una asociación manual equivalente se vincula a SAP; los que SAP deja de listar se marcan retirados (no se borran) y el picking y la búsqueda los ignoran. Punta a punta: 70 códigos importados, la asociación manual confirmada se vinculó sin duplicarse, dos códigos retirados y uno reactivado al reaparecer, con su confirmación intacta.
+
+El puente muestra ahora el código de error del backend (`detalle.codigoBackend`, p. ej. `PRODUCTO_NO_SINCRONIZADO`). 290 pruebas aprobadas. Sin conexión a SAP real.

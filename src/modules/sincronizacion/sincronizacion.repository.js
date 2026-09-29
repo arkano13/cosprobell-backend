@@ -1,4 +1,5 @@
 import { prisma } from "../../infrastructure/database/prisma.js";
+import { AppError } from "../../shared/errors/AppError.js";
 import { guardarPedido } from "./pedidos.repository.js";
 export const sincronizacionRepository = {
   guardarPedido,
@@ -34,6 +35,31 @@ export const sincronizacionRepository = {
       create: { ...cliente, sincronizadoEn: new Date() },
       update: { ...cliente, sincronizadoEn: new Date() },
     });
+  },
+  guardarUnidad(unidad, db) {
+    const { absEntry, ...datos } = unidad;
+    return db.unidadMedida.upsert({ where: { absEntry }, create: unidad, update: datos });
+  },
+  async guardarCodigoBarras(registro, db) {
+    const producto = await db.producto.findUnique({ where: { itemCode: registro.itemCode }, select: { itemCode: true } });
+    if (!producto) throw new AppError({ code: "PRODUCTO_NO_SINCRONIZADO",
+      message: "Debe sincronizar el producto antes de recibir sus códigos de barras", statusCode: 409 });
+    const datos = { itemCode: registro.itemCode, codigo: registro.codigo, uomEntry: registro.uomEntry, sincronizadoEn: new Date(), retiradoEnSap: false };
+    const existente = await db.productoCodigoBarras.findUnique({ where: { sapAbsEntry: registro.absEntry }, select: { id: true } });
+    if (existente) return db.productoCodigoBarras.update({ where: { id: existente.id }, data: datos });
+    // Una asociación creada a mano con los mismos datos se vincula a SAP y conserva su confirmación.
+    const local = await db.productoCodigoBarras.findFirst({ where: { sapAbsEntry: null, itemCode: registro.itemCode,
+      codigo: registro.codigo, uomEntry: registro.uomEntry }, select: { id: true }, orderBy: { id: "asc" } });
+    if (local) return db.productoCodigoBarras.update({ where: { id: local.id }, data: { ...datos, sapAbsEntry: registro.absEntry } });
+    return db.productoCodigoBarras.create({ data: { ...datos, sapAbsEntry: registro.absEntry } });
+  },
+  // Códigos de SAP que no se recibieron desde "antesDe": SAP ya no los lista. Se marcan, no se borran,
+  // para conservar su confirmación si vuelven a aparecer.
+  async marcarCodigosRetirados(antesDe, db = prisma) {
+    const { count } = await db.productoCodigoBarras.updateMany({
+      where: { sapAbsEntry: { not: null }, retiradoEnSap: false, OR: [{ sincronizadoEn: null }, { sincronizadoEn: { lt: antesDe } }] },
+      data: { retiradoEnSap: true } });
+    return count;
   },
   async guardarEstado({ entidad, empresa, secuencia, hash, cantidad }, db) {
     await db.$executeRaw`

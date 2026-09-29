@@ -203,3 +203,58 @@ test("HTTP informa los pedidos abiertos con la hora del backend y exige la crede
   t.mock.method(repo, "existeOtraEmpresa", async () => true);
   assert.equal((await fetch(`${url}/integracion/pedidos/abiertos`, { headers: { Authorization: `Bearer ${process.env.BRIDGE_API_KEY}` } })).status, 409);
 });
+
+const autorizado = { Authorization: `Bearer ${process.env.BRIDGE_API_KEY}` };
+test("HTTP recibe unidades y códigos de barras con sus propias secuencias", async (t) => {
+  const f = preparar(t); const unidades = [], codigos = [];
+  t.mock.method(repo, "guardarUnidad", async (u) => { unidades.push(u); });
+  t.mock.method(repo, "guardarCodigoBarras", async (c) => { codigos.push(c); });
+  const r1 = await enviarA("unidades", { version: 1, empresa, secuencia: 1, unidades: [{ absEntry: 1, code: "UN", name: null }] });
+  assert.equal(r1.status, 200);
+  f.estado(); t.mock.method(repo, "consultarEstado", async () => null);
+  const r2 = await enviarA("codigosBarras", { version: 1, empresa, secuencia: 1, codigosBarras: [{ absEntry: 9, itemCode: "P1", codigo: "0012345", uomEntry: 1 }] });
+  assert.equal(r2.status, 200);
+  assert.deepEqual(unidades, [{ absEntry: 1, code: "UN", name: null }]);
+  assert.deepEqual(codigos, [{ absEntry: 9, itemCode: "P1", codigo: "0012345", uomEntry: 1 }]);
+  for (const cuerpo of [
+    { version: 1, empresa, secuencia: 1, unidades: [{ absEntry: -1, code: "Manual", name: null }] },
+    { version: 1, empresa, secuencia: 1, codigosBarras: [{ absEntry: 9, itemCode: "P1", codigo: " 0012345", uomEntry: 1 }] },
+    { version: 1, empresa, secuencia: 1, codigosBarras: [{ absEntry: 9, itemCode: "P1", codigo: "1", uomEntry: -2 }] },
+  ]) assert.equal((await enviarA(Object.keys(cuerpo).at(-1), cuerpo)).status, 400);
+});
+test("HTTP hora y retiro de códigos: validan fecha y exigen la credencial del puente", async (t) => {
+  preparar(t); let antesDe;
+  t.mock.method(repo, "marcarCodigosRetirados", async (fecha) => { antesDe = fecha; return 2; });
+  const hora = await (await fetch(`${url}/integracion/hora`, { headers: autorizado })).json();
+  assert.ok(Number.isFinite(Date.parse(hora.data.ahora)));
+  const retirar = (body, headers = autorizado) => fetch(`${url}/integracion/codigosBarras/retirados`, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const ok = await retirar({ antesDe: "2026-09-01T10:00:00.000Z" });
+  assert.equal(ok.status, 200); assert.deepEqual(await ok.json(), { data: { retirados: 2 } });
+  assert.equal(antesDe.toISOString(), "2026-09-01T10:00:00.000Z");
+  assert.equal((await retirar({})).status, 400);
+  assert.equal((await retirar({ antesDe: "ayer" })).status, 400);
+  assert.equal((await retirar({ antesDe: new Date(Date.now() + 3600000).toISOString() })).status, 400);
+  assert.equal((await retirar({ antesDe: "2026-09-01T10:00:00.000Z" }, {})).status, 401);
+});
+test("repositorio: guarda un código de SAP, adopta la asociación local y exige el producto", async () => {
+  const operaciones = []; let productoExiste = true, porAbsEntry = null, local = null;
+  const db = {
+    producto: { findUnique: async () => (productoExiste ? { itemCode: "P1" } : null) },
+    productoCodigoBarras: {
+      findUnique: async () => porAbsEntry, findFirst: async (args) => { operaciones.push(["buscarLocal", args.where]); return local; },
+      update: async (args) => operaciones.push(["actualizar", args.where.id, args.data]),
+      create: async (args) => operaciones.push(["crear", args.data]),
+    },
+  };
+  const registro = { absEntry: 9, itemCode: "P1", codigo: "0012345", uomEntry: 1 };
+  const sinFecha = (op) => op.map((v) => (v && typeof v === "object" ? { ...v, sincronizadoEn: v.sincronizadoEn instanceof Date } : v));
+  await repo.guardarCodigoBarras(registro, db);
+  assert.deepEqual(sinFecha(operaciones.at(-1)), ["crear", { itemCode: "P1", codigo: "0012345", uomEntry: 1, sincronizadoEn: true, retiradoEnSap: false, sapAbsEntry: 9 }]);
+  assert.deepEqual(operaciones.at(-2)[1], { sapAbsEntry: null, itemCode: "P1", codigo: "0012345", uomEntry: 1 });
+  local = { id: 4 }; await repo.guardarCodigoBarras(registro, db);
+  assert.deepEqual(sinFecha(operaciones.at(-1)), ["actualizar", 4, { itemCode: "P1", codigo: "0012345", uomEntry: 1, sincronizadoEn: true, retiradoEnSap: false, sapAbsEntry: 9 }]);
+  porAbsEntry = { id: 7 }; await repo.guardarCodigoBarras({ ...registro, codigo: "999" }, db);
+  assert.deepEqual(sinFecha(operaciones.at(-1)), ["actualizar", 7, { itemCode: "P1", codigo: "999", uomEntry: 1, sincronizadoEn: true, retiradoEnSap: false }]);
+  productoExiste = false;
+  await assert.rejects(repo.guardarCodigoBarras(registro, db), { code: "PRODUCTO_NO_SINCRONIZADO" });
+});

@@ -7,11 +7,13 @@ export async function sincronizar({ config, almacen, sap, backend, entidad = PRO
   const coincide = remoto === estado.secuencia || (estado.pendiente && remoto === estado.pendiente.lote.secuencia);
   if (!coincide) throw new ErrorPuente("REQUIERE_RECONCILIACION");
   let lotes = 0, terminado = false;
-  // Pedidos: al empezar un recorrido se anota la hora del backend. Al terminarlo, los pedidos que el backend
-  // tiene abiertos y no se actualizaron desde entonces ya no figuran abiertos en SAP (se cerraron o cancelaron):
-  // se piden uno por uno para registrar su estado actual.
-  if (entidad.revisarCierres && estado.cursor === null && !estado.pendiente && !estado.porRevisar && !estado.inicioRecorrido) {
-    await guardar({ ...estado, inicioRecorrido: (await backend.pedidosAbiertos()).ahora });
+  // Al empezar un recorrido se anota la hora del backend. Al terminarlo:
+  // - pedidos: los que el backend tiene abiertos y no se actualizaron desde entonces ya no figuran abiertos
+  //   en SAP (se cerraron o cancelaron); se piden uno por uno para registrar su estado actual.
+  // - códigos de barras: el backend marca como retirados los que no se recibieron desde entonces.
+  const conInicio = entidad.revisarCierres || entidad.depurarRetirados;
+  if (conInicio && estado.cursor === null && !estado.pendiente && !estado.porRevisar && !estado.inicioRecorrido) {
+    await guardar({ ...estado, inicioRecorrido: await backend.hora() });
   }
   while (!detenido()) {
     if (estado.pendiente) {
@@ -28,6 +30,7 @@ export async function sincronizar({ config, almacen, sap, backend, entidad = PRO
     }
     const filas = await sap.pagina(estado.cursor, entidad);
     if (!filas.length) {
+      if (entidad.depurarRetirados && estado.inicioRecorrido) await backend.marcarRetirados(estado.inicioRecorrido);
       if (!entidad.revisarCierres) { terminado = true; break; }
       const { pedidos } = await backend.pedidosAbiertos();
       // Sin hora de inicio (recorrido empezado por una versión anterior) la revisión queda para el próximo recorrido.
@@ -46,6 +49,6 @@ export async function sincronizar({ config, almacen, sap, backend, entidad = PRO
     await guardar({ ...estado, pendiente: { lote, cursor } });
   }
   if (!terminado) return { completo: false, lotes, ultimaSecuencia: estado.secuencia };
-  await guardar({ ...estado, cursor: null, ...(entidad.revisarCierres ? { porRevisar: null, inicioRecorrido: null } : {}) });
+  await guardar({ ...estado, cursor: null, ...(conInicio ? { porRevisar: null, inicioRecorrido: null } : {}) });
   return { completo: true, lotes, ultimaSecuencia: estado.secuencia };
 }

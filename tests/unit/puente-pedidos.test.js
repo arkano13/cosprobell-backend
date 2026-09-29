@@ -34,7 +34,7 @@ test("pedidos recupera lote pendiente tras perder confirmación y persiste curso
   const config = { directorio, origen: "origen-simulado", empresa: "TEST" };
   let remoto = 0, perderRespuesta = true;
   const enviados = [], cursores = [];
-  const backend = { estado: async () => remoto, pedidosAbiertos: async () => ({ ahora: "2026-09-28T12:00:00.000Z", pedidos: [] }), enviar: async (lote, entidad) => {
+  const backend = { estado: async () => remoto, hora: async () => "2026-09-28T12:00:00.000Z", pedidosAbiertos: async () => ({ ahora: "2026-09-28T12:00:00.000Z", pedidos: [] }), enviar: async (lote, entidad) => {
     assert.equal(entidad, PEDIDOS); enviados.push(structuredClone(lote)); remoto = lote.secuencia;
     if (perderRespuesta) { perderRespuesta = false; throw new Error("respuesta perdida"); }
   } };
@@ -69,6 +69,7 @@ function backendSimulado() {
   const iso = (ms) => new Date(ms).toISOString();
   return { pedidos, enviados, backend: {
     estado: async () => remoto,
+    hora: async () => iso(++reloj),
     pedidosAbiertos: async () => ({ ahora: iso(++reloj), pedidos: [...pedidos.values()]
       .filter((p) => p.documentStatus === "bost_Open").map((p) => ({ docEntry: p.docEntry, sincronizadoEn: iso(p.en) })) }),
     enviar: async (lote) => { remoto = lote.secuencia; for (const p of lote.pedidos) { pedidos.set(p.docEntry, { ...p, en: ++reloj }); enviados.push(p.docEntry); } },

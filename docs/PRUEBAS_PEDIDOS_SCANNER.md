@@ -56,7 +56,7 @@ Mostrar `sincronizadoEn`: corresponde a la recepción local, no garantiza que SA
 1. Desplegar esta versión del backend antes de actualizar el puente. Este cambio no añade migraciones.
 2. Confirmar `SAP_COMPANY_DB=XPRUEBAS2026`, URL del backend de pruebas y credencial compartida del puente. Mantener separados los secretos SAP y la API key de la app.
 3. Resolver el certificado con sistemas y probar desde la red de Cosprobell. No desactivar TLS.
-4. Confirmar datos de códigos de barras, catálogo de unidades y asociaciones locales. El puente actual sincroniza datos básicos de productos, no importa automáticamente las asociaciones de barras ni confirma etiquetas como individuales.
+4. Revisar los códigos de barras y el catálogo de unidades importados de SAP (`BarCodes` y `UnitOfMeasurements`). La importación no confirma etiquetas: cada código que se use en picking debe confirmarse como unidad individual.
 5. Preparar en la sociedad de pruebas un pedido abierto de artículos con cliente, líneas y unidades válidas. No editar producción para esta prueba.
 6. Detener la tarea anterior antes de cambiar su paquete. Conservar `.bridge-state`, `.env.puente` y el certificado aprobado; no sustituirlos por archivos de ejemplo.
 

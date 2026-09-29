@@ -137,11 +137,17 @@ model ProductoCodigoBarras {
   producto    Producto @relation(fields: [itemCode], references: [itemCode])
   itemCode    String
   codigo      String
-  sapAbsEntry Int?
+  sapAbsEntry Int?     @unique
   uomEntry    Int?
+
+  // Espejo de BarCodes de SAP: última recepción y si SAP dejó de listarlo. Un código retirado
+  // no se usa en picking, pero se conserva junto con su confirmación por si vuelve a aparecer.
+  sincronizadoEn DateTime?
+  retiradoEnSap  Boolean   @default(false)
 
   confirmacionPicking ConfirmacionEtiquetaPicking?
 
+  @@index([codigo])
   @@map("productos_codigos_barras")
 }
 
@@ -156,8 +162,9 @@ model ConfirmacionEtiquetaPicking {
   codigoConfirmado   String
   uomEntryConfirmado Int?
 
-  confirmadaEn DateTime @default(now())
-  observacion  String?
+  confirmadaEn  DateTime @default(now())
+  confirmadaPor String? // aplicación (API key) que registró la confirmación
+  observacion   String?
 
   @@map("confirmaciones_etiquetas_picking")
 }
@@ -681,7 +688,6 @@ model ApiKey {
 // NOTA: evaluaciones_credito se disena intencionalmente en la fase final del
 // proyecto (decision del usuario, ver bitacora seccion 13). No se incluye aqui
 // para no fijar una estructura antes de definir el criterio del semaforo.
-
 
 // Estado de recepción de una única empresa SAP por base local.
 model SincronizacionEstado {
