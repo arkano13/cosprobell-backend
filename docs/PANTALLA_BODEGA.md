@@ -7,7 +7,7 @@ Página web para quien prepara los pedidos. La sirve el mismo backend en `/bodeg
 1. **Configurar el equipo** (una sola vez): la clave (API key) del equipo y el nombre de quien escanea. La clave queda guardada solo en ese navegador.
 2. **Pedidos abiertos**: lista con número, cliente, fechas y hace cuánto llegaron los datos de SAP. Buscador por número o cliente.
 3. **Detalle del pedido**: productos y cantidades pendientes a preparar. Si el pedido no se puede preparar (cerrado, cancelado, unidad "Manual", etc.), lo explica y no deja empezar.
-4. **Escaneo**: cada lectura responde en grande, en verde (✓ producto y cuántas lleva) o en rojo (✗ motivo), con sonido distinto y vibración en los errores. Las líneas pendientes quedan arriba; las completas, en verde al final.
+4. **Escaneo**: cada lectura responde en grande, en verde con ícono de aceptada (producto y cuántas lleva) o en rojo con ícono de rechazada (motivo), con sonido distinto y vibración en los errores. Las líneas pendientes quedan arriba; las completas, en verde al final. En PC la lectura queda a la izquierda y las líneas a la derecha.
 5. **Ver lecturas**: historial de la preparación (aceptadas y rechazadas).
 6. **Finalizar**: si faltan productos, muestra cuáles y pide confirmar "Finalizar con diferencias".
 
@@ -17,7 +17,7 @@ Si se sale de una preparación sin finalizarla, la lista ofrece **Continuar** do
 
 - El lector debe funcionar **como teclado** y terminar cada lectura con **Enter** (configuración habitual de fábrica).
 - El campo de lectura tiene siempre el foco; si se toca un botón, vuelve solo.
-- En Android el teclado en pantalla no aparece al escanear. El botón **Teclado** lo muestra para escribir un código a mano.
+- En Android el teclado en pantalla no aparece al escanear. El botón con ícono de **teclado** lo muestra para escribir un código a mano. En una PC con mouse ese botón no se muestra: se escribe con el teclado físico.
 
 ## Sin conexión y reintentos
 
@@ -50,6 +50,13 @@ npm run dev
 
 Abrir `http://localhost:3000/bodega/`, configurar la clave y preparar el pedido 90001. El script muestra los códigos: dos válidos (shampoo y jabón) y tres que se rechazan (crema sin confirmar, caja de shampoo y un producto fuera del pedido). Se pueden escribir y presionar Enter si no hay lector. `--reiniciar` vuelve a crear los datos y `--borrar` los elimina.
 
+## Diseño
+
+- Tema claro, pensado para una bodega iluminada. Color de marca: morado **#362F44** (barra superior); acciones en violeta **#5B3FA0**; verde y rojo solo para aceptado y rechazado, siempre acompañados de ícono y texto.
+- Contraste de texto de al menos 4.5:1 (WCAG AA) en todas las combinaciones; botones de 48 px o más; foco visible; respeta "reducir movimiento" del sistema.
+- Íconos SVG de Lucide (licencia ISC) dentro de `js/iconos.js`: no se descargan de internet.
+- Letra del sistema (sin fuentes externas), para que cargue igual en la red interna.
+
 ## Seguridad
 
 - Los archivos de la pantalla son públicos y no contienen datos ni claves. Todos los datos se piden con la clave del equipo.
@@ -58,7 +65,7 @@ Abrir `http://localhost:3000/bodega/`, configurar la clave y preparar el pedido 
 
 ## Verificación
 
-Prueba en Chromium real contra PostgreSQL con los datos de demostración: configuración con clave equivocada y correcta, lista, detalle, lectura válida, cuatro rechazos, respuesta del servidor perdida y reintento sin doble conteo, corte de red con reenvío automático, recarga con lecturas pendientes (enviadas una sola vez), exceso, historial, vista de celular (412 px, sin desplazamiento horizontal ni teclado en pantalla) y finalización con diferencias. Sin errores de página ni de la política de seguridad (CSP).
+Prueba en Chromium real contra PostgreSQL con los datos de demostración: configuración con clave equivocada y correcta, lista, detalle, lectura válida, cuatro rechazos, respuesta del servidor perdida y reintento sin doble conteo, corte de red con reenvío automático, recarga con lecturas pendientes (enviadas una sola vez), exceso, historial, vista de celular (375 px, sin desplazamiento horizontal, sin teclado en pantalla y botones de 44 px o más) y finalización con diferencias. Sin errores de página ni de la política de seguridad (CSP). Auditoría automática de accesibilidad (axe-core, WCAG 2.2 A/AA) de cada vista en PC y celular, sin problemas detectados.
 
 No probado: un lector físico y equipos Android reales.
 

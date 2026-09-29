@@ -1,5 +1,6 @@
 import { crearApi } from "./api.js";
 import { crearColaLecturas } from "./lecturas.js";
+import { icono } from "./iconos.js";
 
 // ---------------------------------------------------------------------------
 // Utilidades
@@ -100,15 +101,32 @@ const dialogo = document.getElementById("dialogo");
 function mostrar(...nodos) {
   for (const limpiar of limpiezas) limpiar();
   limpiezas = [];
+  delete vista.dataset.ancho;
   // Las partes condicionales (a && h(...)) pueden venir como false o null: no se muestran.
   vista.replaceChildren(...nodos.flat().filter((nodo) => nodo instanceof Node));
   window.scrollTo(0, 0);
+}
+// Vistas con varias columnas en PC (lista de pedidos y escaneo).
+function mostrarAmplio(...nodos) {
+  mostrar(...nodos);
+  vista.dataset.ancho = "amplio";
 }
 function escuchar(objetivo, evento, funcion) {
   objetivo.addEventListener(evento, funcion);
   limpiezas.push(() => objetivo.removeEventListener(evento, funcion));
 }
 const cargando = (texto) => h("p", { class: "cargando" }, texto);
+const boton = (clase, nombreIcono, texto, atributos = {}) =>
+  h("button", { class: `boton ${clase}`.trim(), type: "button", ...atributos }, nombreIcono && icono(nombreIcono), texto);
+
+// Aviso con ícono: el color nunca es la única señal.
+const ICONO_AVISO = { error: "rechazada", alerta: "alerta", ok: "aceptada" };
+function aviso(tipo, texto, atributos = {}, ...extra) {
+  const { class: clase = "", ...resto } = atributos;
+  return h("div", { class: `aviso aviso--${tipo} ${clase}`.trim(), ...resto },
+    icono(ICONO_AVISO[tipo]), h("span", { class: "aviso__texto" }, texto), ...extra);
+}
+const textoAviso = (elemento, texto) => { elemento.querySelector(".aviso__texto").textContent = texto; };
 
 function guardarSesion(sesion) {
   estado.sesion = sesion;
@@ -116,17 +134,19 @@ function guardarSesion(sesion) {
 }
 
 function actualizarBarra() {
-  document.getElementById("operador").textContent = estado.operador ? `Operador: ${estado.operador}` : "";
+  const operador = document.getElementById("operador");
+  operador.hidden = !estado.operador;
+  operador.replaceChildren(...(estado.operador ? [icono("operador"), h("span", {}, `Operador: ${estado.operador}`)] : []));
 }
 
 // Error al cargar una vista: la clave inválida lleva a configurar el equipo; el resto ofrece reintentar.
 function mostrarError(error, reintentar) {
   if (error?.status === 401) return vistaConfiguracion("La clave de este equipo no es válida o fue desactivada.");
   return mostrar(h("div", { class: "tarjeta" },
-    h("p", { class: "aviso aviso--error", role: "alert" }, error?.mensaje ?? "Ocurrió un error inesperado"),
+    aviso("error", error?.mensaje ?? "Ocurrió un error inesperado", { role: "alert" }),
     h("div", { class: "fila" },
-      h("button", { class: "boton boton--principal", type: "button", onclick: reintentar }, "Reintentar"),
-      h("button", { class: "boton", type: "button", onclick: () => vistaPedidos() }, "Volver a pedidos"))));
+      boton("boton--principal", "actualizar", "Reintentar", { onclick: reintentar }),
+      boton("", "volver", "Volver a pedidos", { onclick: () => vistaPedidos() }))));
 }
 
 // Diálogo de confirmación: resuelve true o false.
@@ -151,8 +171,8 @@ function vistaConfiguracion(mensaje = "") {
   const clave = h("input", { id: "cfg-clave", type: "password", autocomplete: "off", required: true });
   const operador = h("input", { id: "cfg-operador", type: "text", autocomplete: "name", maxlength: "60" });
   operador.value = estado.operador;
-  const error = h("p", { class: "aviso aviso--error", role: "alert", hidden: !mensaje }, mensaje);
-  const guardar = h("button", { class: "boton boton--principal boton--ancho", type: "submit" }, "Guardar y continuar");
+  const error = aviso("error", mensaje, { role: "alert", hidden: !mensaje });
+  const guardar = h("button", { class: "boton boton--principal boton--ancho boton--grande", type: "submit" }, "Guardar y continuar");
   const formulario = h("form", { class: "tarjeta formulario", onsubmit: async (evento) => {
     evento.preventDefault();
     guardar.disabled = true; error.hidden = true;
@@ -165,7 +185,7 @@ function vistaConfiguracion(mensaje = "") {
       actualizarBarra();
       vistaPedidos();
     } catch (e) {
-      error.textContent = e.status === 401 ? "La clave no es válida o está desactivada." : e.mensaje;
+      textoAviso(error, e.status === 401 ? "La clave no es válida o está desactivada." : e.mensaje);
       error.hidden = false; guardar.disabled = false;
     }
   } },
@@ -192,10 +212,10 @@ async function vistaPedidos() {
     pedidos.push(...respuesta.data); cursor = respuesta.siguienteCursor;
   } catch (error) { return mostrarError(error, vistaPedidos); }
 
-  const buscador = h("input", { class: "buscador", type: "search", placeholder: "Buscar por número o cliente", "aria-label": "Buscar pedido" });
+  const buscador = h("input", { class: "buscador__campo", type: "search", placeholder: "Buscar por número o cliente", "aria-label": "Buscar pedido" });
   const lista = h("ul", { class: "pedidos" });
-  const masBoton = h("button", { class: "boton boton--ancho", type: "button" }, "Cargar más pedidos");
-  const vacio = h("p", { class: "suave" });
+  const masBoton = boton("boton--ancho", null, "Cargar más pedidos");
+  const vacio = h("p", { class: "suave vacio" });
 
   function pintar() {
     const filtro = buscador.value.trim().toLowerCase();
@@ -205,8 +225,10 @@ async function vistaPedidos() {
         h("div", { class: "pedido__numero" }, `Pedido ${p.docNum}`),
         h("div", { class: "pedido__cliente" }, p.cliente?.cardName ?? p.cardCode),
         h("div", { class: "pedido__meta" }, `Fecha ${fecha(p.docDate)} · Entrega ${fecha(p.docDueDate)}`),
-        h("div", { class: "pedido__meta" }, `Datos de SAP ${hace(p.sincronizadoEn)}`)))));
+        h("div", { class: "pedido__meta" }, `Datos de SAP ${hace(p.sincronizadoEn)}`),
+        icono("siguiente", "icono pedido__flecha")))));
     vacio.textContent = pedidos.length ? (visibles.length ? "" : "Ningún pedido coincide con la búsqueda.") : "No hay pedidos abiertos.";
+    vacio.hidden = !vacio.textContent;
     masBoton.hidden = cursor === null;
   }
   buscador.addEventListener("input", pintar);
@@ -220,14 +242,13 @@ async function vistaPedidos() {
     masBoton.disabled = false;
   });
 
-  const abierta = estado.sesion && h("div", { class: "aviso aviso--alerta fila fila--entre" },
-    h("span", {}, `Tenés una preparación abierta: pedido ${estado.sesion.docNum ?? estado.sesion.docEntry}.`),
-    h("button", { class: "boton boton--principal", type: "button", onclick: () => vistaEscaneo() }, "Continuar"));
+  const abierta = estado.sesion && aviso("alerta", `Tenés una preparación abierta: pedido ${estado.sesion.docNum ?? estado.sesion.docEntry}.`, {},
+    boton("boton--principal", "escaner", "Continuar", { onclick: () => vistaEscaneo() }));
 
-  mostrar(
-    h("div", { class: "fila fila--entre" }, h("h1", {}, "Pedidos abiertos"),
-      h("button", { class: "boton", type: "button", onclick: () => vistaPedidos() }, "Actualizar")),
-    abierta, buscador, vacio, lista, masBoton);
+  mostrarAmplio(
+    h("div", { class: "encabezado" }, h("h1", {}, "Pedidos abiertos"),
+      boton("", "actualizar", "Actualizar", { onclick: () => vistaPedidos() })),
+    abierta, h("label", { class: "buscador" }, icono("buscar"), buscador), vacio, lista, masBoton);
   pintar();
 }
 
@@ -243,7 +264,8 @@ function tarjetaLinea(linea, nombre, { pedida, escaneada = null, reciente = fals
       [nombre.itemCode, nombre.uomCode && `Unidad ${nombre.uomCode}`, nombre.warehouseCode && `Bodega ${nombre.warehouseCode}`].filter(Boolean).join(" · ")),
     h("div", { class: "linea__cantidad" },
       escaneada === null ? cantidad(pedida) : `${cantidad(escaneada)} / ${cantidad(pedida)}`,
-      h("small", {}, escaneada === null ? "a preparar" : completa ? "completa" : `faltan ${cantidad(pedida - escaneada)}`)));
+      h("small", {}, completa && icono("completa"),
+        escaneada === null ? "a preparar" : completa ? "completa" : `faltan ${cantidad(pedida - escaneada)}`)));
 }
 
 async function vistaPedido(docEntry) {
@@ -251,31 +273,31 @@ async function vistaPedido(docEntry) {
   let respuesta;
   try { respuesta = await api.pedido(docEntry); } catch (error) { return mostrarError(error, () => vistaPedido(docEntry)); }
   const { data: pedido, preparacion } = respuesta;
-  const aviso = h("p", { class: "aviso aviso--error", role: "alert", hidden: preparacion.datosValidos }, preparacion.message ?? "");
-  const empezar = h("button", { class: "boton boton--principal boton--ancho", type: "button", disabled: !preparacion.datosValidos }, "Empezar preparación");
+  const problema = aviso("error", preparacion.message ?? "", { role: "alert", hidden: preparacion.datosValidos });
+  const empezar = boton("boton--principal boton--ancho boton--grande", "escaner", "Empezar preparación", { disabled: !preparacion.datosValidos });
   empezar.addEventListener("click", async () => {
-    empezar.disabled = true; aviso.hidden = true;
+    empezar.disabled = true; problema.hidden = true;
     try {
       const { data: sesion } = await api.iniciar(pedido.docEntry, estado.operador);
       guardarSesion({ pickingId: sesion.id, docEntry: pedido.docEntry, docNum: pedido.docNum });
       vistaEscaneo();
     } catch (error) {
       if (error.status === 401) return mostrarError(error);
-      aviso.textContent = error.mensaje; aviso.hidden = false; empezar.disabled = false;
+      textoAviso(problema, error.mensaje); problema.hidden = false; empezar.disabled = false;
     }
   });
   const lineasPorNumero = new Map(pedido.lineas.map((l) => [l.lineNum, l]));
   const aPreparar = preparacion.datosValidos ? preparacion.lineas : [];
   mostrar(
-    h("button", { class: "boton", type: "button", onclick: () => vistaPedidos() }, "← Pedidos"),
-    h("h1", {}, `Pedido ${pedido.docNum}`),
-    h("div", { class: "tarjeta" },
+    boton("boton--volver", "volver", "Pedidos", { onclick: () => vistaPedidos() }),
+    h("div", { class: "encabezado" }, h("h1", {}, `Pedido ${pedido.docNum}`)),
+    h("div", { class: "tarjeta detalle-pedido" },
       h("div", { class: "pedido__cliente" }, pedido.cliente?.cardName ?? pedido.cardCode),
-      h("div", { class: "suave" }, `Fecha ${fecha(pedido.docDate)} · Entrega ${fecha(pedido.docDueDate)}`),
-      h("div", { class: "suave" }, `Datos de SAP ${hace(pedido.sincronizadoEn)}`)),
-    datosViejos(pedido.sincronizadoEn) && h("p", { class: "aviso aviso--alerta" },
+      h("div", { class: "pedido__meta" }, `Fecha ${fecha(pedido.docDate)} · Entrega ${fecha(pedido.docDueDate)}`),
+      h("div", { class: "pedido__meta" }, `Datos de SAP ${hace(pedido.sincronizadoEn)}`)),
+    datosViejos(pedido.sincronizadoEn) && aviso("alerta",
       "Los datos de este pedido tienen más de una hora sin actualizarse desde SAP. Confirmá con el supervisor antes de preparar."),
-    aviso,
+    problema,
     aPreparar.length > 0 && h("h2", {}, "A preparar"),
     h("ul", { class: "lineas" }, aPreparar.map((l) =>
       tarjetaLinea(l.pedidoLineNum, { ...lineasPorNumero.get(l.pedidoLineNum), uomCode: l.uomCode }, { pedida: l.cantidadPedida }))),
@@ -304,16 +326,18 @@ async function vistaEscaneo() {
   const lineasPedido = new Map(pedido.lineas.map((l) => [l.lineNum, l]));
   let lineaReciente = null;
 
-  const resultado = h("div", { class: "resultado", role: "status", "aria-live": "assertive" }, "Escaneá el primer producto.");
+  const resultado = h("div", { class: "resultado", role: "status", "aria-live": "assertive" });
   const envio = h("div", { class: "envio" });
   const barra = h("div", { class: "progreso__barra" });
-  const resumen = h("div", { class: "fila fila--entre" });
-  const bloqueo = h("p", { class: "aviso aviso--error", role: "alert", hidden: true });
-  const desconexion = h("div", { class: "aviso aviso--alerta fila fila--entre", hidden: true });
+  const progreso = h("div", { class: "progreso", role: "progressbar", "aria-label": "Avance de la preparación",
+    "aria-valuemin": "0", "aria-valuemax": "100" }, barra);
+  const resumen = h("div", { class: "fila fila--entre resumen" });
+  const bloqueo = aviso("error", "", { role: "alert", hidden: true });
+  const desconexion = h("div", { class: "aviso aviso--alerta", hidden: true });
   const lista = h("ul", { class: "lineas" });
   const entrada = h("input", { class: "entrada-escaneo", inputmode: "none", autocomplete: "off", autocapitalize: "off",
     spellcheck: "false", enterkeyhint: "send", "aria-label": "Código escaneado", placeholder: "Esperando lectura…" });
-  const teclado = h("button", { class: "boton", type: "button", title: "Mostrar u ocultar el teclado en pantalla" }, "Teclado");
+  const teclado = boton("boton--teclado", "teclado", h("span", { class: "boton__texto" }, "Teclado"), { title: "Mostrar u ocultar el teclado en pantalla" });
   teclado.addEventListener("click", () => {
     entrada.setAttribute("inputmode", entrada.getAttribute("inputmode") === "none" ? "text" : "none");
     entrada.blur(); entrada.focus();
@@ -323,7 +347,10 @@ async function vistaEscaneo() {
     const lineas = [...sesion.lineas].sort((a, b) => a.pedidoLineNum - b.pedidoLineNum);
     const total = lineas.reduce((s, l) => s + l.cantidadPedida, 0);
     const hechas = lineas.reduce((s, l) => s + Math.min(l.cantidadEscaneada, l.cantidadPedida), 0);
-    barra.style.width = `${total ? Math.round((hechas / total) * 100) : 0}%`;
+    const porcentaje = total ? Math.round((hechas / total) * 100) : 0;
+    barra.style.transform = `scaleX(${porcentaje / 100})`;
+    progreso.setAttribute("aria-valuenow", String(porcentaje));
+    progreso.classList.toggle("progreso--completo", porcentaje === 100);
     resumen.replaceChildren(
       h("strong", {}, `${cantidad(hechas)} de ${cantidad(total)} unidades`),
       h("span", { class: "suave" }, pendientesTexto(lineas.filter((l) => l.cantidadEscaneada < l.cantidadPedida).length)));
@@ -336,16 +363,25 @@ async function vistaEscaneo() {
     entrada.disabled = !activa;
     bloqueo.hidden = activa;
     if (sesion.estado === "requiere_revision") {
-      bloqueo.textContent = "SAP modificó este pedido mientras se preparaba. No se puede seguir escaneando: avisá al supervisor.";
+      textoAviso(bloqueo, "SAP modificó este pedido mientras se preparaba. No se puede seguir escaneando: avisá al supervisor.");
     } else if (!activa) {
-      bloqueo.textContent = `La preparación está en estado "${sesion.estado}".`;
+      textoAviso(bloqueo, `La preparación está en estado "${sesion.estado}".`);
     }
   }
 
+  // Cada lectura cambia el recuadro con un destello breve: dos rechazos iguales seguidos también se notan.
+  const movimientoReducido = matchMedia("(prefers-reduced-motion: reduce)");
   function mostrarResultado(tipo, titulo, detalle = "") {
-    resultado.className = `resultado resultado--${tipo}`;
-    resultado.replaceChildren(titulo, detalle ? h("small", {}, detalle) : "");
+    resultado.className = tipo ? `resultado resultado--${tipo}` : "resultado";
+    resultado.replaceChildren(icono(tipo === "ok" ? "aceptada" : tipo === "error" ? "rechazada" : "escaner"),
+      h("div", { class: "resultado__texto" }, h("span", { class: "resultado__titulo" }, titulo), detalle && h("small", {}, detalle)));
+    if (tipo) {
+      resultado.animate?.(movimientoReducido.matches
+        ? [{ opacity: 0.6 }, { opacity: 1 }]
+        : [{ opacity: 0.6, transform: "scale(0.98)" }, { opacity: 1, transform: "none" }], { duration: 180, easing: "ease-out" });
+    }
   }
+  mostrarResultado(null, "Escaneá el primer producto.");
 
   async function refrescarSesion() {
     try { sesion = (await api.sesion(pickingId)).data; pintar(); } catch { /* se reintenta en la próxima lectura */ }
@@ -368,31 +404,31 @@ async function vistaEscaneo() {
         lineaReciente = linea.id;
         desconexion.hidden = true;
         pintar();
-        mostrarResultado("ok", `✓ ${nombreDe(linea)}`,
+        mostrarResultado("ok", nombreDe(linea),
           `${cantidad(linea.cantidadEscaneada)} de ${cantidad(linea.cantidadPedida)}${linea.cantidadEscaneada >= linea.cantidadPedida ? " · línea completa" : ""}`);
         sonar("ok");
       }
       if (tipo === "rechazada") {
-        mostrarResultado("error", `✗ ${evento.error.mensaje}`, `Código ${lectura.codigo}`);
+        mostrarResultado("error", evento.error.mensaje, `Código ${lectura.codigo}`);
         sonar("error");
         refrescarSesion();
       }
       if (tipo === "detenida") {
         if (evento.error?.status === 401) return mostrarError(evento.error);
         desconexion.hidden = false;
-        desconexion.replaceChildren(
-          h("span", {}, `Sin conexión. ${enCola} ${enCola === 1 ? "lectura pendiente" : "lecturas pendientes"}: se enviarán al reconectar, sin contarse dos veces.`),
-          h("button", { class: "boton", type: "button", onclick: () => cola.reanudar() }, "Reintentar ahora"));
+        desconexion.replaceChildren(icono("sinRed"),
+          h("span", { class: "aviso__texto" }, `Sin conexión. ${enCola} ${enCola === 1 ? "lectura pendiente" : "lecturas pendientes"}: se enviarán al reconectar, sin contarse dos veces.`),
+          boton("", "actualizar", "Reintentar ahora", { onclick: () => cola.reanudar() }));
         sonar("error");
       }
   }
 
-  const formulario = h("form", { class: "fila", onsubmit: (evento) => {
+  const formulario = h("form", { class: "fila formulario-escaneo", onsubmit: (evento) => {
     evento.preventDefault();
     const codigo = entrada.value.trim();
     entrada.value = "";
     if (codigo) cola.agregar(codigo);
-  } }, h("div", { class: "crecer" }, entrada), teclado);
+  } }, h("div", { class: "crecer campo-escaneo" }, icono("escaner"), entrada), teclado);
 
   // El lector escribe como un teclado: la entrada debe tener el foco salvo que haya un diálogo abierto.
   const enfocar = () => { if (!dialogo.open && !entrada.disabled && document.activeElement !== entrada) entrada.focus({ preventScroll: true }); };
@@ -410,19 +446,19 @@ async function vistaEscaneo() {
         lecturas.push(...pagina.data); despuesDe = pagina.siguienteCursor;
       } while (despuesDe !== null);
     } catch (error) {
-      dialogo.replaceChildren(h("div", { class: "dialogo__cuerpo" }, h("p", { class: "aviso aviso--error" }, error.mensaje)),
-        h("div", { class: "dialogo__acciones" }, h("button", { class: "boton", type: "button", onclick: () => dialogo.close() }, "Cerrar")));
+      dialogo.replaceChildren(h("div", { class: "dialogo__cuerpo" }, aviso("error", error.mensaje)),
+        h("div", { class: "dialogo__acciones" }, boton("", null, "Cerrar", { onclick: () => dialogo.close() })));
       return;
     }
     dialogo.replaceChildren(
       h("div", { class: "dialogo__cuerpo" }, h("h2", {}, `Lecturas (${lecturas.length})`),
         lecturas.length === 0 ? h("p", { class: "suave" }, "Todavía no hay lecturas.") :
           h("ul", { class: "historial" }, lecturas.reverse().map((l) => h("li", {},
-            h("span", { class: l.resultado === "aceptado" ? "historial__ok" : "historial__error" }, l.resultado === "aceptado" ? "✓ " : "✗ "),
-            `${new Date(l.creadoEn).toLocaleTimeString("es-HN")} · ${l.codigo}`,
+            l.resultado === "aceptado" ? icono("aceptada", "icono historial__ok") : icono("rechazada", "icono historial__error"),
+            h("span", {}, `${l.resultado === "aceptado" ? "Aceptada" : "Rechazada"} · ${new Date(l.creadoEn).toLocaleTimeString("es-HN")} · ${l.codigo}`),
             h("div", { class: "suave" }, l.resultado === "aceptado"
               ? `${l.itemCode ?? ""} · quedó en ${cantidad(l.cantidadDespues)}` : (l.errorMessage ?? "Rechazada")))))),
-      h("div", { class: "dialogo__acciones" }, h("button", { class: "boton", type: "button", onclick: () => dialogo.close() }, "Cerrar")));
+      h("div", { class: "dialogo__acciones" }, boton("", null, "Cerrar", { onclick: () => dialogo.close() })));
   }
 
   async function finalizar() {
@@ -446,24 +482,26 @@ async function vistaEscaneo() {
       vistaResumen(data, pedido);
     } catch (error) {
       if (error.status === 401) return mostrarError(error);
-      mostrarResultado("error", `✗ ${error.mensaje}`);
+      mostrarResultado("error", error.mensaje);
       refrescarSesion();
     }
   }
 
-  mostrar(
-    h("div", { class: "fila fila--entre" },
+  mostrarAmplio(
+    h("div", { class: "encabezado" }, h("div", {},
       h("h1", {}, `Pedido ${pedido.docNum}`),
-      h("span", { class: "suave" }, pedido.cliente?.cardName ?? pedido.cardCode)),
-    datosViejos(pedido.sincronizadoEn) && h("p", { class: "aviso aviso--alerta" },
+      h("div", { class: "encabezado__sub" }, pedido.cliente?.cardName ?? pedido.cardCode))),
+    datosViejos(pedido.sincronizadoEn) && aviso("alerta",
       `Datos de SAP ${hace(pedido.sincronizadoEn)}. Confirmá con el supervisor si el pedido sigue igual.`),
     bloqueo, desconexion,
-    h("div", { class: "escaneo" }, formulario, resultado, envio, h("div", { class: "progreso" }, barra), resumen),
-    lista,
-    h("div", { class: "acciones" },
-      h("button", { class: "boton", type: "button", onclick: verLecturas }, "Ver lecturas"),
-      h("button", { class: "boton boton--principal", type: "button", onclick: finalizar }, "Finalizar"),
-      h("button", { class: "boton", type: "button", onclick: () => vistaPedidos() }, "Salir")));
+    h("div", { class: "escaneo-layout" },
+      h("section", { class: "escaneo", "aria-label": "Lectura de códigos" }, formulario, resultado, envio, progreso, resumen),
+      h("section", { "aria-label": "Líneas del pedido" },
+        lista,
+        h("div", { class: "acciones" },
+          boton("", "lista", "Ver lecturas", { onclick: verLecturas }),
+          boton("boton--principal", "finalizar", "Finalizar", { onclick: finalizar }),
+          boton("", "salir", "Salir", { onclick: () => vistaPedidos() })))));
   pintar();
   // Escuchadores de esta vista: se retiran al cambiar de vista (mostrar()).
   registro.alCambiar = alCambiar;
@@ -486,20 +524,22 @@ function vistaResumen(sesion, pedido) {
   const lineasPedido = new Map(pedido.lineas.map((l) => [l.lineNum, l]));
   const faltantes = sesion.lineas.filter((l) => l.cantidadEscaneada < l.cantidadPedida);
   mostrar(
-    h("h1", {}, `Pedido ${pedido.docNum}`),
-    h("p", { class: `aviso ${sesion.estado === "completo" ? "aviso--ok" : "aviso--alerta"}` },
-      sesion.estado === "completo" ? "Preparación completa." : "Preparación finalizada con diferencias."),
+    h("div", { class: "encabezado" }, h("h1", {}, `Pedido ${pedido.docNum}`)),
+    sesion.estado === "completo"
+      ? aviso("ok", "Preparación completa.", { class: "aviso--grande" })
+      : aviso("alerta", "Preparación finalizada con diferencias.", { class: "aviso--grande" }),
     faltantes.length > 0 && h("div", { class: "tarjeta" }, h("h2", {}, "Faltantes"),
       h("ul", { class: "lineas" }, faltantes.map((l) => tarjetaLinea(l.pedidoLineNum,
         { ...lineasPedido.get(l.pedidoLineNum), itemCode: l.itemCode, uomCode: l.uomCode },
         { pedida: l.cantidadPedida, escaneada: l.cantidadEscaneada })))),
-    h("button", { class: "boton boton--principal boton--ancho", type: "button", onclick: () => vistaPedidos() }, "Volver a pedidos"));
+    boton("boton--principal boton--ancho boton--grande", "volver", "Volver a pedidos", { onclick: () => vistaPedidos() }));
 }
 
 // ---------------------------------------------------------------------------
 // Arranque
 // ---------------------------------------------------------------------------
 
+for (const lugar of document.querySelectorAll("[data-icono]")) lugar.replaceWith(icono(lugar.dataset.icono));
 document.getElementById("btn-inicio").addEventListener("click", () => (api ? vistaPedidos() : vistaConfiguracion()));
 document.getElementById("btn-menu").addEventListener("click", async () => {
   const cambiar = await confirmar({ titulo: "Configuración del equipo",
