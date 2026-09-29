@@ -52,10 +52,15 @@ Abrir `http://localhost:3000/bodega/`, configurar la clave y preparar el pedido 
 
 ## Diseño
 
-- Tema claro, pensado para una bodega iluminada. Color de marca: morado **#362F44** (barra superior); acciones en violeta **#5B3FA0**; verde y rojo solo para aceptado y rechazado, siempre acompañados de ícono y texto.
-- Contraste de texto de al menos 4.5:1 (WCAG AA) en todas las combinaciones; botones de 48 px o más; foco visible; respeta "reducir movimiento" del sistema.
-- Íconos SVG de Lucide (licencia ISC) dentro de `js/iconos.js`: no se descargan de internet.
-- Letra del sistema (sin fuentes externas), para que cargue igual en la red interna.
+Estilo "etiqueta de despacho": la pantalla se dibuja con la tinta morada de Cosprobell (**#362F44**) sobre papel, con bordes y sombras sólidas. Los botones se hunden al presionarlos.
+
+- **Pedidos**: etiquetas de envío con número grande, línea perforada y código de barras decorativo.
+- **Panel del lector** (oscuro): indica "Listo para leer" cuando el campo tiene el foco y "Tocá el campo para leer" cuando no. El resultado de cada lectura ocupa un recuadro verde o rojo con ícono.
+- **Líneas**: una casilla por unidad (hasta 24) y sello "Listo" al completarse. Al finalizar, sello "Completo" o "Con faltantes".
+- **Avisos**: franja de color; las alertas llevan cinta de advertencia amarilla.
+- **Colores**: acciones en violeta **#5B3FA0**; verde y rojo solo para aceptado y rechazado, siempre con ícono y texto. Contraste de texto de al menos 4.5:1 (WCAG AA); botones de 48 px o más; foco visible; respeta "reducir movimiento".
+- **Letras**: Barlow y Barlow Condensed (números y títulos) y JetBrains Mono (códigos), alojadas en `fuentes/` con su licencia SIL OFL 1.1. No se descargan de internet: funcionan en la red interna.
+- **Íconos**: SVG de Lucide (licencia ISC) dentro de `js/iconos.js`.
 
 ## Seguridad
 

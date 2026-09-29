@@ -23,7 +23,7 @@ test("la pantalla de bodega se sirve sin API key y con la política de seguridad
   assert.match(pagina.headers.get("content-type"), /text\/html/);
   assert.match(pagina.headers.get("content-security-policy"), /script-src 'self'/);
   assert.match(await pagina.text(), /<script type="module" src="js\/app.js">/);
-  for (const archivo of ["js/app.js", "js/api.js", "js/lecturas.js", "js/uuid.js", "js/iconos.js", "estilos.css"]) {
+  for (const archivo of ["js/app.js", "js/api.js", "js/lecturas.js", "js/uuid.js", "js/iconos.js", "estilos.css", "fuentes/barlow-latin-500-normal.woff2", "fuentes/OFL-Barlow.txt"]) {
     assert.equal((await fetch(`${url}/bodega/${archivo}`)).status, 200, archivo);
   }
   assert.equal((await fetch(`${url}/bodega`, { redirect: "manual" })).status, 301);

@@ -116,6 +116,7 @@ function escuchar(objetivo, evento, funcion) {
   limpiezas.push(() => objetivo.removeEventListener(evento, funcion));
 }
 const cargando = (texto) => h("p", { class: "cargando" }, texto);
+const tituloPedido = (docNum) => h("h1", {}, h("span", { class: "rotulo" }, "Pedido"), " ", String(docNum));
 const boton = (clase, nombreIcono, texto, atributos = {}) =>
   h("button", { class: `boton ${clase}`.trim(), type: "button", ...atributos }, nombreIcono && icono(nombreIcono), texto);
 
@@ -216,17 +217,22 @@ async function vistaPedidos() {
   const lista = h("ul", { class: "pedidos" });
   const masBoton = boton("boton--ancho", null, "Cargar más pedidos");
   const vacio = h("p", { class: "suave vacio" });
+  const contador = h("span", { class: "contador" });
 
   function pintar() {
     const filtro = buscador.value.trim().toLowerCase();
     const visibles = pedidos.filter((p) => !filtro || String(p.docNum).includes(filtro) || (p.cliente?.cardName ?? "").toLowerCase().includes(filtro));
     lista.replaceChildren(...visibles.map((p) => h("li", {},
       h("button", { class: "pedido", type: "button", onclick: () => vistaPedido(p.docEntry) },
-        h("div", { class: "pedido__numero" }, `Pedido ${p.docNum}`),
+        h("div", { class: "pedido__numero" }, h("span", { class: "rotulo" }, "Pedido"), " ", String(p.docNum)),
+        icono("siguiente", "icono pedido__flecha"),
+        h("div", { class: "pedido__corte", "aria-hidden": "true" }),
         h("div", { class: "pedido__cliente" }, p.cliente?.cardName ?? p.cardCode),
         h("div", { class: "pedido__meta" }, `Fecha ${fecha(p.docDate)} · Entrega ${fecha(p.docDueDate)}`),
         h("div", { class: "pedido__meta" }, `Datos de SAP ${hace(p.sincronizadoEn)}`),
-        icono("siguiente", "icono pedido__flecha")))));
+        h("span", { class: "pedido__barras", "aria-hidden": "true" })))));
+    contador.textContent = `${pedidos.length}${cursor === null ? "" : "+"}`;
+    contador.setAttribute("aria-label", `${contador.textContent} pedidos cargados`);
     vacio.textContent = pedidos.length ? (visibles.length ? "" : "Ningún pedido coincide con la búsqueda.") : "No hay pedidos abiertos.";
     vacio.hidden = !vacio.textContent;
     masBoton.hidden = cursor === null;
@@ -246,7 +252,7 @@ async function vistaPedidos() {
     boton("boton--principal", "escaner", "Continuar", { onclick: () => vistaEscaneo() }));
 
   mostrarAmplio(
-    h("div", { class: "encabezado" }, h("h1", {}, "Pedidos abiertos"),
+    h("div", { class: "encabezado" }, h("div", { class: "encabezado__titulo" }, h("h1", {}, "Pedidos abiertos"), contador),
       boton("", "actualizar", "Actualizar", { onclick: () => vistaPedidos() })),
     abierta, h("label", { class: "buscador" }, icono("buscar"), buscador), vacio, lista, masBoton);
   pintar();
@@ -256,16 +262,23 @@ async function vistaPedidos() {
 // Detalle del pedido e inicio de la preparación
 // ---------------------------------------------------------------------------
 
+// Hasta esta cantidad se dibuja una casilla por unidad; con más, basta el número.
+const MAXIMO_CASILLAS = 24;
+
 function tarjetaLinea(linea, nombre, { pedida, escaneada = null, reciente = false }) {
   const completa = escaneada !== null && escaneada >= pedida;
+  const casillas = escaneada !== null && pedida <= MAXIMO_CASILLAS &&
+    h("div", { class: "unidades", "aria-hidden": "true" },
+      Array.from({ length: pedida }, (_, i) => h("span", { class: i < escaneada ? "lleno" : null })));
   return h("li", { class: `linea${completa ? " linea--completa" : ""}${reciente ? " linea--reciente" : ""}`, "data-linea": linea },
     h("div", { class: "linea__nombre" }, nombre.itemName ?? nombre.itemCode),
-    h("div", { class: "linea__detalle" },
-      [nombre.itemCode, nombre.uomCode && `Unidad ${nombre.uomCode}`, nombre.warehouseCode && `Bodega ${nombre.warehouseCode}`].filter(Boolean).join(" · ")),
+    h("div", { class: "linea__detalle" }, h("span", { class: "codigo" }, nombre.itemCode),
+      [nombre.uomCode && `Unidad ${nombre.uomCode}`, nombre.warehouseCode && `Bodega ${nombre.warehouseCode}`].filter(Boolean).join(" · ")),
     h("div", { class: "linea__cantidad" },
-      escaneada === null ? cantidad(pedida) : `${cantidad(escaneada)} / ${cantidad(pedida)}`,
-      h("small", {}, completa && icono("completa"),
-        escaneada === null ? "a preparar" : completa ? "completa" : `faltan ${cantidad(pedida - escaneada)}`)));
+      escaneada === null ? cantidad(pedida) : [cantidad(escaneada), h("span", { class: "linea__total" }, ` / ${cantidad(pedida)}`)],
+      completa ? h("small", { class: "sello" }, "Listo")
+        : h("small", {}, escaneada === null ? "a preparar" : `faltan ${cantidad(pedida - escaneada)}`)),
+    casillas);
 }
 
 async function vistaPedido(docEntry) {
@@ -290,8 +303,8 @@ async function vistaPedido(docEntry) {
   const aPreparar = preparacion.datosValidos ? preparacion.lineas : [];
   mostrar(
     boton("boton--volver", "volver", "Pedidos", { onclick: () => vistaPedidos() }),
-    h("div", { class: "encabezado" }, h("h1", {}, `Pedido ${pedido.docNum}`)),
-    h("div", { class: "tarjeta detalle-pedido" },
+    h("div", { class: "encabezado" }, tituloPedido(pedido.docNum)),
+    h("div", { class: "tarjeta detalle-pedido" }, h("span", { class: "rotulo" }, "Cliente"),
       h("div", { class: "pedido__cliente" }, pedido.cliente?.cardName ?? pedido.cardCode),
       h("div", { class: "pedido__meta" }, `Fecha ${fecha(pedido.docDate)} · Entrega ${fecha(pedido.docDueDate)}`),
       h("div", { class: "pedido__meta" }, `Datos de SAP ${hace(pedido.sincronizadoEn)}`)),
@@ -372,8 +385,8 @@ async function vistaEscaneo() {
   // Cada lectura cambia el recuadro con un destello breve: dos rechazos iguales seguidos también se notan.
   const movimientoReducido = matchMedia("(prefers-reduced-motion: reduce)");
   function mostrarResultado(tipo, titulo, detalle = "") {
-    resultado.className = tipo ? `resultado resultado--${tipo}` : "resultado";
-    resultado.replaceChildren(icono(tipo === "ok" ? "aceptada" : tipo === "error" ? "rechazada" : "escaner"),
+    resultado.className = `resultado resultado--${tipo ?? "espera"}`;
+    resultado.replaceChildren(tipo ? icono(tipo === "ok" ? "aceptada" : "rechazada") : h("span", { class: "resultado__laser" }, icono("escaner")),
       h("div", { class: "resultado__texto" }, h("span", { class: "resultado__titulo" }, titulo), detalle && h("small", {}, detalle)));
     if (tipo) {
       resultado.animate?.(movimientoReducido.matches
@@ -429,6 +442,9 @@ async function vistaEscaneo() {
     entrada.value = "";
     if (codigo) cola.agregar(codigo);
   } }, h("div", { class: "crecer campo-escaneo" }, icono("escaner"), entrada), teclado);
+  const cabezaLector = h("div", { class: "escaneo__cabeza" }, h("span", { class: "rotulo" }, "Lector"),
+    h("span", { class: "escaneo__estado escaneo__estado--listo" }, "Listo para leer"),
+    h("span", { class: "escaneo__estado escaneo__estado--sin-foco" }, "Tocá el campo para leer"));
 
   // El lector escribe como un teclado: la entrada debe tener el foco salvo que haya un diálogo abierto.
   const enfocar = () => { if (!dialogo.open && !entrada.disabled && document.activeElement !== entrada) entrada.focus({ preventScroll: true }); };
@@ -489,13 +505,13 @@ async function vistaEscaneo() {
 
   mostrarAmplio(
     h("div", { class: "encabezado" }, h("div", {},
-      h("h1", {}, `Pedido ${pedido.docNum}`),
+      tituloPedido(pedido.docNum),
       h("div", { class: "encabezado__sub" }, pedido.cliente?.cardName ?? pedido.cardCode))),
     datosViejos(pedido.sincronizadoEn) && aviso("alerta",
       `Datos de SAP ${hace(pedido.sincronizadoEn)}. Confirmá con el supervisor si el pedido sigue igual.`),
     bloqueo, desconexion,
     h("div", { class: "escaneo-layout" },
-      h("section", { class: "escaneo", "aria-label": "Lectura de códigos" }, formulario, resultado, envio, progreso, resumen),
+      h("section", { class: "escaneo", "aria-label": "Lectura de códigos" }, cabezaLector, formulario, resultado, envio, progreso, resumen),
       h("section", { "aria-label": "Líneas del pedido" },
         lista,
         h("div", { class: "acciones" },
@@ -523,11 +539,12 @@ async function vistaEscaneo() {
 function vistaResumen(sesion, pedido) {
   const lineasPedido = new Map(pedido.lineas.map((l) => [l.lineNum, l]));
   const faltantes = sesion.lineas.filter((l) => l.cantidadEscaneada < l.cantidadPedida);
+  const completo = sesion.estado === "completo";
   mostrar(
-    h("div", { class: "encabezado" }, h("h1", {}, `Pedido ${pedido.docNum}`)),
-    sesion.estado === "completo"
-      ? aviso("ok", "Preparación completa.", { class: "aviso--grande" })
-      : aviso("alerta", "Preparación finalizada con diferencias.", { class: "aviso--grande" }),
+    h("div", { class: "encabezado" }, tituloPedido(pedido.docNum)),
+    h("div", { class: `tarjeta cierre ${completo ? "cierre--completo" : "cierre--diferencias"}` },
+      h("div", { class: "sello", "aria-hidden": "true" }, completo ? "Completo" : "Con faltantes"),
+      h("p", {}, completo ? "Preparación completa." : "Preparación finalizada con diferencias.")),
     faltantes.length > 0 && h("div", { class: "tarjeta" }, h("h2", {}, "Faltantes"),
       h("ul", { class: "lineas" }, faltantes.map((l) => tarjetaLinea(l.pedidoLineNum,
         { ...lineasPedido.get(l.pedidoLineNum), itemCode: l.itemCode, uomCode: l.uomCode },

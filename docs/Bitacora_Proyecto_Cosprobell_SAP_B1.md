@@ -507,3 +507,9 @@ Verificación: 310 pruebas (incluye cola, cliente de la API y servicio estático
 Nuevo diseño a pedido de Cosprobell, con el morado de referencia **#362F44** (medido de la imagen enviada) en la barra superior y violeta **#5B3FA0** en las acciones. Íconos SVG (Lucide, ISC) en lugar de los caracteres ✓/✗; el resultado de cada lectura ocupa un recuadro sólido verde o rojo con ícono y un destello breve, para notar dos rechazos iguales seguidos. En PC la lectura queda fija a la izquierda y las líneas a la derecha; en celular, el botón de teclado es solo ícono y en PC con mouse no aparece. Sin cambios de funcionamiento ni de API.
 
 Verificación: 310 pruebas; prueba completa en Chromium (PC 1280 px y celular 375 px) y auditoría axe-core WCAG 2.2 A/AA de todas las vistas, sin problemas detectados. Contrastes calculados: texto blanco sobre la barra 12.7:1, sobre los botones 7.9:1, texto secundario 6.2:1.
+
+### 2026-09-29 — Identidad "etiqueta de despacho"
+
+El primer rediseño se sentía genérico. Se le dio identidad propia a partir del trabajo en bodega: tinta morada sobre papel con sombras sólidas, pedidos como etiquetas de envío (perforado y código de barras decorativo), panel oscuro del lector con indicador de foco, una casilla por unidad, sellos "Listo", "Completo" y "Con faltantes", y cinta de advertencia en las alertas. Tipografías Barlow, Barlow Condensed y JetBrains Mono alojadas en el servidor (SIL OFL 1.1, unos 200 KB). No se encontró un logo ni colores oficiales publicados de Cosprobell; se mantiene el morado de referencia enviado.
+
+Verificación: 310 pruebas; prueba completa en Chromium (PC y celular) y auditoría axe-core WCAG 2.2 A/AA de todas las vistas, sin problemas detectados.
