@@ -44,6 +44,18 @@ Todas requieren `X-API-Key` de la aplicación; la clave del puente no sirve para
 | `POST /picking/:id/escanear` | `{ "codigo": "00123", "operacionId": "UUID" }` |
 | `GET /picking/:id/escaneos` | Historial paginado |
 | `POST /picking/:id/finalizar` | Finalización con o sin diferencias |
+| `GET /etiquetas?estado=pendientes&limit=50` | Códigos por confirmar: sin confirmar o desactualizados (cambiaron en SAP). También `estado=confirmadas` o `todas`, `itemCode=` y `cursor=` |
+| `PUT /etiquetas/:id/confirmacion` | `{ "esUnidadIndividual": true, "observacion": "opcional" }`. Solo aplicaciones de `ETIQUETAS_APPS_AUTORIZADAS` |
+| `DELETE /etiquetas/:id/confirmacion` | Revoca la confirmación. Mismo permiso |
+
+### Confirmación de etiquetas
+
+Un código importado de SAP no sirve para picking hasta que alguien confirme que corresponde a **una unidad individual** del producto y de la unidad de medida indicados. La confirmación guarda una foto (producto, código, unidad), la hora y la aplicación que confirmó. Si después SAP cambia ese código, la etiqueta pasa a `desactualizada`, vuelve a aparecer entre las pendientes y el escaneo responde `CONFIRMACION_DESACTUALIZADA` hasta confirmarla de nuevo.
+
+- Estados en `GET /etiquetas`: `sin_confirmar`, `desactualizada`, `unidad_individual` y `no_es_unidad`. Se muestran el producto, el código y la unidad (`code` y nombre del catálogo de SAP).
+- No se confirma como unidad individual un código con unidad "Manual" (-1) o sin unidad (`UNIDAD_NO_DEFINIDA`); sí se puede marcar como "no es unidad".
+- Los códigos retirados en SAP no aparecen ni se pueden confirmar (`ETIQUETA_RETIRADA`).
+- Permiso: variable `ETIQUETAS_APPS_AUTORIZADAS` del backend, con los nombres de las API keys autorizadas separados por coma (por ejemplo `supervisor-etiquetas`). Si está vacía, nadie puede confirmar (`FUNCION_NO_HABILITADA`). Conviene que el escáner de bodega use otra API key sin este permiso. La API key identifica la aplicación, no a la persona.
 
 `preparacion.datosValidos` comprueba datos del pedido, no permisos de despacho ni disponibilidad de etiquetas ni sesiones previas. El inicio y el escaneo realizan sus propias comprobaciones.
 
