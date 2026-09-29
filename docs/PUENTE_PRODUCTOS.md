@@ -1,4 +1,4 @@
-# Emisor de productos — primera versión
+# Emisor del puente: productos y clientes
 
 ## Qué incluye
 
@@ -9,7 +9,9 @@ Programa Node.js separado en puente/. Requiere Node 22 o superior (verificado co
 - productos.js: convierte ItemCode, ItemName, BarCode, Valid y Frozen al contrato del backend. Solo tYES/tNO se interpretan como booleanos. Código de barras vacío pasa a null; datos faltantes o inválidos detienen el envío.
 - backend.client.js: consulta el avance y envía lotes con la credencial Bearer del puente. Comprueba la confirmación.
 - estado.js: archivo local de avance y lote pendiente, escritura mediante archivo temporal + fsync + rename; candado con el PID del proceso para impedir dos ejecuciones usando la misma carpeta y recuperarse solo tras un cierre forzado.
-- sincronizar.js: persiste antes de enviar, confirma después de respuesta y recupera pendientes al reiniciar.
+- entidades.js: qué consulta y envía cada entidad (recurso SAP, campos, clave, filtro) y en qué orden: clientes y luego productos.
+- clientes.js y lote.js: conversión de BusinessPartners (solo clientes) y armado común de lotes con detalle del registro inválido.
+- sincronizar.js: persiste antes de enviar, confirma después de respuesta y recupera pendientes al reiniciar. Se ejecuta una vez por entidad en cada ciclo.
 - ejecutar.js: ejecución única o periódica, espera creciente ante errores temporales y parada por señales.
 
 ## Instalación y configuración
@@ -47,6 +49,15 @@ node --env-file=.env.puente puente/ejecutar.js --watch
 ```
 
 El modo periódico sigue siendo un proceso de consola; no está registrado en el administrador de servicios de Windows. Ctrl+C solicita detenerse; una solicitud HTTP en curso tiene timeout de 30 segundos y se deja conservar su resultado. Logout puede consumir otros 30 segundos. No iniciar dos emisores con distintas carpetas para el mismo destino: el candado local protege una carpeta y la secuencia del backend detecta conflictos, pero no elige un emisor principal.
+
+## Varias entidades
+
+Cada ciclo recorre clientes y luego productos. Cada entidad tiene su archivo de estado (clientes.json, productos.json) y su secuencia en el backend; el candado ejecucion.lock es uno solo para el proceso. Un error de datos en una entidad se registra con `"entidad"` y no impide sincronizar las demás; el proceso termina con código 1. Un error de conexión corta el ciclo completo.
+
+```json
+{"evento":"ciclo","entidad":"clientes","completo":true,"lotes":2,"ultimaSecuencia":2}
+{"evento":"fallo","entidad":"clientes","codigo":"CLIENTE_SAP_INVALIDO","temporal":false,"detalle":{"cardCode":"C0030","campo":"CardName"}}
+```
 
 ## Recorrido y recuperación
 

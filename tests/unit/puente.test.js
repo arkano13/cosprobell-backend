@@ -6,7 +6,9 @@ import { join } from "node:path";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { configurar } from "../../puente/config.js";
-import { abrirEstado } from "../../puente/estado.js";
+import { abrirEstado, abrirAlmacen } from "../../puente/estado.js";
+import { construirLoteClientes } from "../../puente/clientes.js";
+import { CLIENTES, PRODUCTOS, ENTIDADES } from "../../puente/entidades.js";
 import { construirLote } from "../../puente/productos.js";
 import { crearClienteSap } from "../../puente/sap.client.js";
 import { crearClienteBackend } from "../../puente/backend.client.js";
@@ -191,4 +193,66 @@ test("recorrido HTTP simulado: login, páginas, lotes, estado y logout", async (
     assert.equal(resultado.completo, true); assert.equal(productos.get("P1").barCode, "00123"); assert.equal(secuencia, 1);
     await sap.cerrar(); assert.ok(peticiones.includes("/b1s/v1/Logout"));
   } finally { await almacen.cerrar(); }
+});
+
+const clienteSap = (code = "C1", name = "Cliente Uno") => ({ CardCode: code, CardName: name, Valid: "tYES", Frozen: "tNO" });
+test("clientes: transforma BusinessPartners e informa código y campo inválidos", () => {
+  assert.deepEqual(construirLoteClientes([clienteSap("C001")], "TEST", 1).clientes, [{ cardCode: "C001", cardName: "Cliente Uno", valid: true, frozen: false }]);
+  for (const [datos, campo] of [[{ ...clienteSap("C2"), CardName: null }, "CardName"], [{ ...clienteSap("C2"), Valid: "Y" }, "Valid"], [clienteSap("C2 "), "CardCode"]]) {
+    assert.throws(() => construirLoteClientes([clienteSap(), datos], "TEST", 1), (e) => {
+      assert.equal(e.code, "CLIENTE_SAP_INVALIDO"); assert.deepEqual(e.detalle, { cardCode: datos.CardCode, campo }); return true;
+    });
+  }
+});
+test("clientes se sincronizan antes que productos", () => {
+  assert.deepEqual(ENTIDADES.map((e) => e.nombre), ["clientes", "productos"]);
+});
+test("clientes: consulta solo clientes de SAP y combina el filtro con el cursor", async () => {
+  const urls = [];
+  const cliente = crearClienteSap(configurar(variables), async (url) => {
+    if (url.endsWith("/Login")) return new Response("{}", { headers: { "Set-Cookie": "B1SESSION=sesion" } });
+    urls.push(url); return Response.json({ value: [] });
+  });
+  await cliente.pagina(null, CLIENTES); await cliente.pagina("C'1", CLIENTES);
+  const base = "https://sap.example/b1s/v1/BusinessPartners?$select=CardCode,CardName,Valid,Frozen&$orderby=CardCode%20asc&$top=50";
+  assert.equal(urls[0], `${base}&$filter=CardType%20eq%20'cCustomer'`);
+  assert.equal(new URL(urls[1]).searchParams.get("$filter"), "CardType eq 'cCustomer' and CardCode gt 'C''1'");
+});
+test("clientes: el backend recibe en su ruta y se verifica la cantidad confirmada", async () => {
+  const rutas = [];
+  const backend = crearClienteBackend(configurar(variables), async (url, opciones) => {
+    rutas.push(new URL(url).pathname);
+    if (url.endsWith("/estado")) return Response.json({ data: { empresa: "TEST", ultimaSecuencia: 0 } });
+    const lote = JSON.parse(opciones.body); return Response.json({ data: { secuencia: lote.secuencia, recibidos: lote.clientes.length, repetido: false } });
+  });
+  assert.equal(await backend.estado(CLIENTES), 0);
+  await backend.enviar(construirLoteClientes([clienteSap(), clienteSap("C2")], "TEST", 1), CLIENTES);
+  assert.deepEqual(rutas, ["/integracion/clientes/estado", "/integracion/clientes"]);
+});
+test("clientes: recorrido por CardCode, estado propio y recuperación del pendiente", async (t) => {
+  const config = await configTemporal(t); const productos = await abrirEstado(config);
+  try {
+    let almacen = await abrirAlmacen(config, CLIENTES); let remoto = 0; const recibidos = [];
+    const backend = { estado: async (e) => { assert.equal(e, CLIENTES); return remoto; },
+      enviar: async (lote, e) => { assert.equal(e, CLIENTES); remoto = lote.secuencia; recibidos.push(...lote.clientes.map((c) => c.cardCode)); throw new ErrorPuente("CONEXION_O_TLS", true); } };
+    const paginas = { null: [clienteSap("C1"), clienteSap("C2")], C2: [] };
+    const sap = { pagina: async (cursor, e) => { assert.equal(e, CLIENTES); return paginas[cursor]; } };
+    await assert.rejects(sincronizar({ config, almacen, sap, backend, entidad: CLIENTES }), { code: "CONEXION_O_TLS" });
+    almacen = await abrirAlmacen(config, CLIENTES);
+    assert.equal(almacen.estado.pendiente.cursor, "C2");
+    backend.enviar = async (lote) => { recibidos.push(`reenvío ${lote.secuencia}`); };
+    const resultado = await sincronizar({ config, almacen, sap, backend, entidad: CLIENTES });
+    assert.deepEqual(resultado, { completo: true, lotes: 1, ultimaSecuencia: 1 });
+    assert.deepEqual(recibidos, ["C1", "C2", "reenvío 1"]);
+    assert.deepEqual((await readdir(config.directorio)).sort(), ["clientes.json", "ejecucion.lock", "productos.json"]);
+    assert.equal(productos.estado.secuencia, 0);
+  } finally { await productos.cerrar(); }
+});
+test("clientes: un pendiente que no cumple el contrato de clientes se rechaza", async (t) => {
+  const config = await configTemporal(t);
+  const lote = construirLote([fila()], "TEST", 1);
+  await writeFile(join(config.directorio, "clientes.json"), JSON.stringify({ version: 1, origen: config.origen, secuencia: 0, cursor: null, pendiente: { lote, cursor: "P1" } }));
+  await assert.rejects(abrirAlmacen(config, CLIENTES), { code: "PENDIENTE_INVALIDO" });
+  await writeFile(join(config.directorio, "productos.json"), JSON.stringify({ version: 1, origen: config.origen, secuencia: 0, cursor: null, pendiente: { lote, cursor: "P1" } }));
+  const almacen = await abrirAlmacen(config, PRODUCTOS); assert.equal(almacen.estado.pendiente.cursor, "P1");
 });

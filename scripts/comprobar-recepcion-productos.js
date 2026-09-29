@@ -6,8 +6,9 @@ import pg from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../generated/prisma/client.js";
 import { prisma } from "../src/infrastructure/database/prisma.js";
-import { sincronizacionProductosRepository as repo } from "../src/modules/sincronizacion/productos.repository.js";
-import { recibirProductos } from "../src/modules/sincronizacion/productos.service.js";
+import { sincronizacionRepository as repo } from "../src/modules/sincronizacion/sincronizacion.repository.js";
+import { recibirLote } from "../src/modules/sincronizacion/sincronizacion.service.js";
+const recibirProductos = (lote, empresa) => recibirLote("productos", lote, empresa);
 
 // Esquema desechable y exclusivo: no cambia productos ni estado reales.
 const schema = `prueba_sync_${randomBytes(8).toString("hex")}`;
@@ -42,10 +43,10 @@ try {
   repo.guardarEstado = async (_estado, tx) => { await tx.$queryRaw`SELECT 1 / 0`; };
   await assert.rejects(recibirProductos(lote(3, "NO DEBE QUEDAR"), empresa));
   repo.guardarEstado = guardarOriginal;
-  assert.equal((await repo.consultarEstado(db)).secuencia, 2);
+  assert.equal((await repo.consultarEstado("productos", db)).secuencia, 2);
   assert.equal((await db.producto.findUnique({ where: { itemCode: "P-TEST" } })).itemName, "Actualizado");
   await recibirProductos(lote(3, "Recuperado"), empresa);
-  assert.equal((await repo.consultarEstado(db)).secuencia, 3);
+  assert.equal((await repo.consultarEstado("productos", db)).secuencia, 3);
   console.log("APROBADO: fallo SQL revierte producto y avance; reintento posterior funciona.");
 } catch (error) {
   console.error("FALLÓ la prueba de recepción. Tipo:", error.name, "Código:", error.code ?? "sin código");

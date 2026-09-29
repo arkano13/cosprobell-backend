@@ -1,10 +1,10 @@
-# Recepción de productos desde el puente
+# Recepción de datos desde el puente
 
 ## Alcance de esta entrega
 
-El backend recibe lotes normalizados. No inicia sesión en SAP ni instala un servicio de Windows. Solo sincroniza itemCode, itemName, barCode principal, valid y frozen. Existencias, grupos, precios, unidades, códigos adicionales, clientes y pedidos quedan para contratos posteriores. No elimina productos por ausencia en un lote ni modifica escaneos, confirmaciones o relaciones.
+El backend recibe lotes normalizados. No inicia sesión en SAP ni instala un servicio de Windows. Solo sincroniza itemCode, itemName, barCode principal, valid y frozen. Clientes tiene su propio contrato (sección "Contrato de clientes v1"). Existencias, grupos, precios, unidades, códigos adicionales y pedidos quedan para contratos posteriores. No elimina productos por ausencia en un lote ni modifica escaneos, confirmaciones o relaciones.
 
-Una empresa SAP por base local. Usar una base de desarrollo/pruebas para XPRUEBAS2026; no mezclarla con producción. El primer lote vincula el estado de recepción a la empresa. Esa comprobación no identifica el origen de productos antiguos ya presentes antes de implementar la sincronización.
+Una empresa SAP por base local. Usar una base de desarrollo/pruebas para XPRUEBAS2026; no mezclarla con producción. El primer lote de cualquier entidad vincula el estado de recepción a la empresa; después se rechaza cualquier entidad de otra empresa (ORIGEN_INCOMPATIBLE). Esa comprobación no identifica el origen de productos antiguos ya presentes antes de implementar la sincronización.
 
 ## Configuración
 
@@ -56,6 +56,23 @@ Respuesta 200, después del commit:
 
 recibidos es la cantidad de productos del lote, no la cantidad de inserciones nuevas. Los existentes se actualizan por itemCode. El reintento del último lote, con mismo contenido, devuelve repetido:true y no escribe. El orden de propiedades JSON y productos no afecta la comprobación porque se valida y normaliza antes del hash.
 
+## Contrato de clientes v1
+
+POST /integracion/clientes y GET /integracion/clientes/estado, con la misma credencial y las mismas reglas de secuencia, repetición y empresa que productos. Cada entidad lleva su propia secuencia.
+
+```json
+{
+  "version": 1,
+  "empresa": "XPRUEBAS2026",
+  "secuencia": 1,
+  "clientes": [
+    { "cardCode": "C0001", "cardName": "Cliente de ejemplo", "valid": true, "frozen": false }
+  ]
+}
+```
+
+Los cuatro campos son obligatorios. Inserta o actualiza por cardCode y solo toca esos campos: no modifica pedidos, facturas ni otros datos del cliente. El puente consulta únicamente socios de negocio con CardType = cCustomer. Saldos, contactos y demás datos personales no se sincronizan hasta que una función concreta los requiera. Existe para que los pedidos, próximo contrato, encuentren a su cliente.
+
 ## Orden y recuperación
 
 GET /integracion/productos/estado utiliza la misma credencial y devuelve empresa, ultimaSecuencia y ultimaRecepcion. Antes de recibir datos devuelve 0 y null. ultimaRecepcion es la fecha del backend: no demuestra que los datos estuvieran actualizados en SAP.
@@ -69,10 +86,11 @@ El número de secuencia y la empresa se almacenan junto con los productos en una
 ## Archivos
 
 - middleware/bridgeAuth.js: verifica la credencial independiente y vincula la empresa desde configuración confiable.
-- productos.schemas.js: valida el contrato.
-- productos.service.js: comprueba empresa, secuencia y contenido; coordina guardado.
-- productos.repository.js: transacción, bloqueo y persistencia.
-- productos.controller.js y sincronizacion.routes.js: publican los endpoints HTTP.
+- lote.schemas.js: estructura común de un lote (versión, empresa, secuencia, 1 a 100 registros sin claves repetidas).
+- productos.schemas.js y clientes.schemas.js: contrato de cada entidad.
+- sincronizacion.service.js: comprueba empresa, secuencia y contenido de cualquier entidad registrada; coordina guardado.
+- sincronizacion.repository.js: transacción, bloqueo y persistencia.
+- sincronizacion.controller.js y sincronizacion.routes.js: publican una ruta fija por entidad.
 - SincronizacionEstado y su migración: guardan el último lote confirmado.
 
 ## Verificación
