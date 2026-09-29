@@ -107,4 +107,4 @@ La suite actual tiene 275 pruebas aprobadas. La instalación y las pruebas reale
 
 ## Pantalla de bodega
 
-`public/bodega/` contiene la pantalla del escáner: HTML, CSS y módulos JavaScript sin compilación (`js/api.js`, `js/lecturas.js`, `js/uuid.js`, `js/iconos.js`, `js/app.js`) y las fuentes en `fuentes/` (SIL OFL 1.1). `src/app.js` la sirve en `/bodega/` antes de la autenticación: los archivos son públicos y los datos se piden con la API key del equipo. `js/lecturas.js` y `js/api.js` no dependen del navegador y se prueban con `node --test`. Guía de uso en `PANTALLA_BODEGA.md`; datos ficticios con `scripts/datos-demo-bodega.js`.
+La pantalla del escáner es una app de escritorio para Windows (Electron) en su propio repositorio, `cosprobell-bodega-escritorio`. Este backend no la sirve: solo expone la API que usa (`/pedidos`, `/picking`) con la API key de cada equipo. La app se conecta desde su propio origen (`app://bodega`), por eso `cors()` debe seguir aceptando esas solicitudes. `pedidosRepository.obtener` agrega el nombre de cada producto al detalle del pedido. Datos ficticios para probarla sin SAP: `scripts/datos-demo-bodega.js`.
