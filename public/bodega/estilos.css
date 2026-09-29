@@ -1,0 +1,169 @@
+/* Pantalla de bodega: pensada para PC con lector USB y para equipos Android con lector integrado.
+   Letras grandes, alto contraste y botones fáciles de tocar con guantes. */
+:root {
+  --fondo: #eef2f6;
+  --superficie: #ffffff;
+  --texto: #14202b;
+  --texto-suave: #52606d;
+  --borde: #cfd8e1;
+  --marca: #16324f;
+  --marca-texto: #ffffff;
+  --accion: #1d5fa6;
+  --accion-hover: #174d87;
+  --ok: #17803d;
+  --ok-fondo: #e3f5e9;
+  --error: #b42318;
+  --error-fondo: #fdecea;
+  --alerta: #8a5a00;
+  --alerta-fondo: #fff4d6;
+  --radio: 10px;
+  --sombra: 0 1px 3px rgba(20, 32, 43, 0.12);
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+/* El atributo hidden siempre oculta, aunque la clase defina otro display. */
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  background: var(--fondo);
+  color: var(--texto);
+  font: 17px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+button, input { font: inherit; }
+
+/* ---------- Barra superior ---------- */
+.barra {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  background: var(--marca); color: var(--marca-texto);
+  box-shadow: var(--sombra);
+}
+.barra__titulo {
+  background: none; border: 0; color: inherit; padding: 4px 0;
+  font-size: 20px; font-weight: 700; cursor: pointer;
+}
+.barra__operador { margin-left: auto; font-size: 15px; opacity: 0.9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
+.boton--barra { background: rgba(255, 255, 255, 0.14); color: #fff; border-color: transparent; min-height: 40px; padding: 6px 14px; }
+.boton--barra:hover { background: rgba(255, 255, 255, 0.24); }
+
+.contenido { max-width: 960px; margin: 0 auto; padding: 16px; }
+
+/* ---------- Bloques comunes ---------- */
+.tarjeta {
+  background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio);
+  padding: 16px; box-shadow: var(--sombra); margin-bottom: 14px;
+}
+h1 { font-size: 24px; margin: 4px 0 12px; }
+h2 { font-size: 19px; margin: 0 0 10px; }
+.suave { color: var(--texto-suave); }
+.cargando { color: var(--texto-suave); text-align: center; padding: 40px 0; }
+.fila { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.fila--entre { justify-content: space-between; }
+.crecer { flex: 1 1 240px; }
+
+.boton {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 48px; padding: 10px 18px;
+  border: 1px solid var(--borde); border-radius: var(--radio);
+  background: var(--superficie); color: var(--texto);
+  font-weight: 600; cursor: pointer; text-decoration: none;
+}
+.boton:hover { background: #f5f7fa; }
+.boton:disabled { opacity: 0.5; cursor: not-allowed; }
+.boton--principal { background: var(--accion); border-color: var(--accion); color: #fff; }
+.boton--principal:hover { background: var(--accion-hover); }
+.boton--peligro { background: var(--error); border-color: var(--error); color: #fff; }
+.boton--ancho { width: 100%; }
+.boton:focus-visible, .entrada-escaneo:focus-visible, input:focus-visible, .pedido:focus-visible {
+  outline: 3px solid #f0b400; outline-offset: 2px;
+}
+
+.aviso { border-radius: var(--radio); padding: 12px 14px; margin: 0 0 14px; font-weight: 600; }
+.aviso--error { background: var(--error-fondo); color: var(--error); border: 1px solid #f3b8b2; }
+.aviso--alerta { background: var(--alerta-fondo); color: var(--alerta); border: 1px solid #f0d58a; }
+.aviso--ok { background: var(--ok-fondo); color: var(--ok); border: 1px solid #a9dcb8; }
+.aviso[hidden] { display: none; }
+
+.chip { display: inline-block; border-radius: 999px; padding: 2px 10px; font-size: 13px; font-weight: 700; }
+.chip--alerta { background: var(--alerta-fondo); color: var(--alerta); }
+.chip--ok { background: var(--ok-fondo); color: var(--ok); }
+.chip--error { background: var(--error-fondo); color: var(--error); }
+
+/* ---------- Formularios ---------- */
+.formulario label { display: block; font-weight: 600; margin: 12px 0 6px; }
+.formulario input {
+  width: 100%; min-height: 48px; padding: 10px 12px;
+  border: 1px solid var(--borde); border-radius: var(--radio); background: #fff;
+}
+.formulario .boton { margin-top: 16px; }
+.buscador { width: 100%; min-height: 48px; padding: 10px 12px; border: 1px solid var(--borde); border-radius: var(--radio); margin-bottom: 12px; }
+
+/* ---------- Lista de pedidos ---------- */
+.pedidos { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); margin: 0; padding: 0; list-style: none; }
+.pedido {
+  width: 100%; text-align: left; cursor: pointer;
+  background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio);
+  padding: 14px 16px; box-shadow: var(--sombra);
+}
+.pedido:hover { border-color: var(--accion); }
+.pedido__numero { font-size: 21px; font-weight: 700; }
+.pedido__cliente { font-weight: 600; margin: 2px 0; overflow-wrap: anywhere; }
+.pedido__meta { font-size: 14px; color: var(--texto-suave); }
+
+/* ---------- Líneas del pedido ---------- */
+.lineas { list-style: none; margin: 0; padding: 0; }
+.linea {
+  display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center;
+  padding: 12px 14px; border: 1px solid var(--borde); border-radius: var(--radio);
+  background: var(--superficie); margin-bottom: 8px;
+}
+.linea__nombre { font-weight: 700; overflow-wrap: anywhere; }
+.linea__detalle { font-size: 14px; color: var(--texto-suave); grid-column: 1; }
+.linea__cantidad { grid-row: 1 / span 2; grid-column: 2; font-size: 24px; font-weight: 800; text-align: right; white-space: nowrap; }
+.linea__cantidad small { display: block; font-size: 13px; font-weight: 600; color: var(--texto-suave); }
+.linea--completa { background: var(--ok-fondo); border-color: #a9dcb8; }
+.linea--completa .linea__cantidad { color: var(--ok); }
+.linea--reciente { box-shadow: 0 0 0 3px #f0b400; }
+
+/* ---------- Escaneo ---------- */
+.escaneo { position: sticky; top: 60px; z-index: 5; background: var(--fondo); padding-bottom: 6px; }
+.entrada-escaneo {
+  width: 100%; min-height: 60px; padding: 12px 14px;
+  font-size: 22px; font-weight: 700; letter-spacing: 0.5px;
+  border: 3px solid var(--accion); border-radius: var(--radio); background: #fff;
+}
+.entrada-escaneo:disabled { border-color: var(--borde); background: #f1f3f5; }
+.resultado {
+  margin: 10px 0; padding: 14px 16px; border-radius: var(--radio);
+  font-size: 20px; font-weight: 800; background: var(--superficie); border: 1px solid var(--borde);
+  min-height: 60px; overflow-wrap: anywhere;
+}
+.resultado--ok { background: var(--ok-fondo); color: var(--ok); border-color: #a9dcb8; }
+.resultado--error { background: var(--error-fondo); color: var(--error); border-color: #f3b8b2; }
+.resultado small { display: block; font-size: 15px; font-weight: 600; margin-top: 2px; }
+.progreso { height: 12px; background: #dde3ea; border-radius: 999px; overflow: hidden; margin: 6px 0 4px; }
+.progreso__barra { height: 100%; background: var(--ok); width: 0; transition: width 0.2s; }
+.envio { font-size: 14px; color: var(--texto-suave); min-height: 20px; }
+.acciones { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-top: 14px; }
+
+/* ---------- Diálogo ---------- */
+.dialogo { border: 0; border-radius: 14px; padding: 0; width: min(560px, calc(100vw - 24px)); max-height: 85vh; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3); }
+.dialogo::backdrop { background: rgba(20, 32, 43, 0.55); }
+.dialogo__cuerpo { padding: 18px; overflow-y: auto; max-height: calc(85vh - 80px); }
+.dialogo__acciones { display: flex; gap: 10px; justify-content: flex-end; padding: 12px 18px; border-top: 1px solid var(--borde); flex-wrap: wrap; }
+.historial { list-style: none; margin: 0; padding: 0; }
+.historial li { padding: 8px 0; border-bottom: 1px solid var(--borde); font-size: 15px; }
+.historial__ok { color: var(--ok); font-weight: 700; }
+.historial__error { color: var(--error); font-weight: 700; }
+
+@media (max-width: 520px) {
+  body { font-size: 16px; }
+  .contenido { padding: 12px; }
+  .barra__operador { display: none; }
+  .escaneo { top: 58px; }
+}

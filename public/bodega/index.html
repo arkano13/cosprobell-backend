@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#16324f">
+  <title>Bodega · Cosprobell</title>
+  <link rel="stylesheet" href="estilos.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <header class="barra">
+    <button id="btn-inicio" class="barra__titulo" type="button">Bodega</button>
+    <span id="estado-conexion" class="chip chip--alerta" hidden>Sin conexión</span>
+    <span id="operador" class="barra__operador"></span>
+    <button id="btn-menu" class="boton boton--barra" type="button">Menú</button>
+  </header>
+  <main id="vista" class="contenido">
+    <p class="cargando">Cargando…</p>
+  </main>
+  <dialog id="dialogo" class="dialogo"></dialog>
+  <noscript><p class="aviso aviso--error">Esta pantalla necesita JavaScript activado.</p></noscript>
+</body>
+</html>
