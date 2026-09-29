@@ -523,3 +523,22 @@ A pedido de Cosprobell, la identidad se llevó a un tono más serio: se quitaron
 La pantalla se usará en PC, no en celulares. Se convirtió en una app de Windows (Electron) en un repositorio aparte, `cosprobell-bodega-escritorio`, y se quitó de este backend: ya no existen `public/bodega/` ni la ruta `/bodega`. Sus pruebas y su guía se movieron a ese repositorio. Se conservan aquí el nombre de producto en el detalle del pedido y `scripts/datos-demo-bodega.js`.
 
 La app trae la pantalla dentro y se conecta por HTTPS a la dirección del servidor configurada en cada equipo, desde el origen `app://bodega`. Depende de que `cors()` siga aceptando sus solicitudes; la seguridad sigue estando en la API key de cada equipo. Cambios en la pantalla ahora requieren publicar una versión nueva del instalador.
+
+### 2026-09-29 — Instalador de Windows verificado
+
+GitHub Actions armó `Bodega-Cosprobell-1.0.0-instalador.exe` en una máquina Windows: 13 pruebas aprobadas y el programa armado abrió la configuración sin acceso a Node ("PRUEBA RÁPIDA APROBADA"). El instalador no está firmado: Windows muestra el aviso de SmartScreen. Falta probarlo en una PC de bodega con el lector físico.
+
+## 23. Despliegue en Railway
+
+Prioridad: ver funcionar la app contra un backend en Railway. El puente con SAP queda para después; sin sus variables, `/integracion` responde 503 y el resto funciona.
+
+- `railway.json`: migraciones antes de cada despliegue, `npm start`, comprobación en `/health` y reinicio si el proceso cae.
+- `prisma` pasó a dependencias de ejecución y `npm install` genera el cliente (`postinstall`): el cliente generado no está en el repositorio y en producción no se instalan dependencias de desarrollo.
+- Variables mínimas del servicio: `DATABASE_URL=${{Postgres.DATABASE_URL}}` (referencia a la base, sin copiar la contraseña) y `NODE_ENV=production`. Guía en `DESPLEGAR_RAILWAY.md`.
+
+Verificación: instalación limpia con `NODE_ENV=production` y sin `DATABASE_URL` (el cliente se generó), migraciones sobre una base vacía, arranque, `/health` con `{"status":"ok","db":"ok"}`, `/pedidos` sin clave 401 y `/integracion` sin configurar 503. 302 pruebas aprobadas. No probado en Railway real.
+
+Observaciones:
+- Un error 503 de `/integracion` sin configurar llega al cliente como `INTERNAL_ERROR` genérico, porque el manejador de errores oculta los 5xx; el motivo solo se ve en el registro. Revisar cuando se retome el puente.
+- Se compartió por chat una dirección de la base de pruebas con su contraseña. Se recomendó regenerarla en Railway (Postgres → Database → Credentials) y volver a desplegar el backend. No se registra el valor.
+- En discusión, sin implementar: dirección del servidor fija dentro de la app de escritorio e ingreso de cada bodeguero con un PIN de 4 números elegido por él.

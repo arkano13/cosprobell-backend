@@ -108,3 +108,7 @@ La suite actual tiene 275 pruebas aprobadas. La instalación y las pruebas reale
 ## Pantalla de bodega
 
 La pantalla del escáner es una app de escritorio para Windows (Electron) en su propio repositorio, `cosprobell-bodega-escritorio`. Este backend no la sirve: solo expone la API que usa (`/pedidos`, `/picking`) con la API key de cada equipo. La app se conecta desde su propio origen (`app://bodega`), por eso `cors()` debe seguir aceptando esas solicitudes. `pedidosRepository.obtener` agrega el nombre de cada producto al detalle del pedido. Datos ficticios para probarla sin SAP: `scripts/datos-demo-bodega.js`.
+
+## Despliegue en Railway
+
+`railway.json` define el despliegue: migraciones antes de arrancar (`npx prisma migrate deploy`), `npm start` y comprobación en `/health`. `prisma` es dependencia de ejecución y `npm install` genera el cliente (`postinstall`). Pasos y variables en [DESPLEGAR_RAILWAY.md](DESPLEGAR_RAILWAY.md).
