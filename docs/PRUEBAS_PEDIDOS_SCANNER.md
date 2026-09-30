@@ -35,7 +35,7 @@ Todas requieren `X-API-Key` de la aplicación; la clave del puente no sirve para
 
 | Método y ruta | Uso |
 |---|---|
-| `GET /pedidos?estado=abiertos&limit=25` | Lista inicial por `docEntry` ascendente |
+| `GET /pedidos?estado=abiertos&limit=25` | Lista inicial por `docEntry` ascendente; cada pedido trae `preparado` (última preparación finalizada o `null`) |
 | `GET /pedidos?cursor=123&limit=25` | Página siguiente, usando `siguienteCursor` |
 | `GET /pedidos?estado=todos` | Incluye cerrados y cancelados |
 | `GET /pedidos/:docEntry` | Detalle y diagnóstico `preparacion` de los datos locales |

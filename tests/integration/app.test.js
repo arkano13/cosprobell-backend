@@ -814,8 +814,34 @@ test("HTTP pedidos lista con cursor sin perder la fila siguiente", async (t) => 
     assert.deepEqual(q, { limit: 1, cursor: 8, estado: "abiertos" });
     return [{ docEntry: 9 }, { docEntry: 10 }];
   });
+  const preparaciones = t.mock.method(pedidosRepository, "preparaciones", async () => []);
   const r = await fetch(`${baseUrl}/pedidos?limit=1&cursor=8`, { headers: autenticar(t) });
-  assert.equal(r.status, 200); assert.deepEqual(await r.json(), { data: [{ docEntry: 9 }], siguienteCursor: 9 });
+  assert.equal(r.status, 200); assert.deepEqual(await r.json(), { data: [{ docEntry: 9, preparado: null }], siguienteCursor: 9 });
+  assert.deepEqual(preparaciones.mock.calls[0].arguments, [[9]]);
+});
+test("HTTP pedidos informa la última preparación finalizada de cada pedido", async (t) => {
+  t.mock.method(pedidosRepository, "listar", async () => [{ docEntry: 9 }, { docEntry: 10 }, { docEntry: 11 }]);
+  const fin = new Date("2026-09-30T14:32:00.000Z");
+  t.mock.method(pedidosRepository, "preparaciones", async () => [
+    { id: 41, pedidoDocEntry: 10, estado: "con_diferencias", usuarioId: "Luis Pérez", fechaFin: fin,
+      lineas: [{ cantidadPedida: 6, cantidadEscaneada: 6 }, { cantidadPedida: 5, cantidadEscaneada: 3 }] },
+    { id: 30, pedidoDocEntry: 10, estado: "completo", usuarioId: "Anterior", fechaFin: new Date("2026-09-29T10:00:00.000Z"), lineas: [] },
+    { id: 12, pedidoDocEntry: 11, estado: "completo", usuarioId: "Ana López", fechaFin: fin, lineas: [{ cantidadPedida: 1, cantidadEscaneada: 1 }] },
+  ]);
+  const r = await fetch(`${baseUrl}/pedidos`, { headers: autenticar(t) });
+  assert.equal(r.status, 200);
+  assert.deepEqual((await r.json()).data.map((p) => [p.docEntry, p.preparado]), [
+    [9, null],
+    [10, { pickingId: 41, estado: "con_diferencias", operador: "Luis Pérez", fechaFin: fin.toISOString(), unidadesPreparadas: 9, unidadesPedidas: 11 }],
+    [11, { pickingId: 12, estado: "completo", operador: "Ana López", fechaFin: fin.toISOString(), unidadesPreparadas: 1, unidadesPedidas: 1 }],
+  ]);
+});
+test("HTTP pedidos sin resultados no consulta preparaciones", async (t) => {
+  t.mock.method(pedidosRepository, "listar", async () => []);
+  const preparaciones = t.mock.method(pedidosRepository, "preparaciones", async () => assert.fail("No debe consultar"));
+  const r = await fetch(`${baseUrl}/pedidos`, { headers: autenticar(t) });
+  assert.deepEqual(await r.json(), { data: [], siguienteCursor: null });
+  assert.equal(preparaciones.mock.callCount(), 0);
 });
 test("HTTP detalle de pedido informa pendientes y bloqueos locales", async (t) => {
   const pedido = construirLotePedidos([pedidoSap()], "TEST", 1).pedidos[0];

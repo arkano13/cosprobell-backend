@@ -3,8 +3,20 @@ import { comprobarPedidoElegible, lineasParaPreparar } from "../picking/picking.
 import { AppError } from "../../shared/errors/AppError.js";
 export async function listarPedidos(query) {
   const filas = await repo.listar(query);
-  const data = filas.slice(0, query.limit);
-  return { data, siguienteCursor: filas.length > query.limit ? data.at(-1).docEntry : null };
+  const pagina = filas.slice(0, query.limit);
+  // Un pedido preparado sigue abierto hasta que SAP registra la entrega; la bodega lo ve como "Preparado".
+  const preparaciones = pagina.length ? await repo.preparaciones(pagina.map((p) => p.docEntry)) : [];
+  const ultima = new Map();
+  for (const preparacion of preparaciones) {
+    if (!ultima.has(preparacion.pedidoDocEntry)) ultima.set(preparacion.pedidoDocEntry, resumirPreparacion(preparacion));
+  }
+  const data = pagina.map((pedido) => ({ ...pedido, preparado: ultima.get(pedido.docEntry) ?? null }));
+  return { data, siguienteCursor: filas.length > query.limit ? pagina.at(-1).docEntry : null };
+}
+function resumirPreparacion({ id, estado, usuarioId, fechaFin, lineas }) {
+  const sumar = (valor) => lineas.reduce((total, linea) => total + valor(linea), 0);
+  return { pickingId: id, estado, operador: usuarioId, fechaFin,
+    unidadesPreparadas: sumar((l) => Math.min(l.cantidadEscaneada, l.cantidadPedida)), unidadesPedidas: sumar((l) => l.cantidadPedida) };
 }
 export async function obtenerPedido(docEntry) {
   const pedido = await repo.obtener(docEntry);
