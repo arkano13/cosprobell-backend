@@ -1,8 +1,11 @@
 import { ErrorPuente } from "./http.js";
 import { PRODUCTOS } from "./entidades.js";
+import { separarCambios, claveHuella } from "./huellas.js";
 export async function sincronizar({ config, almacen, sap, backend, entidad = PRODUCTOS, detenido = () => false }) {
   let estado = almacen.estado;
   const guardar = async (siguiente) => { await almacen.guardar(siguiente); almacen.estado = estado = siguiente; };
+  const comparar = async registros => separarCambios(registros, entidad, config.reconciliar ? {} :
+    await almacen.leerHuellas(registros.map(r => claveHuella(r[entidad.claveLocal]))));
   const remoto = await backend.estado(entidad);
   const coincide = remoto === estado.secuencia || (estado.pendiente && remoto === estado.pendiente.lote.secuencia);
   if (!coincide) throw new ErrorPuente("REQUIERE_RECONCILIACION");
@@ -18,13 +21,27 @@ export async function sincronizar({ config, almacen, sap, backend, entidad = PRO
   while (!detenido()) {
     if (estado.pendiente) {
       await backend.enviar(estado.pendiente.lote, entidad);
-      await guardar({ ...estado, secuencia: estado.pendiente.lote.secuencia, cursor: estado.pendiente.cursor, pendiente: null }); lotes++;
+      if (estado.pendiente.observados?.length) await backend.observar(estado.pendiente.observados, entidad);
+      if (estado.pendiente.huellas) await almacen.confirmarHuellas(estado.pendiente.huellas);
+      await guardar({ ...estado, secuencia: estado.pendiente.lote.secuencia, cursor: estado.pendiente.cursor,
+        pendiente: null }); lotes++;
       continue;
     }
     if (estado.porRevisar) {
       if (!estado.porRevisar.length) { terminado = true; break; }
       const [clave, ...resto] = estado.porRevisar;
       const lote = entidad.construirLote([await sap.documento(clave, entidad)], config.empresa, estado.secuencia + 1);
+      // Las revisiones también pueden encontrar un pedido sin cambios.
+      if (config.soloCambios) {
+        const partes = await comparar(lote[entidad.nombre]);
+        if (!partes.cambios.length) {
+          await backend.observar(partes.observados, entidad);
+          await guardar({ ...estado, porRevisar: resto });
+          continue;
+        }
+        await guardar({ ...estado, porRevisar: resto, pendiente: { lote, cursor: clave, huellas: partes.huellas } });
+        continue;
+      }
       await guardar({ ...estado, porRevisar: resto, pendiente: { lote, cursor: clave } });
       continue;
     }
@@ -46,9 +63,18 @@ export async function sincronizar({ config, almacen, sap, backend, entidad = PRO
       throw new ErrorPuente("PAGINACION_SIN_AVANCE");
     }
     if (cursor === estado.cursor || registros.some((r) => r[entidad.claveLocal] === estado.cursor)) throw new ErrorPuente("PAGINACION_SIN_AVANCE");
-    await guardar({ ...estado, pendiente: { lote, cursor } });
+    if (config.soloCambios) {
+      const partes = await comparar(registros);
+      if (!partes.cambios.length) {
+        await backend.observar(partes.observados, entidad);
+        await guardar({ ...estado, cursor });
+        continue;
+      }
+      lote[entidad.nombre] = partes.cambios;
+      await guardar({ ...estado, pendiente: { lote, cursor, observados: partes.observados, huellas: partes.huellas } });
+    } else await guardar({ ...estado, pendiente: { lote, cursor } });
   }
   if (!terminado) return { completo: false, lotes, ultimaSecuencia: estado.secuencia };
-  await guardar({ ...estado, cursor: null, ...(conInicio ? { porRevisar: null, inicioRecorrido: null } : {}) });
+  await guardar({ ...estado, cursor: null, ultimoCompleto: new Date().toISOString(), ...(conInicio ? { porRevisar: null, inicioRecorrido: null } : {}) });
   return { completo: true, lotes, ultimaSecuencia: estado.secuencia };
 }

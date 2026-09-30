@@ -3,6 +3,7 @@ import { PRODUCTOS } from "./entidades.js";
 export function crearClienteSap(config, fetchImpl = fetch) {
   let cookie = null;
   async function login() {
+    await config.control?.antesDeConsultar();
     const respuesta = await solicitar(`${config.sapUrl}/Login`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ CompanyDB: config.empresa, UserName: config.usuario, Password: config.password }),
@@ -18,6 +19,7 @@ export function crearClienteSap(config, fetchImpl = fetch) {
     if (!cookie) await login();
     for (let intento = 0; ; intento++) {
       try {
+        await config.control?.antesDeConsultar();
         return await leerJson(await solicitar(`${config.sapUrl}/${ruta}`, { headers: { Cookie: cookie, ...cabeceras } }, fetchImpl));
       } catch (error) {
         if (error.code !== "HTTP_401" || intento === 1) throw error;

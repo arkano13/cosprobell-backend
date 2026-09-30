@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { ErrorPuente } from "./http.js";
 import { PRODUCTOS } from "./entidades.js";
 import { tomarCandado } from "./candado.js";
+import { crearCache } from "./cache.js";
 // Toma el candado de la carpeta y abre el estado de una entidad. Las demás entidades del mismo
 // proceso se abren con abrirAlmacen, bajo el mismo candado.
 export async function abrirEstado(config, entidad = PRODUCTOS) {
@@ -41,13 +42,21 @@ export async function abrirAlmacen(config, entidad) {
   // Revisión de cierres (solo pedidos): hora de inicio del recorrido y claves pendientes de revisar.
   const { inicioRecorrido = null, porRevisar = null } = estado;
   const claveValida = (c) => entidad.claveNumerica ? Number.isSafeInteger(c) && c >= 0 : typeof c === "string";
+  const huellasValidas = h => h && typeof h === "object" && !Array.isArray(h) && Object.entries(h).every(([k, v]) =>
+    k.startsWith("k:") && typeof v === "string" && /^[a-f0-9]{64}$/.test(v));
+  if ((estado.huellas !== undefined && !huellasValidas(estado.huellas)) ||
+      (estado.ultimaAtencion !== undefined && !Number.isFinite(Date.parse(estado.ultimaAtencion))) ||
+      (estado.ultimoCompleto !== undefined && !Number.isFinite(Date.parse(estado.ultimoCompleto)))) throw new ErrorPuente("ESTADO_LOCAL_INCOMPATIBLE");
   if (!(inicioRecorrido === null || (typeof inicioRecorrido === "string" && Number.isFinite(Date.parse(inicioRecorrido)))) ||
       !(porRevisar === null || (Array.isArray(porRevisar) && porRevisar.every(claveValida)))) throw new ErrorPuente("ESTADO_LOCAL_INCOMPATIBLE");
   if (estado.pendiente !== null) {
     const p = estado.pendiente;
     const valido = entidad.schema.safeParse(p?.lote);
     if (!valido.success || p.lote.empresa !== config.empresa || p.lote.secuencia !== estado.secuencia + 1 ||
-        p.cursor !== p.lote[entidad.nombre].at(-1)[entidad.claveLocal]) throw new ErrorPuente("PENDIENTE_INVALIDO");
+        !claveValida(p.cursor) ||
+        (p.huellas === undefined ? p.cursor !== p.lote[entidad.nombre].at(-1)[entidad.claveLocal] : !huellasValidas(p.huellas)) ||
+        (p.observados !== undefined && (!Array.isArray(p.observados) || p.observados.length > 100 || !p.observados.every(claveValida)))) throw new ErrorPuente("PENDIENTE_INVALIDO");
   }
-  return { estado, guardar };
+  const cache = crearCache(join(config.directorio, `${entidad.nombre}-${config.origen}.sqlite`));
+  return { estado, guardar, leerHuellas: claves => cache.leer(claves), confirmarHuellas: huellas => cache.confirmar(huellas) };
 }

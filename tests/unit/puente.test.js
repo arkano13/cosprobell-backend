@@ -244,7 +244,7 @@ test("clientes: recorrido por CardCode, estado propio y recuperación del pendie
     const resultado = await sincronizar({ config, almacen, sap, backend, entidad: CLIENTES });
     assert.deepEqual(resultado, { completo: true, lotes: 1, ultimaSecuencia: 1 });
     assert.deepEqual(recibidos, ["C1", "C2", "reenvío 1"]);
-    assert.deepEqual((await readdir(config.directorio)).sort(), ["clientes.json", "ejecucion.lock", "productos.json"]);
+    assert.deepEqual((await readdir(config.directorio)).sort(), [`clientes-${config.origen}.sqlite`, "clientes.json", "ejecucion.lock", "productos.json"]);
     assert.equal(productos.estado.secuencia, 0);
   } finally { await productos.cerrar(); }
 });

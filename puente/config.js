@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
+import { ENTIDADES } from "./entidades.js";
 function urlSegura(valor, campo) {
   let u;
   try { u = new URL(valor); } catch { throw new Error(`Configuración inválida: ${campo}`); }
@@ -21,7 +22,23 @@ export function configurar(v) {
   const segundos = Number(v.BRIDGE_INTERVAL_SECONDS ?? 900);
   if (!Number.isSafeInteger(segundos) || segundos < 60 || segundos > 86400) throw new Error("BRIDGE_INTERVAL_SECONDS debe estar entre 60 y 86400");
   const empresa = v.SAP_COMPANY_DB.trim();
+  const numero = (campo, defecto, min, max) => {
+    const n = Number(v[campo] ?? defecto);
+    if (!Number.isSafeInteger(n) || n < min || n > max) throw new Error(`Configuración inválida: ${campo}`);
+    return n;
+  };
+  let frecuencias;
+  try { frecuencias = JSON.parse(v.BRIDGE_FREQUENCIES_JSON ?? "{}"); }
+  catch { throw new Error("Configuración inválida: BRIDGE_FREQUENCIES_JSON"); }
+  if (!frecuencias || Array.isArray(frecuencias) || typeof frecuencias !== "object" || Object.entries(frecuencias).some(([nombre, n]) =>
+    !ENTIDADES.some(e => e.nombre === nombre) || !Number.isSafeInteger(n) || n < 60 || n > 2592000)) {
+    throw new Error("Configuración inválida: BRIDGE_FREQUENCIES_JSON");
+  }
   return { sapUrl, backendUrl, empresa, usuario: v.SAP_USER, password: v.SAP_PASSWORD,
+    frecuencias, soloCambios: true,
+    maxConsultas: numero("BRIDGE_MAX_REQUESTS", 25, 1, 10000),
+    maxDuracionMs: numero("BRIDGE_MAX_SECONDS", 120, 10, 3600) * 1000,
+    pausaMs: numero("BRIDGE_REQUEST_DELAY_MS", 500, 100, 60000),
     clave: v.BRIDGE_API_KEY, directorio: resolve(v.BRIDGE_STATE_DIR), intervaloMs: segundos * 1000,
     origen: createHash("sha256").update(JSON.stringify([sapUrl, backendUrl, empresa])).digest("hex") };
 }

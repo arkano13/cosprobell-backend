@@ -18,6 +18,7 @@ export const CLIENTES = { nombre: "clientes", recurso: "BusinessPartners", clave
   schema: loteClientesSchema, construirLote: construirLoteClientes };
 // Orden de cada ciclo. Los pedidos, cuando se agreguen, irán después: dependen de los clientes.
 export const PEDIDOS = { nombre: "pedidos", recurso: "Orders", claveSap: "DocEntry", claveLocal: "docEntry",
+  dependencias: ["clientes", "productos"],
   claveNumerica: true, tamanoPagina: 1,
   campos: ["DocEntry", "DocNum", "DocType", "CardCode", "DocDate", "DocDueDate", "DocTotal",
     "DocumentStatus", "Cancelled", "CancelStatus", "DocumentLines"],
@@ -33,6 +34,7 @@ export const UNIDADES = { nombre: "unidades", recurso: "UnitOfMeasurements", cla
 // Todos los códigos de barras con su producto y unidad. depurarRetirados: al terminar un recorrido completo,
 // el backend marca como retirados los que SAP ya no lista (conserva sus confirmaciones).
 export const CODIGOS_BARRAS = { nombre: "codigosBarras", recurso: "BarCodes", claveSap: "AbsEntry", claveLocal: "absEntry",
+  dependencias: ["productos", "unidades"],
   claveNumerica: true, campos: ["AbsEntry", "ItemNo", "Barcode", "UoMEntry"], filtro: null, depurarRetirados: true,
   schema: loteCodigosBarrasSchema, construirLote: construirLoteCodigosBarras };
 // Orden de cada ciclo: los códigos dependen de los productos y los pedidos de los clientes.

@@ -1,15 +1,25 @@
 // Arma dist/puente-cosprobell: una carpeta autónoma para copiar al equipo de Cosprobell.
 // Contiene solo el puente, los contratos que valida antes de enviar, zod y los scripts de Windows.
 // No incluye el backend, la base de datos ni credenciales. Uso: npm run empaquetar:puente
-import { cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, rm, writeFile, lstat } from "node:fs/promises";
 import { execFileSync, spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const raiz = fileURLToPath(new URL("..", import.meta.url));
 const destino = join(raiz, "dist", "puente-cosprobell");
 const copiar = (desde, hacia = desde) => cp(join(raiz, desde), join(destino, hacia), { recursive: true });
 
+// Solo reconstruir el directorio generado; nunca borrar una instalación configurada.
+if (dirname(resolve(destino)) !== resolve(raiz, "dist")) throw new Error("Destino de paquete inválido");
+for (const ruta of [join(raiz, "dist"), destino]) {
+  const info = await lstat(ruta).catch(error => { if (error.code !== "ENOENT") throw error; });
+  if (info?.isSymbolicLink()) throw new Error("No se empaqueta sobre enlaces");
+}
+const existentes = await readdir(destino).catch(error => { if (error.code === "ENOENT") return []; throw error; });
+if (existentes.some(nombre => [".env.puente", ".bridge-state", "logs", "certificado"].includes(nombre))) {
+  throw new Error("El destino contiene configuración o estado de ejecución; conservarlo antes de empaquetar");
+}
 await rm(destino, { recursive: true, force: true });
 await mkdir(destino, { recursive: true });
 
@@ -29,7 +39,7 @@ await copiar("docs/PRUEBAS_PEDIDOS_SCANNER.md", "PRUEBAS_PEDIDOS_SCANNER.md");
 
 const { version } = JSON.parse(await readFile(join(raiz, "package.json"), "utf8"));
 await writeFile(join(destino, "package.json"), JSON.stringify({
-  name: "puente-cosprobell", version, private: true, type: "module", engines: { node: ">=22" },
+  name: "puente-cosprobell", version, private: true, type: "module", engines: { node: ">=22.13.0" },
 }, null, 2) + "\n");
 let commit = "desconocido";
 try { commit = execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: raiz, encoding: "utf8" }).trim(); } catch { /* sin git */ }

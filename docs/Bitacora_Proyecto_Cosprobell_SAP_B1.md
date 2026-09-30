@@ -564,3 +564,18 @@ Diseño aprobado por el usuario a partir de una maqueta: un pedido ya preparado 
 - `scripts/datos-demo-belleza.js` (13 productos de belleza, 4 clientes y 6 pedidos ficticios) se entregó al usuario para copiar y no se agregó al repositorio.
 
 Verificación: 319 pruebas (lista con y sin preparaciones, la más reciente por pedido, consulta del repositorio). Recorrido real con la app de escritorio 1.2.0 contra PostgreSQL y este backend, con los datos de belleza: sin preparaciones no aparece la sección; un pedido preparado completo y otro con diferencias pasan a "Preparados" en verde y ámbar con operador y unidades; el que lleva 26 horas muestra el aviso; "Ver resumen" abre el resumen; el buscador filtra ambas secciones; al cerrarse en SAP el pedido sale de la lista. Auditoría axe-core WCAG 2.2 A/AA sin problemas.
+
+## 26. Puente con control de carga y envío de cambios (2026-09-29)
+
+Se eliminó la repetición automática de todos los catálogos cada 15 minutos. La frecuencia queda pendiente de acordar y se configura por entidad, preparada para incorporar otros documentos posteriormente. La carga inicial y sus continuaciones siguen disponibles sin configurar frecuencias.
+
+- Límites iniciales por ejecución: 25 solicitudes SAP, 120 segundos antes de dejar de iniciar consultas y 500 ms entre solicitudes. Logout queda fuera del presupuesto; las peticiones en curso pueden prolongar la duración. Las pausas conservan el avance.
+- Cada registro se compara con una huella de contenido confirmada por el backend. Se envían documentos nuevos/modificados; los que no cambiaron solo confirman presencia mediante identificadores, evitando falsos retiros y revisiones de cierre innecesarias. La presencia sí actualiza fechas en PostgreSQL.
+- Caché SQLite local por entidad y origen, sin servicio adicional ni acceso directo a SQL Server. Avance y lote pendiente continúan en JSON; las huellas solo se confirman después de recibir las respuestas del backend.
+- Las entidades menos atendidas tienen prioridad y se respetan las dependencias de carga inicial. Se añadieron sondeo sin envíos, recorrido manual forzado y reenvío completo de contenido para reconciliación. Este último no corrige diferencias de secuencia.
+- La instalación de la tarea exige cuenta Windows e intervalo explícitos; ya no usa SYSTEM. No se instaló ninguna tarea.
+- Desplegar el backend actualizado antes del puente: nuevas rutas autenticadas de observación. Sin migración de base de datos. Conservar estado JSON/SQLite al actualizar.
+
+Verificación: 335/335 pruebas automatizadas. Incluyen respuesta perdida, página con cambios parciales, presencia de códigos sin cambios, límites, avance conservado, alternancia de entidades y sondeo HTTP simulado sin contactos al backend ni creación de estado. No se contactó SAP ni la base real.
+
+Pendiente: medir carga y validar certificados, cuenta y datos en Cosprobell; elegir frecuencias. Cada recorrido todavía lee las páginas correspondientes de SAP. Consultar solo cambios desde SAP requiere validar filtros de fecha/hora y sus efectos sobre líneas, cancelaciones y cierres; no se afirma que esa etapa esté resuelta. Las facturas aún no están implementadas. Usar una base receptora de pruebas separada de los datos demo.

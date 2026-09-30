@@ -2,7 +2,7 @@
 rem Ejecuta un ciclo del puente (clientes y productos) y agrega la salida al registro del dia.
 rem Lo llama el Programador de tareas; tambien se puede ejecutar a mano para probar.
 setlocal
-cd /d "%~dp0"
+cd /d "%~dp0" || exit /b 1
 if not exist logs mkdir logs
 
 rem El certificado del Service Layer debe definirse ANTES de iniciar Node: dentro de .env.puente no funciona.
@@ -12,10 +12,10 @@ for /f %%f in ('powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd"') d
 set "REGISTRO=logs\puente-%HOY%.log"
 
 echo {"evento":"inicio","hora":"%DATE% %TIME%"} >> "%REGISTRO%"
-node --env-file=.env.puente puente\ejecutar.js --once >> "%REGISTRO%" 2>&1
+node --env-file=.env.puente puente\ejecutar.js --once %* >> "%REGISTRO%" 2>&1
 set "CODIGO=%ERRORLEVEL%"
 echo {"evento":"fin","codigo":%CODIGO%,"hora":"%DATE% %TIME%"} >> "%REGISTRO%"
 
 rem Conserva 30 dias de registros.
-forfiles /p logs /m puente-*.log /d -30 /c "cmd /c del @path" >nul 2>&1
+powershell -NoProfile -Command "Get-ChildItem -LiteralPath './logs' -File -Filter 'puente-*.log' | Where-Object LastWriteTime -lt (Get-Date).AddDays(-30) | ForEach-Object { Remove-Item -LiteralPath $_.FullName }" >nul 2>&1
 exit /b %CODIGO%

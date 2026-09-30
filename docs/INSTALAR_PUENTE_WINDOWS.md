@@ -1,11 +1,11 @@
 # Instalar y ejecutar el puente en Windows
 
-El puente es un programa pequeño que corre **dentro de la red de Cosprobell**. Cada 15 minutos lee clientes, productos y pedidos de artículos del Service Layer de SAP (solo lectura) y los envía al backend por HTTPS. No abre puertos ni expone SAP a internet. Antes de programarlo, completar la guía `PRUEBAS_PEDIDOS_SCANNER.md` y medir la duración del recorrido.
+El puente es un programa pequeño que corre **dentro de la red de Cosprobell**. Lee clientes, productos, unidades, códigos de barras y pedidos de artículos del Service Layer de SAP y envía al backend únicamente el contenido nuevo o modificado. Las frecuencias por entidad quedan pendientes de definir; no se activa una repetición automática por defecto. No abre puertos ni expone SAP a internet. Antes de programarlo, completar la guía `PRUEBAS_PEDIDOS_SCANNER.md` y medir la duración del recorrido.
 
 ```text
 Red de Cosprobell                                        Internet
 SAP B1 ── Service Layer ── [equipo con el puente] ──HTTPS──► backend ──► PostgreSQL
-           (solo GET)       tarea cada 15 min
+           (lectura)        ejecución limitada
 ```
 
 ## 1. Antes de empezar
@@ -17,9 +17,9 @@ SAP B1 ── Service Layer ── [equipo con el puente] ──HTTPS──► b
 - llegue a `SERVIDOR.COSPROBELL.COM` puerto 50000 (`Test-NetConnection SERVIDOR.COSPROBELL.COM -Port 50000` debe decir `TcpTestSucceeded : True`);
 - tenga salida HTTPS a internet hacia el backend;
 - tenga la hora sincronizada automáticamente;
-- tenga **Node.js 22 LTS o superior** instalado con el instalador oficial `.msi` de nodejs.org (así queda disponible para la tarea programada). Comprobar con `node --version`.
+- tenga **Node.js 22.13.0 o superior** (desarrollo verificado con Node 24) instalado con el instalador oficial `.msi` de nodejs.org (así queda disponible para la tarea programada). Comprobar con `node --version`.
 
-**Usuario SAP propio del puente** (no `manager`) con acceso a Service Layer. No se necesita usuario de base de datos.
+**Usuario SAP con acceso a Service Layer**. En la sociedad de pruebas se usará el usuario disponible autorizado por sistemas; para producción, preparar una cuenta exclusiva con permisos mínimos. No se necesita usuario de base de datos.
 
 ## 2. Armar el paquete (en tu PC, desde el proyecto)
 
@@ -72,50 +72,56 @@ Crea la carpeta `dist\puente-cosprobell` con el puente, sus contratos, `zod` y l
 
 ## 4. Primera ejecución manual
 
+Primero desplegar el backend actualizado: esta versión necesita las rutas `/integracion/:entidad/observados`. No necesita una migración nueva. Usar un backend de pruebas separado de los datos demo.
+
+```powershell
+.\ejecutar-puente.cmd --sondeo
+```
+
+El sondeo inicia sesión, solicita como máximo un registro de cada entidad, valida sus campos y cierra sesión. No contacta al backend ni modifica el avance local. Revisar el log antes de iniciar la carga:
+
 ```powershell
 .\ejecutar-puente.cmd
-type logs\puente-(fecha de hoy).log
 ```
 
-Una ejecución correcta termina así:
+Cada ejecución inicia o continúa la carga pendiente. Una entidad completada no vuelve a recorrerse si no tiene frecuencia configurada. Los registros sin cambios envían solo sus identificadores para confirmar su presencia; no se sobrescribe su contenido. Las huellas se guardan en archivos SQLite locales, sin instalar otro servicio ni tocar SQL Server.
 
-```json
-{"evento":"ciclo","entidad":"clientes","completo":true,"lotes":2,"ultimaSecuencia":2}
-{"evento":"ciclo","entidad":"productos","completo":true,"lotes":3,"ultimaSecuencia":3}
-{"evento":"ciclo","entidad":"pedidos","completo":true,"lotes":5,"ultimaSecuencia":5}
-{"evento":"fin","codigo":0,"hora":"..."}
-```
+| Variable | Valor inicial | Función |
+|---|---|---|
+| `BRIDGE_FREQUENCIES_JSON` | `{}` | Sin repetición automática tras completar la carga inicial |
+| `BRIDGE_MAX_REQUESTS` | `25` | Máximo de solicitudes SAP por ejecución, incluyendo login y reintentos; logout queda fuera para liberar sesión |
+| `BRIDGE_MAX_SECONDS` | `120` | Deja de iniciar consultas al alcanzar este tiempo; una solicitud en curso, confirmaciones y logout pueden prolongarlo |
+| `BRIDGE_REQUEST_DELAY_MS` | `500` | Separación mínima entre inicios de solicitudes SAP |
 
-`codigo` 0 es éxito; 1 indica un problema (ver sección 7). Revisar después en el backend que llegaron los datos.
+`pausa_por_presupuesto` es una pausa normal: conserva el avance para la próxima ejecución. Un código de salida 0 no significa que todas las entidades terminaron; comprobar `completo:true` por entidad. Se alternan las entidades menos atendidas y se esperan los catálogos iniciales que requieren los pedidos y códigos de barras.
 
-## 5. Programar la ejecución cada 15 minutos
+Para solicitar otro recorrido manual: `.\ejecutar-puente.cmd --forzar`. Para reenviar contenido aunque coincidan las huellas: `--reconciliar`. Ambos respetan los límites; repetir el mismo comando si queda trabajo. `--reconciliar` **no repara** discrepancias entre secuencias locales y remotas.
 
-Clic derecho sobre `instalar-tarea.cmd` → **Ejecutar como administrador**. Crea la tarea `Cosprobell\Puente`, que:
+**Límite actual:** cuando corresponde un recorrido, se siguen consultando las páginas de SAP (en pedidos, los abiertos y la revisión de cierres). Las huellas reducen transferencias al backend, no convierten esas lecturas en consultas incrementales de SAP. Los filtros por fecha de modificación requieren validar su comportamiento real, las líneas y los cierres. No considerar esta etapa como sincronización incremental completa desde SAP.
 
-- corre cada 15 minutos con la cuenta SYSTEM, aunque nadie haya iniciado sesión, y sigue después de reiniciar el equipo;
-- no inicia un ciclo nuevo si el anterior sigue en curso;
-- ejecuta `ejecutar-puente.cmd`, que agrega la salida a `logs\puente-AAAA-MM-DD.log` y borra registros de más de 30 días.
+## 5. Programar cuando se acuerden las frecuencias
 
-Comandos útiles (PowerShell como administrador):
+No instalar una tarea todavía. Tras medir la prueba, definir `BRIDGE_FREQUENCIES_JSON`: un objeto con segundos por entidad (`clientes`, `productos`, `unidades`, `codigosBarras`, `pedidos`). Las entidades omitidas solo realizan la carga inicial y sus continuaciones. Cada frecuencia se cuenta desde el último recorrido completo.
+
+La frecuencia de arranque de Windows es independiente: cada arranque revisa qué entidades están pendientes. `BRIDGE_INTERVAL_SECONDS` solo controla la espera del modo `--watch`; no configura Windows. Usar un único mecanismo. `--watch` exige frecuencias explícitas y no permite `--forzar` ni `--reconciliar`.
+
+En una consola elevada, ejecutar `instalar-tarea.cmd` con dos argumentos: cuenta de Windows autorizada y minutos entre arranques. El script solicita su contraseña y rechaza SYSTEM; no reemplaza tareas existentes. La cuenta necesita leer el programa y la configuración y escribir estado y logs, sin privilegios administrativos permanentes.
+
+La tarea se llama `Cosprobell\Puente`. El candado del programa impide dos sincronizaciones locales simultáneas. Comprobar además en el Programador: «Si la tarea ya se está ejecutando: no iniciar una nueva instancia». Los logs se conservan 30 días.
 
 ```powershell
-schtasks /Run /TN "Cosprobell\Puente"                 # ejecutar ahora
-schtasks /Query /TN "Cosprobell\Puente" /V /FO LIST   # estado, última ejecución y resultado
-.\desinstalar-tarea.cmd                               # quitar la tarea (no borra configuración ni estado)
+schtasks /Query /TN "Cosprobell\Puente" /V /FO LIST
+.\desinstalar-tarea.cmd
 ```
-
-Si sistemas prefiere una cuenta de servicio en lugar de SYSTEM, cambiar en `instalar-tarea.cmd` `/RU SYSTEM` por `/RU DOMINIO\usuario /RP *` (pedirá la contraseña). Esa cuenta necesita permiso de lectura y escritura en la carpeta.
-
-Sin el script, desde el Programador de tareas: Crear tarea → "Ejecutar tanto si el usuario inició sesión como si no" → Desencadenador diario, repetir cada 15 minutos indefinidamente → Acción: iniciar `C:\cosprobell\puente-cosprobell\ejecutar-puente.cmd` → Configuración: "Si la tarea ya se está ejecutando: no iniciar una nueva instancia".
 
 ## 6. Actualizar a una versión nueva
 
 1. `.\desinstalar-tarea.cmd` (o deshabilitar la tarea) y esperar a que no haya un ciclo en curso. No ejecutar versiones antiguas y nuevas simultáneamente: las antiguas no respetan la guardia de recuperación.
 2. Reemplazar los archivos con los del paquete nuevo, **conservando** `.env.puente`, `.bridge-state\`, `certificado\` y `logs\`.
 3. `.\ejecutar-puente.cmd` una vez y revisar el registro.
-4. `instalar-tarea.cmd` como administrador.
+4. Rehabilitar la tarea con la cuenta y frecuencia previamente acordadas.
 
-`VERSION.txt` indica la versión y el commit del paquete instalado.
+`VERSION.txt` indica la versión y el commit base del paquete. Conservar los archivos JSON y SQLite de `.bridge-state`; no copiar estado entre sociedades o backends diferentes.
 
 ## 7. Problemas frecuentes
 
@@ -136,4 +142,6 @@ Si la red de Cosprobell obliga a usar un proxy para salir a internet, avisar: No
 
 ## Qué no está probado
 
-Los scripts `.cmd` se escribieron para Windows pero no se pudieron ejecutar en Windows durante el desarrollo. El puente, el paquete y el certificado sí se probaron en Linux con Service Layer simulado y PostgreSQL. La primera instalación debe seguir esta guía paso a paso y revisar el registro de la primera ejecución.
+La caché utiliza `node:sqlite`, disponible sin bandera desde Node 22.13.0; en Node 24 puede mostrar un aviso experimental. Mantener la versión de Node probada durante la instalación. Referencia: [documentación de Node.js](https://nodejs.org/api/sqlite.html).
+
+Las pruebas automatizadas usan SAP simulado y archivos locales temporales. No verifican la carga real del servidor de Cosprobell, sus certificados ni los permisos de la cuenta de Windows. La instalación de la tarea y la sincronización contra la sociedad de pruebas siguen pendientes. No se ha contactado SAP ni modificado su base durante estos cambios.
