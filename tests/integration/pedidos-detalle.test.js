@@ -21,3 +21,12 @@ test("el detalle del pedido agrega el nombre de cada producto", async (t) => {
   sustituir(t, prisma.pedido, "findUnique", async () => null);
   assert.equal(await pedidosRepository.obtener(10), null);
 });
+
+test("las preparaciones de la lista son solo las finalizadas de esos pedidos, la más reciente primero", async (t) => {
+  let consulta;
+  sustituir(t, prisma.pickingPedido, "findMany", async (args) => { consulta = args; return []; });
+  await pedidosRepository.preparaciones([9, 10]);
+  assert.deepEqual(consulta.where, { pedidoDocEntry: { in: [9, 10] }, estado: { in: ["completo", "con_diferencias"] } });
+  assert.deepEqual(consulta.orderBy, [{ fechaFin: "desc" }, { id: "desc" }]);
+  assert.deepEqual(consulta.select.lineas, { select: { cantidadPedida: true, cantidadEscaneada: true } });
+});

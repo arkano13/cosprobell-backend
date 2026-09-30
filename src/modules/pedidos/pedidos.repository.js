@@ -11,6 +11,15 @@ export const pedidosRepository = {
       orderBy: { docEntry: "asc" }, take: limit + 1,
     });
   },
+  // Preparaciones finalizadas de los pedidos indicados, la más reciente primero, con las cantidades de cada línea.
+  preparaciones(docEntries) {
+    return prisma.pickingPedido.findMany({
+      where: { pedidoDocEntry: { in: docEntries }, estado: { in: ["completo", "con_diferencias"] } },
+      select: { id: true, pedidoDocEntry: true, estado: true, usuarioId: true, fechaFin: true,
+        lineas: { select: { cantidadPedida: true, cantidadEscaneada: true } } },
+      orderBy: [{ fechaFin: "desc" }, { id: "desc" }],
+    });
+  },
   async obtener(docEntry) {
     const pedido = await prisma.pedido.findUnique({ where: { docEntry }, include: {
       cliente: { select: { cardName: true } }, lineas: { orderBy: { lineNum: "asc" } },

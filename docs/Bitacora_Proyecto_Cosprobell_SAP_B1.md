@@ -1,6 +1,6 @@
 # Bitácora del proyecto — Cosprobell · SAP Business One
 
-Última actualización: 28 de septiembre de 2026.
+Última actualización: 30 de septiembre de 2026.
 
 ## Procedencia
 
@@ -553,3 +553,14 @@ Decisión de Cosprobell: cada persona de bodega ingresa con su nombre y un PIN d
 - `scripts/operadores.js` (listar, crear, pin, desbloquear, desactivar, activar) y `crear-api-key.js --solo-ingreso`. Guía en `INGRESO_OPERADORES.md`.
 
 Verificación: 316 pruebas (PIN, bloqueo con reloj controlado, sesiones, rutas por alcance). Contra PostgreSQL: comandos del supervisor, lista con la clave de ingreso (y 403 en pedidos), PIN incorrecto, sesión, pedidos con sesión, productos 403, preparación iniciada a nombre del operador, cierre de sesión (401 después), pausa al quinto error, desbloqueo y cambio de PIN. Falta la parte de la app de escritorio y probar en Railway.
+
+## 25. Pedidos preparados en la lista
+
+Diseño aprobado por el usuario a partir de una maqueta: un pedido ya preparado sigue en la lista hasta que SAP registra la entrega y lo cierra, marcado en verde ("Preparado") o en ámbar ("Preparado con diferencias"). No se quita por tiempo: si pasan más de 24 horas sin cierre en SAP, la app de escritorio muestra un aviso para revisar la entrega.
+
+- `GET /pedidos` agrega a cada pedido `preparado`: la última preparación finalizada (`completo` o `con_diferencias`) con `pickingId`, `estado`, `operador`, `fechaFin`, `unidadesPreparadas` y `unidadesPedidas`, o `null`. Una sola consulta por página; si la página está vacía no consulta.
+- Sin migración. Las preparaciones en curso o en revisión no se informan en la lista.
+- Corregido el mensaje "Ese producto ya completó su cantidad pedida" (faltaba la tilde).
+- `scripts/datos-demo-belleza.js` (13 productos de belleza, 4 clientes y 6 pedidos ficticios) se entregó al usuario para copiar y no se agregó al repositorio.
+
+Verificación: 319 pruebas (lista con y sin preparaciones, la más reciente por pedido, consulta del repositorio). Recorrido real con la app de escritorio 1.2.0 contra PostgreSQL y este backend, con los datos de belleza: sin preparaciones no aparece la sección; un pedido preparado completo y otro con diferencias pasan a "Preparados" en verde y ámbar con operador y unidades; el que lleva 26 horas muestra el aviso; "Ver resumen" abre el resumen; el buscador filtra ambas secciones; al cerrarse en SAP el pedido sale de la lista. Auditoría axe-core WCAG 2.2 A/AA sin problemas.

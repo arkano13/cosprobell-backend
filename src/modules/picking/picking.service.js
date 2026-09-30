@@ -107,7 +107,7 @@ async function registrarUnidad(id, codigo, tx) {
   if (!pendiente) {
     throw new AppError({
       code: "CANTIDAD_COMPLETADA",
-      message: "Ese producto ya completo su cantidad pedida",
+      message: "Ese producto ya completó su cantidad pedida",
       statusCode: 409,
     });
   }
