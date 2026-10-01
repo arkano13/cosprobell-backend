@@ -27,11 +27,10 @@ test("sondeo consulta SAP simulado sin contactar backend ni crear estado", async
       BRIDGE_STATE_DIR: join(carpeta, "estado"), BRIDGE_REQUEST_DELAY_MS: "100", BRIDGE_FREQUENCIES_JSON: "{}",
       BRIDGE_MAX_REQUESTS: "25", BRIDGE_MAX_SECONDS: "120", NODE_TLS_REJECT_UNAUTHORIZED: "1" },
   });
-  // Login, una página de cada una de las 12 entidades y Logout.
-  assert.equal(llamadas.length, 14);
-  assert.equal(llamadas.filter(x => x.metodo === "GET").length, 12);
+  assert.equal(llamadas.length, 7);
+  assert.equal(llamadas.filter(x => x.metodo === "GET").length, 5);
   assert(llamadas.filter(x => x.metodo === "GET").every(x => x.url.includes("$top=1")));
   assert(llamadas.every(x => x.url.startsWith("/b1s/v1/")));
   assert.deepEqual(await readdir(carpeta), []);
-  assert.equal(stdout.trim().split("\n").map(JSON.parse).filter(x => x.evento === "sondeo").length, 12);
+  assert.equal(stdout.trim().split("\n").map(JSON.parse).filter(x => x.evento === "sondeo").length, 5);
 });

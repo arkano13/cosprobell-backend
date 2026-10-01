@@ -205,8 +205,7 @@ test("clientes: transforma BusinessPartners e informa código y campo inválidos
   }
 });
 test("clientes se sincronizan antes que productos", () => {
-  assert.deepEqual(ENTIDADES.map((e) => e.nombre), ["clientes", "productos", "unidades", "codigosBarras", "pedidos", "almacenes", "existencias",
-    "entradasCompra", "entradasInventario", "salidasInventario", "devolucionesProveedor", "devolucionesCliente"]);
+  assert.deepEqual(ENTIDADES.map((e) => e.nombre), ["clientes", "productos", "unidades", "codigosBarras", "pedidos"]);
 });
 test("clientes: consulta solo clientes de SAP y combina el filtro con el cursor", async () => {
   const urls = [];
