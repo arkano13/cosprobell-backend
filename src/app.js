@@ -17,6 +17,7 @@ import errorHandler from "./middleware/errorHandler.js";
 import { requireAppAuth, soloAplicaciones } from "./middleware/authenticate.js";
 import operadoresRoutes from "./modules/operadores/operadores.routes.js";
 import supervisorRoutes from "./modules/supervisor/supervisor.routes.js";
+import inventarioRoutes from "./modules/inventario/inventario.routes.js";
 
 const app = express();
 app.use(helmet());
@@ -33,7 +34,9 @@ app.use(pickingRoutes);
 app.use(pedidosRoutes);
 // Panel del supervisor (rol supervisor con sesión de PIN).
 app.use("/supervisor", supervisorRoutes);
-// Un operador solo llega hasta pedidos y picking.
+// Inventario de las dos bodegas (operadores y aplicaciones; algunas correcciones solo el supervisor).
+app.use("/inventario", inventarioRoutes);
+// Un operador solo llega hasta pedidos, picking, el panel y el inventario.
 app.use(soloAplicaciones);
 app.use(productosRoutes);
 app.use(bodegasRoutes);

@@ -35,7 +35,9 @@ export function crearClienteSap(config, fetchImpl = fetch) {
         ? !Number.isInteger(cursor) || cursor < 0 || cursor > 2147483647
         : typeof cursor !== "string")) throw new ErrorPuente("CURSOR_INVALIDO");
       const literal = cursor === null ? null : entidad.claveNumerica ? cursor : `'${cursor.replaceAll("'", "''")}'`;
-      const condiciones = [entidad.filtro, cursor === null ? null : `${entidad.claveSap} gt ${literal}`].filter(Boolean);
+      // El filtro puede depender de la configuración (por ejemplo, documentos desde hace N días).
+      const fijo = typeof entidad.filtro === "function" ? entidad.filtro(config) : entidad.filtro;
+      const condiciones = [fijo, cursor === null ? null : `${entidad.claveSap} gt ${literal}`].filter(Boolean);
       const tamano = entidad.tamanoPagina ?? 50;
       const filtro = condiciones.length ? `&$filter=${encodeURIComponent(condiciones.join(" and "))}` : "";
       const consulta = `$select=${entidad.campos.join(",")}&$orderby=${encodeURIComponent(`${entidad.claveSap} asc`)}&$top=${tamano}${filtro}`;

@@ -47,16 +47,12 @@ export const sincronizacionRepository = {
     return filas[0] ?? null;
   },
   async guardarProducto(producto, db) {
-    const anterior = await db.producto.findUnique({ where: { itemCode: producto.itemCode }, select: { quantityOnStock: true } });
     const guardado = await db.producto.upsert({
       where: { itemCode: producto.itemCode },
       create: { ...producto, sincronizadoEn: new Date() },
       update: { ...producto, sincronizadoEn: new Date() },
     });
     await sincronizarCodigoFicha(producto.itemCode, producto.barCode, db);
-    if (anterior && producto.quantityOnStock !== undefined && producto.quantityOnStock !== anterior.quantityOnStock) {
-      await registrarCambioExistencias(producto.itemCode, (producto.quantityOnStock ?? 0) - (anterior.quantityOnStock ?? 0), db);
-    }
     return guardado;
   },
   guardarCliente(cliente, db) {
@@ -92,6 +88,47 @@ export const sincronizacionRepository = {
       where: { sapAbsEntry: { not: null }, retiradoEnSap: false, OR: [{ sincronizadoEn: null }, { sincronizadoEn: { lt: antesDe } }] },
       data: { retiradoEnSap: true } });
     return count;
+  },
+  guardarAlmacen(almacen, db) {
+    const { warehouseCode, ...datos } = almacen;
+    return db.bodega.upsert({ where: { warehouseCode },
+      create: { ...almacen, sincronizadoEn: new Date() }, update: { ...datos, sincronizadoEn: new Date() } });
+  },
+  // Reemplaza la existencia del artículo en cada almacén. Si cambia lo que suman los almacenes de esta
+  // bodega, el inventario se entera (puede haber mercadería por ubicar o por descontar).
+  async guardarExistencias({ itemCode, almacenes }, db) {
+    const producto = await db.producto.findUnique({ where: { itemCode }, select: { itemCode: true } });
+    if (!producto) throw new AppError({ code: "PRODUCTO_NO_SINCRONIZADO",
+      message: "Debe sincronizar el producto antes de recibir sus existencias", statusCode: 409 });
+    const codigos = almacenes.map((a) => a.warehouseCode);
+    const conocidos = codigos.length ? await db.bodega.count({ where: { warehouseCode: { in: codigos } } }) : 0;
+    if (conocidos !== codigos.length) throw new AppError({ code: "ALMACEN_NO_SINCRONIZADO",
+      message: "Debe sincronizar los almacenes antes de recibir las existencias", statusCode: 409 });
+    const [antes] = await db.$queryRaw`
+      SELECT COALESCE(SUM(e."inStock"), 0)::float AS total FROM productos_existencias e
+      JOIN bodegas b ON b."warehouseCode" = e."warehouseCode" AND b."deEstaBodega"
+      WHERE e."itemCode" = ${itemCode}`;
+    await db.productoExistencia.deleteMany({ where: { itemCode, warehouseCode: { notIn: codigos } } });
+    for (const a of almacenes) {
+      const { warehouseCode, ...datos } = a;
+      await db.productoExistencia.upsert({ where: { itemCode_warehouseCode: { itemCode, warehouseCode } },
+        create: { itemCode, ...a, actualizadoEn: new Date() }, update: { ...datos, actualizadoEn: new Date() } });
+    }
+    const [despues] = await db.$queryRaw`
+      SELECT COALESCE(SUM(e."inStock"), 0)::float AS total FROM productos_existencias e
+      JOIN bodegas b ON b."warehouseCode" = e."warehouseCode" AND b."deEstaBodega"
+      WHERE e."itemCode" = ${itemCode}`;
+    const delta = (despues?.total ?? 0) - (antes?.total ?? 0);
+    if (delta !== 0) await registrarCambioExistencias(itemCode, delta, db);
+  },
+  // Documento de stock de SAP con sus líneas de artículos (las de servicios no traen artículo y no llegan).
+  async guardarDocumentoStock(tipo, documento, db) {
+    const { lineas, docEntry, docDate, ...cabecera } = documento;
+    const datos = { ...cabecera, docDate: new Date(`${docDate}T00:00:00.000Z`), sincronizadoEn: new Date() };
+    await db.documentoStock.upsert({ where: { tipo_docEntry: { tipo, docEntry } },
+      create: { tipo, docEntry, ...datos }, update: datos });
+    await db.documentoStockLinea.deleteMany({ where: { tipo, docEntry } });
+    if (lineas.length) await db.documentoStockLinea.createMany({ data: lineas.map((l) => ({ tipo, docEntry, ...l })) });
   },
   async guardarEstado({ entidad, empresa, secuencia, hash, cantidad }, db) {
     await db.$executeRaw`

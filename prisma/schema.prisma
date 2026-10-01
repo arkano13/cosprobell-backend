@@ -36,12 +36,16 @@ model GrupoProducto {
 }
 
 model Bodega {
-  warehouseCode String               @id
-  warehouseName String
-  city          String?
-  country       String?
-  inactive      Boolean              @default(false)
-  existencias   ProductoExistencia[]
+  warehouseCode  String               @id
+  warehouseName  String
+  city           String?
+  country        String?
+  inactive       Boolean              @default(false)
+  // Almacén de SAP que corresponde a esta bodega física: el inventario compara contra su existencia.
+  // Lo marca el supervisor; la sincronización no lo cambia.
+  deEstaBodega   Boolean              @default(false)
+  sincronizadoEn DateTime?
+  existencias    ProductoExistencia[]
 
   @@map("bodegas")
 }
@@ -851,11 +855,22 @@ model DocumentoStockLinea {
   tipo      String
   docEntry  Int
   documento DocumentoStock @relation(fields: [tipo, docEntry], references: [tipo, docEntry], onDelete: Cascade)
-  lineNum   Int
-  itemCode  String
-  cantidad  Float
+  lineNum       Int
+  itemCode      String
+  warehouseCode String?
+  cantidad      Float
 
   @@unique([tipo, docEntry, lineNum])
   @@index([itemCode])
   @@map("documentos_stock_lineas")
+}
+
+// Opciones del backend que cambia el supervisor (por ejemplo, filtrar pedidos por almacén).
+model Configuracion {
+  clave          String   @id
+  valor          Json
+  actualizadoEn  DateTime @updatedAt
+  actualizadoPor String?
+
+  @@map("configuracion")
 }

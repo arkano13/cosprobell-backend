@@ -140,7 +140,6 @@ function baseProductos({ anterior = null, activo = null, retirado = null } = {})
       update: async (args) => operaciones.push(["actualizarCodigo", args.where.id, args.data]),
       create: async (args) => operaciones.push(["crearCodigo", args.data]),
     },
-    $executeRaw: async () => operaciones.push(["existencias"]),
   };
   return { db, operaciones };
 }
@@ -170,17 +169,6 @@ test("repositorio: el código de la ficha del artículo queda como código Manua
   await repo.guardarProducto({ ...producto, barCode: null }, db);
   assert.deepEqual(operaciones.find((o) => o[0] === "retirarFicha")[1], { itemCode: "P1", origen: "ficha", retiradoEnSap: false });
   assert.ok(!operaciones.some((o) => o[0] === "crearCodigo"));
-});
-test("repositorio: un cambio de existencias en SAP avisa al inventario", async () => {
-  let { db, operaciones } = baseProductos({ anterior: { quantityOnStock: 10 } });
-  await repo.guardarProducto({ ...producto, quantityOnStock: 110 }, db);
-  assert.ok(operaciones.some((o) => o[0] === "existencias"));
-  ({ db, operaciones } = baseProductos({ anterior: { quantityOnStock: 10 } }));
-  await repo.guardarProducto({ ...producto, quantityOnStock: 10 }, db);
-  assert.ok(!operaciones.some((o) => o[0] === "existencias"), "sin cambio no avisa");
-  ({ db, operaciones } = baseProductos({ anterior: { quantityOnStock: 10 } }));
-  await repo.guardarProducto(producto, db);
-  assert.ok(!operaciones.some((o) => o[0] === "existencias"), "un puente anterior no envía existencias");
 });
 
 for (const [nombre, body, status, code] of [
@@ -304,4 +292,79 @@ test("repositorio: guarda un código de SAP, adopta la asociación local y exige
   assert.deepEqual(sinFecha(operaciones.at(-1)), ["actualizar", 7, { itemCode: "P1", codigo: "999", uomEntry: 1, sincronizadoEn: true, retiradoEnSap: false, origen: "sap" }]);
   productoExiste = false;
   await assert.rejects(repo.guardarCodigoBarras(registro, db), { code: "PRODUCTO_NO_SINCRONIZADO" });
+});
+
+test("HTTP recibe almacenes, existencias por almacén y documentos de stock", async (t) => {
+  preparar(t); const guardados = [];
+  t.mock.method(repo, "consultarEstado", async () => null);
+  t.mock.method(repo, "guardarAlmacen", async (a) => { guardados.push(["almacen", a]); });
+  t.mock.method(repo, "guardarExistencias", async (e) => { guardados.push(["existencias", e]); });
+  t.mock.method(repo, "guardarDocumentoStock", async (tipo, d) => { guardados.push([tipo, d.docEntry]); });
+  assert.equal((await enviarA("almacenes", { version: 1, empresa, secuencia: 1,
+    almacenes: [{ warehouseCode: "V05", warehouseName: "Bodega central", inactive: false }] })).status, 200);
+  assert.equal((await enviarA("existencias", { version: 1, empresa, secuencia: 1, existencias: [{ itemCode: "P1", almacenes: [
+    { warehouseCode: "V05", inStock: 10, committed: 2, ordered: 0 }, { warehouseCode: "01", inStock: 0, committed: 0, ordered: 5 }] }] })).status, 200);
+  const documento = { docEntry: 77, docNum: 1377, docDate: "2026-09-30", comentarios: "Vencido, lote L2408-090", cancelado: false,
+    lineas: [{ lineNum: 1, itemCode: "P1", warehouseCode: "V05", cantidad: 100 }, { lineNum: 0, itemCode: "P2", warehouseCode: null, cantidad: 3 }] };
+  assert.equal((await enviarA("salidasInventario", { version: 1, empresa, secuencia: 1, salidasInventario: [documento] })).status, 200);
+  assert.equal((await enviarA("entradasCompra", { version: 1, empresa, secuencia: 1, entradasCompra: [{ ...documento, docEntry: 5 }] })).status, 200);
+  assert.deepEqual(guardados.map((g) => g[0]), ["almacen", "existencias", "salidaInventario", "entradaCompra"]);
+  // Los almacenes de un artículo se ordenan: el mismo contenido en otro orden es el mismo lote.
+  assert.deepEqual(guardados[1][1].almacenes.map((a) => a.warehouseCode), ["01", "V05"]);
+  for (const [entidad, cuerpo] of [
+    ["existencias", { existencias: [{ itemCode: "P1", almacenes: [{ warehouseCode: "V05", inStock: 1, committed: 0, ordered: 0 }, { warehouseCode: "V05", inStock: 2, committed: 0, ordered: 0 }] }] }],
+    ["existencias", { existencias: [{ itemCode: "P1", almacenes: [{ warehouseCode: "V05", inStock: 1 }] }] }],
+    ["almacenes", { almacenes: [{ warehouseCode: "V05", warehouseName: "X", inactive: "no" }] }],
+    ["salidasInventario", { salidasInventario: [{ ...documento, docDate: "30/09/2026" }] }],
+    ["salidasInventario", { salidasInventario: [{ ...documento, lineas: [{ lineNum: 0, itemCode: "P1", warehouseCode: "V05", cantidad: -1 }] }] }],
+  ]) assert.equal((await enviarA(entidad, { version: 1, empresa, secuencia: 1, ...cuerpo })).status, 400, JSON.stringify(cuerpo));
+});
+
+function baseExistencias({ producto = true, conocidos = null, antes = 10, despues = 10 } = {}) {
+  const ops = []; let consulta = 0;
+  const db = {
+    producto: { findUnique: async () => (producto ? { itemCode: "P1" } : null) },
+    bodega: { count: async ({ where }) => conocidos ?? where.warehouseCode.in.length },
+    $queryRaw: async () => [{ total: consulta++ === 0 ? antes : despues }],
+    $executeRaw: async (partes, ...valores) => { ops.push(["inventario", valores]); },
+    productoExistencia: {
+      deleteMany: async ({ where }) => ops.push(["borrar", where]),
+      upsert: async ({ where, update }) => ops.push(["guardar", where.itemCode_warehouseCode.warehouseCode, update.inStock]),
+    },
+  };
+  return { db, ops };
+}
+test("repositorio: existencias reemplazan los almacenes del artículo y avisan al inventario si cambia esta bodega", async () => {
+  const registro = { itemCode: "P1", almacenes: [{ warehouseCode: "V05", inStock: 110, committed: 0, ordered: 0 }] };
+  let { db, ops } = baseExistencias({ antes: 10, despues: 110 });
+  await repo.guardarExistencias(registro, db);
+  assert.deepEqual(ops[0], ["borrar", { itemCode: "P1", warehouseCode: { notIn: ["V05"] } }]);
+  assert.deepEqual(ops[1], ["guardar", "V05", 110]);
+  // Subió 100: el aviso al inventario descuenta hasta 100 de lo recibido antes que SAP.
+  assert.deepEqual(ops[2], ["inventario", [100, "P1"]]);
+  ({ db, ops } = baseExistencias({ antes: 10, despues: 10 }));
+  await repo.guardarExistencias(registro, db);
+  assert.ok(!ops.some((o) => o[0] === "inventario"), "sin cambio en esta bodega no avisa");
+  ({ db, ops } = baseExistencias());
+  await repo.guardarExistencias({ itemCode: "P1", almacenes: [] }, db);
+  assert.deepEqual(ops[0], ["borrar", { itemCode: "P1", warehouseCode: { notIn: [] } }], "sin almacenes con valores: todo queda en cero");
+  await assert.rejects(repo.guardarExistencias(registro, baseExistencias({ producto: false }).db), { code: "PRODUCTO_NO_SINCRONIZADO" });
+  await assert.rejects(repo.guardarExistencias(registro, baseExistencias({ conocidos: 0 }).db), { code: "ALMACEN_NO_SINCRONIZADO" });
+});
+
+test("repositorio: un documento de stock reemplaza sus líneas", async () => {
+  const ops = [];
+  const db = {
+    documentoStock: { upsert: async (q) => ops.push(["cabecera", q]) },
+    documentoStockLinea: { deleteMany: async ({ where }) => ops.push(["borrar", where]), createMany: async ({ data }) => ops.push(["lineas", data]) },
+  };
+  await repo.guardarDocumentoStock("salidaInventario", { docEntry: 77, docNum: 1377, docDate: "2026-09-30", comentarios: null, cancelado: false,
+    lineas: [{ lineNum: 0, itemCode: "P1", warehouseCode: "V05", cantidad: 100 }] }, db);
+  assert.deepEqual(ops[0][1].where, { tipo_docEntry: { tipo: "salidaInventario", docEntry: 77 } });
+  assert.equal(ops[0][1].create.docDate.toISOString(), "2026-09-30T00:00:00.000Z");
+  assert.deepEqual(ops[1], ["borrar", { tipo: "salidaInventario", docEntry: 77 }]);
+  assert.deepEqual(ops[2], ["lineas", [{ tipo: "salidaInventario", docEntry: 77, lineNum: 0, itemCode: "P1", warehouseCode: "V05", cantidad: 100 }]]);
+  ops.length = 0;
+  await repo.guardarDocumentoStock("salidaInventario", { docEntry: 78, docNum: 1378, docDate: "2026-09-30", comentarios: null, cancelado: true, lineas: [] }, db);
+  assert.ok(!ops.some((o) => o[0] === "lineas"));
 });

@@ -23,6 +23,9 @@ const { pickingRepository } = await import(
   "../../src/modules/picking/picking.repository.js"
 );
 const { pedidosRepository } = await import("../../src/modules/pedidos/pedidos.repository.js");
+const { inventarioRepository } = await import("../../src/modules/inventario/inventario.repository.js");
+// La lista de pedidos pregunta si el supervisor la filtró por almacenes: en estas pruebas no hay filtro.
+prisma.configuracion.findUnique = async () => null;
 
 const { logger } = await import(
   "../../src/infrastructure/logging/logger.js"
@@ -637,6 +640,8 @@ function prepararEscaneoHttp(t, cambios = {}) {
     return evento;
   });
   sustituir(t, prisma, "$transaction", async (operacion) => operacion(tx));
+  t.mock.method(inventarioRepository, "bloquearProductos", async () => {});
+  t.mock.method(inventarioRepository, "estadoProducto", async () => null);
   t.mock.method(pickingEtiquetasRepository, "buscarProductos", async (codigo, db) => {
     assert.equal(db, tx);
     assert.equal(codigo, "00123");
@@ -812,13 +817,24 @@ test("HTTP pedidos exige autenticación y valida paginación antes de consultar"
 });
 test("HTTP pedidos lista con cursor sin perder la fila siguiente", async (t) => {
   t.mock.method(pedidosRepository, "listar", async q => {
-    assert.deepEqual(q, { limit: 1, cursor: 8, estado: "abiertos" });
+    assert.deepEqual(q, { limit: 1, cursor: 8, estado: "abiertos", almacenes: null });
     return [{ docEntry: 9 }, { docEntry: 10 }];
   });
   const preparaciones = t.mock.method(pedidosRepository, "preparaciones", async () => []);
   const r = await fetch(`${baseUrl}/pedidos?limit=1&cursor=8`, { headers: autenticar(t) });
   assert.equal(r.status, 200); assert.deepEqual(await r.json(), { data: [{ docEntry: 9, preparado: null }], siguienteCursor: 9 });
   assert.deepEqual(preparaciones.mock.calls[0].arguments, [[9]]);
+});
+test("HTTP pedidos: con el filtro del supervisor solo pide los de los almacenes de esta bodega", async (t) => {
+  sustituir(t, prisma.configuracion, "findUnique", async ({ where }) => (where.clave === "pedidosSoloDeEstaBodega" ? { valor: true } : null));
+  sustituir(t, prisma.bodega, "findMany", async () => [{ warehouseCode: "01" }, { warehouseCode: "V05" }]);
+  const listar = t.mock.method(pedidosRepository, "listar", async () => []);
+  assert.equal((await fetch(`${baseUrl}/pedidos`, { headers: autenticar(t) })).status, 200);
+  assert.deepEqual(listar.mock.calls[0].arguments[0].almacenes, ["01", "V05"]);
+  // Sin almacenes elegidos no se filtra: la lista no puede quedar vacía por una configuración a medias.
+  sustituir(t, prisma.bodega, "findMany", async () => []);
+  assert.equal((await fetch(`${baseUrl}/pedidos`, { headers: autenticar(t) })).status, 200);
+  assert.equal(listar.mock.calls[1].arguments[0].almacenes, null);
 });
 test("HTTP pedidos informa la última preparación finalizada de cada pedido", async (t) => {
   t.mock.method(pedidosRepository, "listar", async () => [{ docEntry: 9 }, { docEntry: 10 }, { docEntry: 11 }]);

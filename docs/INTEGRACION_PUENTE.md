@@ -85,6 +85,21 @@ Los cuatro campos son obligatorios. Inserta o actualiza por cardCode y solo toca
 
 Códigos retirados: el puente pide `GET /integracion/hora` al empezar un recorrido completo de `BarCodes` y, al terminarlo, `POST /integracion/codigosBarras/retirados` con `{ "antesDe": "<hora de inicio>" }`. Los códigos de SAP no recibidos desde esa hora se marcan `retiradoEnSap = true`: no identifican productos ni sirven para picking, pero no se borran ni pierden su confirmación. Si vuelven a aparecer en SAP se reactivan. Repetir la llamada no cambia el resultado; `antesDe` no puede ser futura.
 
+## Contratos del inventario v1: almacenes, existencias y documentos de stock
+
+Solo lectura de SAP. Sirven para comparar el inventario de la bodega con SAP; el backend nunca escribe en SAP.
+
+`POST /integracion/almacenes` recibe `Warehouses`: `{ "warehouseCode": "V05", "warehouseName": "Almacén de ventas", "inactive": false }`. Inserta o actualiza `bodegas`. La marca "de esta bodega" (`deEstaBodega`) la pone el supervisor en la app; la sincronización no la toca.
+
+`POST /integracion/existencias` recibe la existencia de un artículo en cada almacén (`Items.ItemWarehouseInfoCollection`): `{ "itemCode": "P1", "almacenes": [{ "warehouseCode": "V05", "inStock": 10, "committed": 2, "ordered": 0 }] }`. Reglas:
+
+- Reemplaza las filas del artículo: un almacén que no llega queda en cero (se borra su fila). El puente envía solo los almacenes con algún valor distinto de cero; un artículo sin ninguno llega con `almacenes: []`.
+- El producto y los almacenes deben estar sincronizados: si no, `409 PRODUCTO_NO_SINCRONIZADO` o `409 ALMACEN_NO_SINCRONIZADO`.
+- Si cambia lo que suman los almacenes marcados de esta bodega, avisa al inventario: el producto queda "SAP actualizándose" 15 minutos y, si subió, descuenta primero lo que la bodega recibió antes que SAP.
+- Observar existencias sin cambios comprueba el producto y actualiza `actualizadoEn` de sus filas (lo usa el panel de Sincronización).
+
+Documentos de stock, uno por tipo con su propia secuencia: `POST /integracion/entradasCompra` (PurchaseDeliveryNotes), `entradasInventario` (InventoryGenEntries), `salidasInventario` (InventoryGenExits), `devolucionesProveedor` (PurchaseReturns) y `devolucionesCliente` (Returns). Cada registro: `{ "docEntry": 77, "docNum": 1377, "docDate": "2026-09-30", "comentarios": "Vencido, lote L2408-090", "cancelado": false, "lineas": [{ "lineNum": 0, "itemCode": "P1", "warehouseCode": "V05", "cantidad": 100 }] }`. Reemplaza las líneas del documento. `cancelado` es verdadero para el documento cancelado y para el que revierte la cancelación (`CancelStatus` `csYes` o `csCancellation`); esos no se muestran como explicación de una diferencia. No se valida que el artículo exista: solo se usan para explicar.
+
 ## Orden y recuperación
 
 GET /integracion/productos/estado utiliza la misma credencial y devuelve empresa, ultimaSecuencia y ultimaRecepcion. Antes de recibir datos devuelve 0 y null. ultimaRecepcion es la fecha del backend: no demuestra que los datos estuvieran actualizados en SAP.
@@ -99,7 +114,7 @@ El número de secuencia y la empresa se almacenan junto con los productos en una
 
 - middleware/bridgeAuth.js: verifica la credencial independiente y vincula la empresa desde configuración confiable.
 - lote.schemas.js: estructura común de un lote (versión, empresa, secuencia, 1 a 100 registros sin claves repetidas).
-- productos, clientes, pedidos, unidades y codigosBarras `.schemas.js`: contrato de cada entidad.
+- productos, clientes, pedidos, unidades, codigosBarras, almacenes, existencias y documentos `.schemas.js`: contrato de cada entidad.
 - sincronizacion.service.js: comprueba empresa, secuencia y contenido de cualquier entidad registrada; coordina guardado.
 - sincronizacion.repository.js: transacción, bloqueo y persistencia.
 - sincronizacion.controller.js y sincronizacion.routes.js: publican una ruta fija por entidad.

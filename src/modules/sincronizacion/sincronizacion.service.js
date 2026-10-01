@@ -6,6 +6,9 @@ import { loteClientesSchema } from "./clientes.schemas.js";
 import { lotePedidosSchema } from "./pedidos.schemas.js";
 import { loteUnidadesSchema } from "./unidades.schemas.js";
 import { loteCodigosBarrasSchema } from "./codigosBarras.schemas.js";
+import { loteAlmacenesSchema } from "./almacenes.schemas.js";
+import { loteExistenciasSchema } from "./existencias.schemas.js";
+import { loteDocumentosSchema, TIPOS_DOCUMENTO } from "./documentos.schemas.js";
 import { sincronizacionRepository as repo } from "./sincronizacion.repository.js";
 const conflicto = (code, message) => new AppError({ code, message, statusCode: 409 });
 const origenIncompatible = () => conflicto("ORIGEN_INCOMPATIBLE", "Esta base ya recibió datos de otra empresa SAP");
@@ -18,6 +21,10 @@ const DEFINICIONES = {
   pedidos: { schema: lotePedidosSchema, clave: "docEntry", guardar: (r, tx) => repo.guardarPedido(r, tx) },
   unidades: { schema: loteUnidadesSchema, clave: "absEntry", guardar: (r, tx) => repo.guardarUnidad(r, tx) },
   codigosBarras: { schema: loteCodigosBarrasSchema, clave: "absEntry", guardar: (r, tx) => repo.guardarCodigoBarras(r, tx) },
+  almacenes: { schema: loteAlmacenesSchema, clave: "warehouseCode", guardar: (r, tx) => repo.guardarAlmacen(r, tx) },
+  existencias: { schema: loteExistenciasSchema, clave: "itemCode", guardar: (r, tx) => repo.guardarExistencias(r, tx) },
+  ...Object.fromEntries(Object.entries(TIPOS_DOCUMENTO).map(([entidad, tipo]) => [entidad,
+    { schema: loteDocumentosSchema(entidad), clave: "docEntry", guardar: (r, tx) => repo.guardarDocumentoStock(tipo, r, tx) }])),
 };
 export const ENTIDADES_SINCRONIZABLES = Object.keys(DEFINICIONES);
 
@@ -41,6 +48,8 @@ export async function recibirLote(entidad, entrada, empresaAutorizada) {
   // Mismo contenido con distinto orden conserva la identidad del lote.
   lote[entidad].sort((a, b) => a[clave] < b[clave] ? -1 : a[clave] > b[clave] ? 1 : 0);
   if (entidad === "pedidos") for (const pedido of lote.pedidos) pedido.lineas.sort((a, b) => a.lineNum - b.lineNum);
+  if (entidad === "existencias") for (const r of lote.existencias) r.almacenes.sort((a, b) => (a.warehouseCode < b.warehouseCode ? -1 : 1));
+  if (Object.hasOwn(TIPOS_DOCUMENTO, entidad)) for (const d of lote[entidad]) d.lineas.sort((a, b) => a.lineNum - b.lineNum);
   const hash = createHash("sha256").update(JSON.stringify(lote)).digest("hex");
   return repo.conBloqueo(async (tx) => {
     // Una sola empresa SAP por base local, sin importar la entidad que llegue primero.

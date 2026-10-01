@@ -1,5 +1,9 @@
--- Inventario de dos bodegas (grande por cajas y lotes, pequeña por unidades) y origen de los códigos de barras.
--- Solo agrega columnas y tablas: no modifica datos existentes salvo marcar como 'app' los códigos cargados a mano.
+-- Inventario de dos bodegas (grande por cajas y lotes, pequeña por unidades), almacenes de SAP de esta
+-- bodega, documentos de stock de SAP y origen de los códigos de barras. Solo agrega columnas y tablas;
+-- únicamente marca como 'app' los códigos cargados a mano antes de esta versión.
+-- AlterTable
+ALTER TABLE "bodegas" ADD COLUMN     "deEstaBodega" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "sincronizadoEn" TIMESTAMP(3);
 
 -- AlterTable
 ALTER TABLE "productos_codigos_barras" ADD COLUMN     "creadoEn" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -88,9 +92,20 @@ CREATE TABLE "documentos_stock_lineas" (
     "docEntry" INTEGER NOT NULL,
     "lineNum" INTEGER NOT NULL,
     "itemCode" TEXT NOT NULL,
+    "warehouseCode" TEXT,
     "cantidad" DOUBLE PRECISION NOT NULL,
 
     CONSTRAINT "documentos_stock_lineas_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "configuracion" (
+    "clave" TEXT NOT NULL,
+    "valor" JSONB NOT NULL,
+    "actualizadoEn" TIMESTAMP(3) NOT NULL,
+    "actualizadoPor" TEXT,
+
+    CONSTRAINT "configuracion_pkey" PRIMARY KEY ("clave")
 );
 
 -- CreateIndex

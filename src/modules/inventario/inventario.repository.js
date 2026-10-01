@@ -4,15 +4,23 @@ import { prisma } from "../../infrastructure/database/prisma.js";
 
 const literal = (texto) => texto.replace(/[\\%_]/g, (c) => `\\${c}`);
 
+// Existencia en SAP sumando solo los almacenes que el supervisor marcó como de esta bodega.
+const EN_SAP = Prisma.sql`
+  SELECT e."itemCode", SUM(e."inStock")::float AS sap
+  FROM productos_existencias e JOIN bodegas b ON b."warehouseCode" = e."warehouseCode" AND b."deEstaBodega"
+  GROUP BY e."itemCode"`;
+
 // Unidades preparadas y finalizadas cuyo pedido sigue abierto en SAP y todavía no se entregaron: ya salieron
 // de la bodega pequeña, pero SAP las sigue contando. Lo entregado se deduce de lo que SAP dejó pendiente.
+// Solo cuentan las líneas de los almacenes de esta bodega.
 const SIN_ENTREGA = Prisma.sql`
   SELECT l."itemCode", SUM(GREATEST(0, l."cantidadEscaneada" - GREATEST(0, l."cantidadPedida"
     - COALESCE(pl."remainingOpenInventoryQuantity", pl."remainingOpenQuantity", 0))))::int AS "sinEntrega"
   FROM picking_pedidos s
   JOIN pedidos p ON p."docEntry" = s."pedidoDocEntry" AND p."documentStatus" = 'bost_Open' AND p.cancelled = false
   JOIN picking_pedidos_lineas l ON l."pickingId" = s.id
-  LEFT JOIN pedidos_lineas pl ON pl."pedidoDocEntry" = s."pedidoDocEntry" AND pl."lineNum" = l."pedidoLineNum"
+  JOIN pedidos_lineas pl ON pl."pedidoDocEntry" = s."pedidoDocEntry" AND pl."lineNum" = l."pedidoLineNum"
+  JOIN bodegas b ON b."warehouseCode" = pl."warehouseCode" AND b."deEstaBodega"
   WHERE s.estado IN ('completo', 'con_diferencias')
   GROUP BY l."itemCode"`;
 
@@ -25,6 +33,9 @@ export const inventarioRepository = {
       return operacion(tx);
     }, { isolationLevel: "ReadCommitted", maxWait: 10_000, timeout: 30_000 });
   },
+  transaccion(operacion) {
+    return prisma.$transaction(operacion, { isolationLevel: "ReadCommitted", maxWait: 10_000, timeout: 30_000 });
+  },
   bloquearProductos(itemCodes, tx) {
     return [...new Set(itemCodes)].sort().reduce((p, itemCode) =>
       p.then(() => tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`inventario:${itemCode}`}))::text`), Promise.resolve());
@@ -33,19 +44,49 @@ export const inventarioRepository = {
   // Datos para la diferencia con SAP, de todos los productos con existencia o en el inventario, o de algunos.
   estados({ itemCodes = null } = {}, db = prisma) {
     const filtro = itemCodes ? Prisma.sql`pr."itemCode" = ANY(${itemCodes})`
-      : Prisma.sql`(ip."itemCode" IS NOT NULL OR pr."quantityOnStock" <> 0 OR g.grande IS NOT NULL)`;
+      : Prisma.sql`(ip."itemCode" IS NOT NULL OR COALESCE(s.sap, 0) <> 0 OR g.grande IS NOT NULL)`;
     return db.$queryRaw`
       WITH g AS (SELECT "itemCode", SUM(unidades)::int AS grande FROM inventario_cajas GROUP BY "itemCode"),
-           se AS (${SIN_ENTREGA})
-      SELECT pr."itemCode", pr."itemName", pr."quantityOnStock" AS sap, (ip."itemCode" IS NOT NULL) AS activo,
+           s AS (${EN_SAP}), se AS (${SIN_ENTREGA})
+      SELECT pr."itemCode", pr."itemName", COALESCE(s.sap, 0) AS sap, (ip."itemCode" IS NOT NULL) AS activo,
              COALESCE(ip.pequena, 0) AS pequena, COALESCE(ip.adelantado, 0) AS adelantado, ip."sapCambioEn",
              COALESCE(g.grande, 0) AS grande, COALESCE(se."sinEntrega", 0) AS "sinEntrega"
       FROM productos pr
       LEFT JOIN inventario_productos ip ON ip."itemCode" = pr."itemCode"
       LEFT JOIN g ON g."itemCode" = pr."itemCode"
+      LEFT JOIN s ON s."itemCode" = pr."itemCode"
       LEFT JOIN se ON se."itemCode" = pr."itemCode"
-      WHERE pr."quantityOnStock" IS NOT NULL AND ${filtro}
+      WHERE ${filtro}
       ORDER BY pr."itemName", pr."itemCode"`;
+  },
+
+  // Almacenes de SAP con lo que sirve para reconocerlos: productos con existencia, unidades y líneas de pedidos abiertos.
+  almacenes(db = prisma) {
+    return db.$queryRaw`
+      SELECT b."warehouseCode", b."warehouseName", b.inactive, b."deEstaBodega", b."sincronizadoEn",
+             COALESCE(e.productos, 0)::int AS productos, COALESCE(e.unidades, 0)::float AS unidades,
+             COALESCE(l.lineas, 0)::int AS "lineasAbiertas"
+      FROM bodegas b
+      LEFT JOIN (SELECT "warehouseCode", COUNT(*) FILTER (WHERE "inStock" <> 0) AS productos, SUM("inStock") AS unidades
+                 FROM productos_existencias GROUP BY "warehouseCode") e ON e."warehouseCode" = b."warehouseCode"
+      LEFT JOIN (SELECT pl."warehouseCode", COUNT(*) AS lineas FROM pedidos_lineas pl
+                 JOIN pedidos p ON p."docEntry" = pl."pedidoDocEntry" AND p."documentStatus" = 'bost_Open' AND p.cancelled = false
+                 GROUP BY pl."warehouseCode") l ON l."warehouseCode" = b."warehouseCode"
+      ORDER BY b."deEstaBodega" DESC, COALESCE(l.lineas, 0) DESC, COALESCE(e.unidades, 0) DESC, b."warehouseCode"`;
+  },
+  async almacenesDeEstaBodega(db = prisma) {
+    const filas = await db.bodega.findMany({ where: { deEstaBodega: true }, select: { warehouseCode: true }, orderBy: { warehouseCode: "asc" } });
+    return filas.map((f) => f.warehouseCode);
+  },
+  marcarAlmacenes(codigos, tx) {
+    return tx.$executeRaw`UPDATE bodegas SET "deEstaBodega" = ("warehouseCode" = ANY(${codigos}))`;
+  },
+  async opcion(clave, db = prisma) {
+    const fila = await db.configuracion.findUnique({ where: { clave } });
+    return fila?.valor ?? null;
+  },
+  guardarOpcion(clave, valor, actualizadoPor, tx) {
+    return tx.configuracion.upsert({ where: { clave }, create: { clave, valor, actualizadoPor }, update: { valor, actualizadoPor } });
   },
 
   async resumenBodegas(db = prisma) {
@@ -90,6 +131,9 @@ export const inventarioRepository = {
   cajasDe(itemCode, { conUnidades = true } = {}, db = prisma) {
     return db.inventarioCaja.findMany({ where: { itemCode, ...(conUnidades ? { unidades: { gt: 0 } } : {}) },
       orderBy: [{ vencimiento: { sort: "asc", nulls: "last" } }, { id: "asc" }] });
+  },
+  cajaPorId(id, db = prisma) {
+    return db.inventarioCaja.findUnique({ where: { id } });
   },
   cajaPorCodigo(codigo, db = prisma) {
     return db.inventarioCaja.findUnique({ where: { codigo }, include: { producto: { select: { itemName: true } } } });
@@ -171,14 +215,15 @@ export const inventarioRepository = {
   },
 
   // Documentos de SAP recientes que mueven existencias de estos productos (para explicar una diferencia).
+  // Los anulados no cuentan: el cancelado y el que lo revierte se compensan.
   documentosRecientes(itemCodes, { dias = 30, porProducto = 3 } = {}, db = prisma) {
     if (!itemCodes.length) return [];
     return db.$queryRaw`
-      SELECT * FROM (
-        SELECT l."itemCode", d.tipo, d."docEntry", d."docNum", d."docDate", d.comentarios, d.cancelado, SUM(l.cantidad) AS cantidad,
+      SELECT "itemCode", tipo, "docEntry", "docNum", "docDate", comentarios, cancelado, cantidad FROM (
+        SELECT l."itemCode", d.tipo, d."docEntry", d."docNum", d."docDate", d.comentarios, d.cancelado, SUM(l.cantidad)::float AS cantidad,
                ROW_NUMBER() OVER (PARTITION BY l."itemCode" ORDER BY d."docDate" DESC, d."docEntry" DESC) AS n
         FROM documentos_stock_lineas l JOIN documentos_stock d ON d.tipo = l.tipo AND d."docEntry" = l."docEntry"
-        WHERE l."itemCode" = ANY(${itemCodes}) AND d."docDate" >= now() - make_interval(days => ${dias})
+        WHERE l."itemCode" = ANY(${itemCodes}) AND d."docDate" >= now() - make_interval(days => ${dias}) AND NOT d.cancelado
         GROUP BY l."itemCode", d.tipo, d."docEntry", d."docNum", d."docDate", d.comentarios, d.cancelado
       ) x WHERE n <= ${porProducto} ORDER BY "itemCode", "docDate" DESC`;
   },
@@ -202,7 +247,4 @@ export const inventarioRepository = {
       select: { unidadesIniciales: true, lote: true, vencimiento: true } });
   },
 
-  lineasPicking(pickingId, tx) {
-    return tx.pickingPedidoLinea.findMany({ where: { pickingId, cantidadEscaneada: { gt: 0 } }, select: { itemCode: true, cantidadEscaneada: true } });
-  },
 };

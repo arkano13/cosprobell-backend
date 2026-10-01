@@ -6,6 +6,7 @@ import { validarCompatibilidadLinea } from "./picking.cantidades.js";
 import { pickingRepository } from "./picking.repository.js";
 import { conSesionBloqueada } from "./picking.transaction.js";
 import { AppError } from "../../shared/errors/AppError.js";
+import { descontarPorPicking } from "../inventario/inventario.service.js";
 
 function sesionNoEncontrada() {
   return new AppError({
@@ -251,6 +252,9 @@ export async function finalizarPicking(id) {
     const estado = hayDiferencias
       ? "con_diferencias"
       : "completo";
+
+    // Lo preparado sale de la bodega pequeña junto con el cierre: si algo falla, no se cierra.
+    await descontarPorPicking({ pickingId: id, lineas: picking.lineas, hechoPor: picking.usuarioId ?? null }, tx);
 
     return pickingRepository.guardarFinalizacion(
       id,

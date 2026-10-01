@@ -9,6 +9,7 @@ const { pickingEtiquetasRepository } = await import("../../src/modules/picking/p
 const { escanearPicking, finalizarPicking } = await import("../../src/modules/picking/picking.service.js");
 const { pickingEscaneosRepository } = await import("../../src/modules/picking/picking.escaneos.repository.js");
 const { AppError } = await import("../../src/shared/errors/AppError.js");
+const { inventarioRepository } = await import("../../src/modules/inventario/inventario.repository.js");
 
 function linea(cambios = {}) {
   return { id: 10, itemCode: "PROD-001", uomEntry: 1,
@@ -66,9 +67,22 @@ function preparar(t, opciones = {}) {
 
   const finalizar = t.mock.method(pickingRepository, "guardarFinalizacion", async (id, estado, fechaFin, db) => {
     assert.equal(db, tx);
+    pasos.push("finalizar");
     return { id, estado, fechaFin, lineas };
   });
-  return { tx, pasos, incrementar, finalizar, consultar, consultaEtiquetas };
+  // Inventario: por defecto el producto todavía no está en el inventario y el cierre no descuenta nada.
+  const inventario = { pequena: [], movimientos: [] };
+  t.mock.method(inventarioRepository, "bloquearProductos", async (itemCodes, db) => { assert.equal(db, tx); pasos.push("bloquearInventario"); });
+  t.mock.method(inventarioRepository, "estadoProducto", async (itemCode, db) => {
+    assert.equal(db, tx); return opciones.enInventario ? { itemCode, pequena: 10 } : null;
+  });
+  t.mock.method(inventarioRepository, "cambiarPequena", async (itemCode, delta, db) => {
+    assert.equal(db, tx); inventario.pequena.push([itemCode, delta]); pasos.push("descontarPequena");
+  });
+  t.mock.method(inventarioRepository, "registrarMovimientos", async (movimientos, db) => {
+    assert.equal(db, tx); inventario.movimientos.push(...movimientos);
+  });
+  return { tx, pasos, incrementar, finalizar, consultar, consultaEtiquetas, inventario };
 }
 
 function errorEsperado(code, statusCode = 409) {
@@ -176,4 +190,20 @@ test("finaliza completo cuando las cantidades coinciden", async (t) => {
 test("finaliza con diferencias cuando falta cantidad", async (t) => {
   preparar(t);
   assert.equal((await finalizarPicking(25)).estado, "con_diferencias");
+});
+
+test("finalizar descuenta lo escaneado de la bodega pequeña antes de cerrar, en la misma transacción", async (t) => {
+  const { pasos, inventario } = preparar(t, { enInventario: true, sesion: { id: 25, estado: "en_proceso", usuarioId: "Carmen" },
+    lineas: [linea({ cantidadEscaneada: 2 }), linea({ id: 11, cantidadEscaneada: 1 }), linea({ id: 12, itemCode: "OTRO", cantidadEscaneada: 0 })] });
+  assert.equal((await finalizarPicking(25)).estado, "con_diferencias");
+  assert.deepEqual(inventario.pequena, [["PROD-001", -3]], "suma las líneas del producto y omite lo no escaneado");
+  assert.deepEqual(inventario.movimientos, [{ grupo: "picking-25-PROD-001", tipo: "picking", itemCode: "PROD-001",
+    bodega: "pequena", cantidad: -3, pickingId: 25, hechoPor: "Carmen" }]);
+  assert.ok(pasos.indexOf("descontarPequena") < pasos.indexOf("finalizar"));
+});
+
+test("finalizar no descuenta productos que todavía no entraron al inventario", async (t) => {
+  const { inventario } = preparar(t, { lineas: [linea({ cantidadEscaneada: 3 })] });
+  assert.equal((await finalizarPicking(25)).estado, "completo");
+  assert.deepEqual(inventario.pequena, []);
 });
