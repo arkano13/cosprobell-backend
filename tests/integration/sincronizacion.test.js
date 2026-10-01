@@ -130,10 +130,57 @@ test("base vinculada a otra empresa no permite mezclar origen", async (t) => {
   await assert.rejects(recibirProductos(lote(), empresa), { code: "ORIGEN_INCOMPATIBLE" });
   await assert.rejects(consultarEstadoProductos(empresa), { code: "ORIGEN_INCOMPATIBLE" });
 });
-test("repositorio solo actualiza campos permitidos sin tocar relaciones", async (t) => {
-  let consulta; await repo.guardarProducto(producto, { producto: { upsert: async (args) => { consulta = args; } } });
+function baseProductos({ anterior = null, activo = null, retirado = null } = {}) {
+  const operaciones = [];
+  const db = {
+    producto: { findUnique: async () => anterior, upsert: async (args) => { operaciones.push(["producto", args]); } },
+    productoCodigoBarras: {
+      updateMany: async (args) => operaciones.push(["retirarFicha", args.where]),
+      findFirst: async (args) => (args.where.retiradoEnSap === false ? activo : retirado),
+      update: async (args) => operaciones.push(["actualizarCodigo", args.where.id, args.data]),
+      create: async (args) => operaciones.push(["crearCodigo", args.data]),
+    },
+    $executeRaw: async () => operaciones.push(["existencias"]),
+  };
+  return { db, operaciones };
+}
+test("repositorio solo actualiza campos permitidos sin tocar relaciones", async () => {
+  const { db, operaciones } = baseProductos();
+  await repo.guardarProducto(producto, db);
+  const [, consulta] = operaciones.find((o) => o[0] === "producto");
   assert.deepEqual(Object.keys(consulta.update).sort(), [...Object.keys(producto), "sincronizadoEn"].sort());
   assert.deepEqual(consulta.where, { itemCode: "P1" });
+});
+test("repositorio: el código de la ficha del artículo queda como código Manual sin duplicarse", async () => {
+  const conCodigo = { ...producto, barCode: "7501234567890" };
+  let { db, operaciones } = baseProductos();
+  await repo.guardarProducto(conCodigo, db);
+  assert.deepEqual(operaciones.find((o) => o[0] === "retirarFicha")[1],
+    { itemCode: "P1", origen: "ficha", retiradoEnSap: false, codigo: { not: "7501234567890" } });
+  const creado = operaciones.find((o) => o[0] === "crearCodigo")[1];
+  assert.deepEqual({ ...creado, sincronizadoEn: creado.sincronizadoEn instanceof Date },
+    { itemCode: "P1", codigo: "7501234567890", uomEntry: -1, origen: "ficha", sincronizadoEn: true });
+  ({ db, operaciones } = baseProductos({ activo: { id: 3, origen: "app" } }));
+  await repo.guardarProducto(conCodigo, db);
+  assert.ok(!operaciones.some((o) => o[0] === "crearCodigo" || o[0] === "actualizarCodigo"), "ya existe desde la app: no se duplica");
+  ({ db, operaciones } = baseProductos({ retirado: { id: 8 } }));
+  await repo.guardarProducto(conCodigo, db);
+  assert.equal(operaciones.find((o) => o[0] === "actualizarCodigo")[2].retiradoEnSap, false);
+  ({ db, operaciones } = baseProductos());
+  await repo.guardarProducto({ ...producto, barCode: null }, db);
+  assert.deepEqual(operaciones.find((o) => o[0] === "retirarFicha")[1], { itemCode: "P1", origen: "ficha", retiradoEnSap: false });
+  assert.ok(!operaciones.some((o) => o[0] === "crearCodigo"));
+});
+test("repositorio: un cambio de existencias en SAP avisa al inventario", async () => {
+  let { db, operaciones } = baseProductos({ anterior: { quantityOnStock: 10 } });
+  await repo.guardarProducto({ ...producto, quantityOnStock: 110 }, db);
+  assert.ok(operaciones.some((o) => o[0] === "existencias"));
+  ({ db, operaciones } = baseProductos({ anterior: { quantityOnStock: 10 } }));
+  await repo.guardarProducto({ ...producto, quantityOnStock: 10 }, db);
+  assert.ok(!operaciones.some((o) => o[0] === "existencias"), "sin cambio no avisa");
+  ({ db, operaciones } = baseProductos({ anterior: { quantityOnStock: 10 } }));
+  await repo.guardarProducto(producto, db);
+  assert.ok(!operaciones.some((o) => o[0] === "existencias"), "un puente anterior no envía existencias");
 });
 
 for (const [nombre, body, status, code] of [
@@ -249,12 +296,12 @@ test("repositorio: guarda un código de SAP, adopta la asociación local y exige
   const registro = { absEntry: 9, itemCode: "P1", codigo: "0012345", uomEntry: 1 };
   const sinFecha = (op) => op.map((v) => (v && typeof v === "object" ? { ...v, sincronizadoEn: v.sincronizadoEn instanceof Date } : v));
   await repo.guardarCodigoBarras(registro, db);
-  assert.deepEqual(sinFecha(operaciones.at(-1)), ["crear", { itemCode: "P1", codigo: "0012345", uomEntry: 1, sincronizadoEn: true, retiradoEnSap: false, sapAbsEntry: 9 }]);
+  assert.deepEqual(sinFecha(operaciones.at(-1)), ["crear", { itemCode: "P1", codigo: "0012345", uomEntry: 1, sincronizadoEn: true, retiradoEnSap: false, origen: "sap", sapAbsEntry: 9 }]);
   assert.deepEqual(operaciones.at(-2)[1], { sapAbsEntry: null, itemCode: "P1", codigo: "0012345", uomEntry: 1 });
   local = { id: 4 }; await repo.guardarCodigoBarras(registro, db);
-  assert.deepEqual(sinFecha(operaciones.at(-1)), ["actualizar", 4, { itemCode: "P1", codigo: "0012345", uomEntry: 1, sincronizadoEn: true, retiradoEnSap: false, sapAbsEntry: 9 }]);
+  assert.deepEqual(sinFecha(operaciones.at(-1)), ["actualizar", 4, { itemCode: "P1", codigo: "0012345", uomEntry: 1, sincronizadoEn: true, retiradoEnSap: false, origen: "sap", sapAbsEntry: 9 }]);
   porAbsEntry = { id: 7 }; await repo.guardarCodigoBarras({ ...registro, codigo: "999" }, db);
-  assert.deepEqual(sinFecha(operaciones.at(-1)), ["actualizar", 7, { itemCode: "P1", codigo: "999", uomEntry: 1, sincronizadoEn: true, retiradoEnSap: false }]);
+  assert.deepEqual(sinFecha(operaciones.at(-1)), ["actualizar", 7, { itemCode: "P1", codigo: "999", uomEntry: 1, sincronizadoEn: true, retiradoEnSap: false, origen: "sap" }]);
   productoExiste = false;
   await assert.rejects(repo.guardarCodigoBarras(registro, db), { code: "PRODUCTO_NO_SINCRONIZADO" });
 });

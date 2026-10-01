@@ -8,7 +8,7 @@ const DESACTUALIZADA = Prisma.sql`(k."itemCodeConfirmado" <> c."itemCode" OR k."
 function consultar(condiciones, limite, db) {
   return db.$queryRaw`
     SELECT c.id, c."itemCode", p."itemName", c.codigo, c."uomEntry", u.code AS "uomCode", u.name AS "uomNombre",
-           c."sapAbsEntry", (k."codigoBarrasId" IS NOT NULL) AS confirmada, k."esUnidadIndividual",
+           c."sapAbsEntry", c.origen, (k."codigoBarrasId" IS NOT NULL) AS confirmada, k."esUnidadIndividual",
            k."confirmadaEn", k."confirmadaPor", k.observacion, COALESCE(${DESACTUALIZADA}, false) AS desactualizada
     FROM productos_codigos_barras c
     JOIN productos p ON p."itemCode" = c."itemCode"

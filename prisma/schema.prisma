@@ -97,6 +97,8 @@ model Producto {
   precios       ProductoPrecio[]
   existencias   ProductoExistencia[]
   codigosBarras ProductoCodigoBarras[]
+  inventario    InventarioProducto?
+  cajas         InventarioCaja[]
 
   @@map("productos")
 }
@@ -144,6 +146,12 @@ model ProductoCodigoBarras {
   // no se usa en picking, pero se conserva junto con su confirmación por si vuelve a aparecer.
   sincronizadoEn DateTime?
   retiradoEnSap  Boolean   @default(false)
+
+  // De dónde salió: sap (BarCodes), ficha (campo código de barras de la ficha del artículo) o app (lo
+  // registró un supervisor). La sincronización solo retira los de SAP y los de la ficha.
+  origen        String   @default("sap")
+  registradoPor String?
+  creadoEn      DateTime @default(now())
 
   confirmacionPicking ConfirmacionEtiquetaPicking?
 
@@ -735,4 +743,119 @@ model SincronizacionEstado {
   actualizadoEn DateTime @default(now())
 
   @@map("sincronizacion_estados")
+}
+
+// ---------------------------------------------------------------------------
+// Inventario de la bodega. SAP solo sabe el total por producto: las dos bodegas, las cajas y los lotes
+// existen únicamente aquí. Nada de esto se escribe en SAP.
+// ---------------------------------------------------------------------------
+
+// Estado por producto. Existe desde la primera vez que el producto entra al inventario.
+model InventarioProducto {
+  itemCode      String    @id
+  producto      Producto  @relation(fields: [itemCode], references: [itemCode])
+  pequena       Int       @default(0) // unidades sueltas en la bodega pequeña
+  adelantado    Int       @default(0) // recibido en la app antes de que SAP registre la entrada
+  sapCambioEn   DateTime? // último cambio de SAP que mueve la diferencia (existencias o pedidos preparados)
+  creadoEn      DateTime  @default(now())
+  actualizadoEn DateTime  @updatedAt
+
+  @@map("inventario_productos")
+}
+
+// Bodega grande: una fila por caja (o bulto suelto) con su lote.
+model InventarioCaja {
+  id                Int       @id @default(autoincrement())
+  codigo            String    @unique // CJ-000123, el de la etiqueta que imprime la app
+  itemCode          String
+  producto          Producto  @relation(fields: [itemCode], references: [itemCode])
+  lote              String?
+  vencimiento       DateTime? @db.Date
+  suelto            Boolean   @default(false)
+  unidadesIniciales Int
+  unidades          Int
+  recibidaEn        DateTime  @default(now())
+  recibidaPor       String?
+
+  movimientos InventarioMovimiento[]
+
+  @@index([itemCode])
+  @@index([vencimiento])
+  @@map("inventario_cajas")
+}
+
+// Cada cambio de unidades, con quién, cuándo y por qué. cantidad con signo: + entra, − sale.
+model InventarioMovimiento {
+  id          Int                  @id @default(autoincrement())
+  grupo       String // los movimientos de una misma operación (una recepción de 10 cajas, una reposición) lo comparten
+  tipo        String // recepcion | reposicion | picking | descuento | conteo | correccion | reasignacion
+  itemCode    String
+  bodega      String // grande | pequena
+  cantidad    Int
+  cajaId      Int?
+  caja        InventarioCaja?      @relation(fields: [cajaId], references: [id])
+  lote        String?
+  pickingId   Int?
+  descuentoId Int?
+  descuento   InventarioDescuento? @relation(fields: [descuentoId], references: [id])
+  observacion String?
+  hechoPor    String?
+  creadoEn    DateTime             @default(now())
+
+  @@index([itemCode, creadoEn])
+  @@index([creadoEn])
+  @@index([grupo])
+  @@index([descuentoId])
+  @@map("inventario_movimientos")
+}
+
+// Lo que SAP descontó y la bodega asignó a lotes o a la bodega pequeña.
+model InventarioDescuento {
+  id           Int       @id @default(autoincrement())
+  itemCode     String
+  unidades     Int
+  documentos   String? // documentos de SAP que lo explican, como texto
+  hechoPor     String?
+  creadoEn     DateTime  @default(now())
+  corregidoPor String?
+  corregidoEn  DateTime?
+  anterior     String? // asignación previa a la última corrección, como texto
+
+  movimientos InventarioMovimiento[]
+
+  @@index([creadoEn])
+  @@map("inventario_descuentos")
+}
+
+// Documentos de SAP que mueven existencias (entradas, salidas y devoluciones). Solo lectura: explican
+// de dónde viene una diferencia. tipo: entradaCompra | entradaInventario | salidaInventario |
+// devolucionProveedor | devolucionCliente.
+model DocumentoStock {
+  tipo           String
+  docEntry       Int
+  docNum         Int
+  docDate        DateTime
+  comentarios    String?
+  cancelado      Boolean  @default(false)
+  sincronizadoEn DateTime @default(now())
+
+  lineas DocumentoStockLinea[]
+
+  @@id([tipo, docEntry])
+  @@index([docDate])
+  @@map("documentos_stock")
+}
+
+model DocumentoStockLinea {
+  id        Int            @id @default(autoincrement())
+  tipo      String
+  docEntry  Int
+  documento DocumentoStock @relation(fields: [tipo, docEntry], references: [tipo, docEntry], onDelete: Cascade)
+  lineNum   Int
+  itemCode  String
+  cantidad  Float
+
+  @@unique([tipo, docEntry, lineNum])
+  @@index([itemCode])
+  @@map("documentos_stock_lineas")
 }

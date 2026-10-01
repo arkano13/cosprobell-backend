@@ -1,6 +1,31 @@
 import { prisma } from "../../infrastructure/database/prisma.js";
 import { AppError } from "../../shared/errors/AppError.js";
 import { guardarPedido } from "./pedidos.repository.js";
+import { UNIDAD_MANUAL } from "../picking/picking.cantidades.js";
+import { registrarCambioExistencias } from "../inventario/inventario.sap.js";
+
+// El código de la ficha del artículo (campo BarCode de Items) también sirve para escanear: se guarda como
+// código de origen "ficha" con la unidad Manual del artículo, y se confirma como los demás. Si la ficha
+// cambia o lo quita, el anterior se retira. Un código igual ya existente (de SAP o de la app) no se duplica.
+async function sincronizarCodigoFicha(itemCode, barCode, db) {
+  await db.productoCodigoBarras.updateMany({
+    where: { itemCode, origen: "ficha", retiradoEnSap: false, ...(barCode ? { codigo: { not: barCode } } : {}) },
+    data: { retiradoEnSap: true } });
+  if (!barCode) return;
+  const activo = await db.productoCodigoBarras.findFirst({ where: { itemCode, codigo: barCode, retiradoEnSap: false },
+    select: { id: true, origen: true }, orderBy: { id: "asc" } });
+  if (activo) {
+    if (activo.origen === "ficha") await db.productoCodigoBarras.update({ where: { id: activo.id }, data: { sincronizadoEn: new Date() } });
+    return;
+  }
+  const retirado = await db.productoCodigoBarras.findFirst({ where: { itemCode, codigo: barCode, origen: "ficha" },
+    select: { id: true }, orderBy: { id: "asc" } });
+  if (retirado) {
+    await db.productoCodigoBarras.update({ where: { id: retirado.id }, data: { retiradoEnSap: false, sincronizadoEn: new Date() } });
+    return;
+  }
+  await db.productoCodigoBarras.create({ data: { itemCode, codigo: barCode, uomEntry: UNIDAD_MANUAL, origen: "ficha", sincronizadoEn: new Date() } });
+}
 export const sincronizacionRepository = {
   guardarPedido,
   conBloqueo(operacion, db = prisma) {
@@ -21,12 +46,18 @@ export const sincronizacionRepository = {
     const filas = await db.$queryRaw`SELECT * FROM sincronizacion_estados WHERE entidad = ${entidad}`;
     return filas[0] ?? null;
   },
-  guardarProducto(producto, db) {
-    return db.producto.upsert({
+  async guardarProducto(producto, db) {
+    const anterior = await db.producto.findUnique({ where: { itemCode: producto.itemCode }, select: { quantityOnStock: true } });
+    const guardado = await db.producto.upsert({
       where: { itemCode: producto.itemCode },
       create: { ...producto, sincronizadoEn: new Date() },
       update: { ...producto, sincronizadoEn: new Date() },
     });
+    await sincronizarCodigoFicha(producto.itemCode, producto.barCode, db);
+    if (anterior && producto.quantityOnStock !== undefined && producto.quantityOnStock !== anterior.quantityOnStock) {
+      await registrarCambioExistencias(producto.itemCode, (producto.quantityOnStock ?? 0) - (anterior.quantityOnStock ?? 0), db);
+    }
+    return guardado;
   },
   guardarCliente(cliente, db) {
     // Solo los campos del contrato: no toca pedidos, facturas ni otros datos del cliente.
@@ -44,10 +75,11 @@ export const sincronizacionRepository = {
     const producto = await db.producto.findUnique({ where: { itemCode: registro.itemCode }, select: { itemCode: true } });
     if (!producto) throw new AppError({ code: "PRODUCTO_NO_SINCRONIZADO",
       message: "Debe sincronizar el producto antes de recibir sus códigos de barras", statusCode: 409 });
-    const datos = { itemCode: registro.itemCode, codigo: registro.codigo, uomEntry: registro.uomEntry, sincronizadoEn: new Date(), retiradoEnSap: false };
+    const datos = { itemCode: registro.itemCode, codigo: registro.codigo, uomEntry: registro.uomEntry, sincronizadoEn: new Date(),
+      retiradoEnSap: false, origen: "sap" };
     const existente = await db.productoCodigoBarras.findUnique({ where: { sapAbsEntry: registro.absEntry }, select: { id: true } });
     if (existente) return db.productoCodigoBarras.update({ where: { id: existente.id }, data: datos });
-    // Una asociación creada a mano con los mismos datos se vincula a SAP y conserva su confirmación.
+    // Una asociación creada a mano o tomada de la ficha con los mismos datos se vincula a SAP y conserva su confirmación.
     const local = await db.productoCodigoBarras.findFirst({ where: { sapAbsEntry: null, itemCode: registro.itemCode,
       codigo: registro.codigo, uomEntry: registro.uomEntry }, select: { id: true }, orderBy: { id: "asc" } });
     if (local) return db.productoCodigoBarras.update({ where: { id: local.id }, data: { ...datos, sapAbsEntry: registro.absEntry } });
