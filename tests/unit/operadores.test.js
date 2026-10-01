@@ -47,7 +47,7 @@ const intentar = (e, pin) => iniciarSesion({ operadorId: 7, pin, aplicacion: "ap
 test("ingreso correcto: sesión de un turno; en la base solo queda el hash del token", async () => {
   const e = escenario();
   const r = await intentar(e, "4827");
-  assert.deepEqual(r.operador, { id: 7, nombre: "Ana López" });
+  assert.deepEqual(r.operador, { id: 7, nombre: "Ana López", rol: "operador" });
   assert.match(r.token, /^[0-9a-f]{64}$/);
   assert.equal(r.expiraEn.getTime() - new Date("2026-09-29T10:00:00Z").getTime(), DURACION_SESION_MS);
   assert.equal(e.sesiones[0].tokenHash, hashApiKey(r.token));
@@ -87,7 +87,7 @@ test("operador inexistente o desactivado no ingresa", async () => {
 test("sesión: vigente, vencida, cerrada, operador desactivado y token mal formado", async () => {
   const e = escenario();
   const { token } = await intentar(e, "4827");
-  assert.deepEqual(await autenticarSesion(token, e.deps), { sesionId: 1, operador: { id: 7, nombre: "Ana López" } });
+  assert.deepEqual(await autenticarSesion(token, e.deps), { sesionId: 1, operador: { id: 7, nombre: "Ana López", rol: "operador" } });
   assert.equal(await autenticarSesion("x".repeat(64), e.deps), null);
   assert.equal(await autenticarSesion(undefined, e.deps), null);
   e.operador.activo = false;

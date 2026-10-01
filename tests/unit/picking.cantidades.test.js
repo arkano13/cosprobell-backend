@@ -66,7 +66,7 @@ test("rechaza una cantidad por lectura distinta de uno", () => {
 });
 
 test("rechaza unidades desconocidas incluso cuando ambas referencias coinciden", () => {
-  for (const uomEntry of [null, undefined, -1, "1", 1.5]) {
+  for (const uomEntry of [null, undefined, -2, "1", 1.5, "-1"]) {
     comprobarError(
       crearLinea({ uomEntry }),
       crearEtiqueta(),
@@ -128,3 +128,12 @@ test("una línea completa sigue teniendo unidades compatibles", () => {
     )
   );
 }); 
+
+test("acepta la unidad Manual (-1) cuando la línea y la etiqueta la comparten", () => {
+  assert.doesNotThrow(() => validarCompatibilidadLinea(crearLinea({ uomEntry: -1, uomCode: "Manual" }), crearEtiqueta({ uomEntry: -1 })));
+});
+
+test("Manual no se mezcla con una unidad de SAP", () => {
+  comprobarError(crearLinea({ uomEntry: -1 }), crearEtiqueta({ uomEntry: 1 }), "UNIDAD_INCOMPATIBLE");
+  comprobarError(crearLinea({ uomEntry: 1 }), crearEtiqueta({ uomEntry: -1 }), "UNIDAD_INCOMPATIBLE");
+});

@@ -1,4 +1,5 @@
 import { AppError } from "../../shared/errors/AppError.js";
+import { unidadConocida } from "./picking.cantidades.js";
 
 export function comprobarPedidoElegible(pedido) {
   if (!pedido) throw new AppError({
@@ -34,7 +35,7 @@ export function lineasParaPreparar(pedido) {
       throw error("PENDIENTE_NO_CONFIRMADO", "La cantidad pendiente no es válida para preparar unidades individuales");
     }
     if (pendiente === 0) continue;
-    if (!Number.isInteger(linea.uomEntry) || linea.uomEntry < 0 || !linea.itemCode) {
+    if (!unidadConocida(linea.uomEntry) || !linea.itemCode) {
       throw error("UNIDAD_NO_DEFINIDA", "La línea requiere un producto y una unidad de medida confirmados");
     }
     if (linea.remainingOpenInventoryQuantity !== pendiente || linea.inventoryQuantity !== linea.quantity) {

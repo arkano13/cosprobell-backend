@@ -19,14 +19,54 @@ function consultar(condiciones, limite, db) {
     LIMIT ${limite}`;
 }
 
+// Texto literal para ILIKE: % y _ no actúan como comodines.
+const literal = (texto) => texto.replace(/[\\%_]/g, (c) => `\\${c}`);
+
 export const etiquetasRepository = {
-  listar({ estado, itemCode, cursor, limit }, db = prisma) {
+  listar({ estado, itemCode, buscar, cursor, limit }, db = prisma) {
     const condiciones = [Prisma.sql`c."retiradoEnSap" = false`];
     if (cursor !== undefined) condiciones.push(Prisma.sql`c.id > ${cursor}`);
     if (itemCode !== undefined) condiciones.push(Prisma.sql`c."itemCode" = ${itemCode}`);
     if (estado === "pendientes") condiciones.push(Prisma.sql`(k."codigoBarrasId" IS NULL OR ${DESACTUALIZADA})`);
+    if (estado === "sin_confirmar") condiciones.push(Prisma.sql`k."codigoBarrasId" IS NULL`);
+    if (estado === "desactualizadas") condiciones.push(Prisma.sql`k."codigoBarrasId" IS NOT NULL AND ${DESACTUALIZADA}`);
     if (estado === "confirmadas") condiciones.push(Prisma.sql`k."codigoBarrasId" IS NOT NULL AND NOT ${DESACTUALIZADA}`);
+    if (buscar !== undefined) {
+      const patron = `%${literal(buscar)}%`;
+      condiciones.push(Prisma.sql`(c.codigo = ${buscar} OR c."itemCode" ILIKE ${patron} OR p."itemName" ILIKE ${patron})`);
+    }
     return consultar(condiciones, limit + 1, db);
+  },
+  async contar(db = prisma) {
+    const [fila] = await db.$queryRaw`
+      SELECT count(*) FILTER (WHERE k."codigoBarrasId" IS NULL)::int AS "sinConfirmar",
+             count(*) FILTER (WHERE k."codigoBarrasId" IS NULL AND c."uomEntry" = -1)::int AS "manualSinConfirmar",
+             count(*) FILTER (WHERE k."codigoBarrasId" IS NOT NULL AND ${DESACTUALIZADA})::int AS desactualizadas,
+             count(*) FILTER (WHERE k."codigoBarrasId" IS NOT NULL AND NOT ${DESACTUALIZADA})::int AS confirmadas
+      FROM productos_codigos_barras c
+      LEFT JOIN confirmaciones_etiquetas_picking k ON k."codigoBarrasId" = c.id
+      WHERE c."retiradoEnSap" = false`;
+    return fila;
+  },
+  // Confirma como unidad todos los códigos sin confirmar con unidad Manual. Bloquea esas filas como la
+  // confirmación individual y solo aplica si siguen siendo los que vio el supervisor (misma cantidad).
+  confirmarManualPendientes({ cantidadEsperada, confirmadaPor }) {
+    return prisma.$transaction(async (tx) => {
+      const filas = await tx.$queryRaw`
+        SELECT c.id FROM productos_codigos_barras c
+        WHERE c."retiradoEnSap" = false AND c."uomEntry" = -1
+          AND NOT EXISTS (SELECT 1 FROM confirmaciones_etiquetas_picking k WHERE k."codigoBarrasId" = c.id)
+        ORDER BY c.id FOR UPDATE OF c`;
+      if (filas.length !== cantidadEsperada) return { confirmadas: 0, disponibles: filas.length };
+      const ids = filas.map((f) => f.id);
+      const confirmadas = ids.length ? await tx.$executeRaw`
+        INSERT INTO confirmaciones_etiquetas_picking ("codigoBarrasId", "esUnidadIndividual", "itemCodeConfirmado",
+          "codigoConfirmado", "uomEntryConfirmado", "confirmadaEn", "confirmadaPor", observacion)
+        SELECT c.id, true, c."itemCode", c.codigo, c."uomEntry", now(), ${confirmadaPor}, 'Confirmación masiva: unidad Manual'
+        FROM productos_codigos_barras c WHERE c.id = ANY(${ids})
+        ON CONFLICT ("codigoBarrasId") DO NOTHING` : 0;
+      return { confirmadas, disponibles: filas.length };
+    }, { isolationLevel: "ReadCommitted", maxWait: 10_000, timeout: 60_000 });
   },
   async obtener(id, db = prisma) {
     const [fila] = await consultar([Prisma.sql`c.id = ${id}`], 1, db);

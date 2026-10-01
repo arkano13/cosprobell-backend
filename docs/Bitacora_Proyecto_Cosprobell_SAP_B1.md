@@ -561,7 +561,7 @@ Diseño aprobado por el usuario a partir de una maqueta: un pedido ya preparado 
 - `GET /pedidos` agrega a cada pedido `preparado`: la última preparación finalizada (`completo` o `con_diferencias`) con `pickingId`, `estado`, `operador`, `fechaFin`, `unidadesPreparadas` y `unidadesPedidas`, o `null`. Una sola consulta por página; si la página está vacía no consulta.
 - Sin migración. Las preparaciones en curso o en revisión no se informan en la lista.
 - Corregido el mensaje "Ese producto ya completó su cantidad pedida" (faltaba la tilde).
-- `scripts/datos-demo-belleza.js` (13 productos de belleza, 4 clientes y 6 pedidos ficticios) se entregó al usuario para copiar y no se agregó al repositorio.
+- `scripts/datos-demo-belleza.js` (13 productos de belleza, 4 clientes y 6 pedidos ficticios) se entregó al usuario para copiar; después el usuario lo agregó al repositorio.
 
 Verificación: 319 pruebas (lista con y sin preparaciones, la más reciente por pedido, consulta del repositorio). Recorrido real con la app de escritorio 1.2.0 contra PostgreSQL y este backend, con los datos de belleza: sin preparaciones no aparece la sección; un pedido preparado completo y otro con diferencias pasan a "Preparados" en verde y ámbar con operador y unidades; el que lleva 26 horas muestra el aviso; "Ver resumen" abre el resumen; el buscador filtra ambas secciones; al cerrarse en SAP el pedido sale de la lista. Auditoría axe-core WCAG 2.2 A/AA sin problemas.
 
@@ -579,3 +579,23 @@ Se eliminó la repetición automática de todos los catálogos cada 15 minutos. 
 Verificación: 335/335 pruebas automatizadas. Incluyen respuesta perdida, página con cambios parciales, presencia de códigos sin cambios, límites, avance conservado, alternancia de entidades y sondeo HTTP simulado sin contactos al backend ni creación de estado. No se contactó SAP ni la base real.
 
 Pendiente: medir carga y validar certificados, cuenta y datos en Cosprobell; elegir frecuencias. Cada recorrido todavía lee las páginas correspondientes de SAP. Consultar solo cambios desde SAP requiere validar filtros de fecha/hora y sus efectos sobre líneas, cancelaciones y cierres; no se afirma que esa etapa esté resuelta. Las facturas aún no están implementadas. Usar una base receptora de pruebas separada de los datos demo.
+
+## 27. Unidad Manual como unidad y panel del supervisor (2026-10-01)
+
+Con el puente ya cargando datos reales, un pedido real no se pudo preparar: "La línea requiere un producto y una unidad de medida confirmados". Cosprobell usa en SAP la unidad **Manual** (`UoMEntry` -1, factor 1) en todos los artículos y líneas, y la regla anterior la bloqueaba. Decisión del usuario: Manual cuenta como la unidad del artículo, y por ahora se maneja todo por unidad, con confirmación humana de las etiquetas.
+
+- `unidadConocida` acepta -1 (`UNIDAD_MANUAL`). Se sigue exigiendo que la cantidad de inventario coincida con la de venta; no hay conversión. Las etiquetas con unidad Manual se pueden confirmar como unidad individual.
+- Rol de operador: columna `rol` (`operador` por defecto o `supervisor`), migración `20261001090000_operadores_rol` (solo agrega). El ingreso y la sesión devuelven `rol`. `scripts/operadores.js` suma `crear ... --supervisor` y `rol`.
+- Rutas `/supervisor/*` (middleware `soloSupervisor`: sesión con PIN y rol supervisor; las API keys reciben 403):
+  - Etiquetas: lista con filtros y búsqueda, conteos, confirmación individual a nombre del supervisor y **confirmación masiva** de los códigos Manual sin confirmar. La masiva recibe la cantidad que vio el supervisor y no confirma nada si cambió (`CANTIDAD_CAMBIO`).
+  - Operadores: alta, cambio de PIN, desbloqueo, activar y desactivar (nadie se desactiva a sí mismo).
+  - Revisiones: preparaciones `requiere_revision` con lo que cambió en SAP por producto, finalizadas con diferencias (24 h) y preparadas sin entrega en SAP (24 h o más). Nuevo estado `anulada`: el supervisor reinicia una preparación en revisión, las lecturas quedan en el historial y el pedido se vuelve a preparar con los datos actuales. `iniciarPicking` ignora las anuladas.
+  - Sincronización: última recepción y registros por tipo de dato.
+- Finalizar con diferencias sigue igual: lo puede hacer cualquier operador (decisión del usuario).
+- App de escritorio 1.3.0: panel del supervisor en el menú con cuatro pestañas y aviso al operador cuando el supervisor reinició su preparación.
+
+Desplegar primero el backend (tiene migración) y después instalar la app 1.3.0. Crear el primer supervisor en Railway con `node scripts/operadores.js crear "Nombre" PIN --supervisor` o `rol "Nombre" supervisor`.
+
+Verificación: 351/351 pruebas del backend (12 nuevas de integración del panel) y 21/21 de la interfaz de la app. Recorrido real con Electron contra PostgreSQL y este backend: un operador no ve el panel y recibe 403; confirmación masiva de 2 códigos Manual a nombre de la supervisora; búsqueda con el código y confirmación individual; etiqueta que cambió en SAP; desbloqueo, alta con aviso de PIN fácil, cambio de PIN que cierra sesiones y desactivación; revisión con el cambio de cantidad (6 → 8), reinicio y nueva preparación con los datos actuales; aviso de códigos con más de 24 h sin datos; pedido con unidad Manual escaneado hasta completar la línea. Auditoría axe-core WCAG 2.2 A/AA sin problemas en las cuatro pestañas.
+
+Pendiente: saber cuántos códigos de barras trae SAP de Cosprobell (la ficha de producto revisada no tenía); sin códigos no hay nada que escanear. Frecuencias del puente y consultas por fecha de actualización, con recorrido completo nocturno a las 2:00 a. m., a decidir con las mediciones.

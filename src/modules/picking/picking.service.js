@@ -36,7 +36,8 @@ export async function iniciarPicking({ pedidoDocEntry, usuarioId }) {
     const pedido = await pickingRepository.buscarPedidoConLineas(pedidoDocEntry, tx);
     comprobarPedidoElegible(pedido);
 
-    const sesiones = await pickingRepository.buscarSesionesDelPedido(pedidoDocEntry, tx);
+    // Las preparaciones anuladas por el supervisor quedan en el historial y no impiden empezar otra.
+    const sesiones = (await pickingRepository.buscarSesionesDelPedido(pedidoDocEntry, tx)).filter((s) => s.estado !== "anulada");
     if (sesiones.some(s => s.estado === "requiere_revision")) throw new AppError({ code: "PEDIDO_REQUIERE_REVISION",
       message: "El pedido tiene una preparación pendiente de revisión", statusCode: 409 });
     const activas = sesiones.filter((sesion) => sesion.estado === "en_proceso");

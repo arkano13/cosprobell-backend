@@ -66,7 +66,7 @@ test("inicio de sesión: valida el cuerpo, rechaza PIN incorrecto y entrega el t
   assert.equal(bien.status, 201);
   const { data } = await bien.json();
   assert.match(data.token, /^[0-9a-f]{64}$/);
-  assert.deepEqual(data.operador, { id: 7, nombre: "Ana López" });
+  assert.deepEqual(data.operador, { id: 7, nombre: "Ana López", rol: "operador" });
   assert.equal(creadas[0].aplicacion, "app-bodega");
   assert.equal(creadas[0].tokenHash, hashApiKey(data.token));
 });

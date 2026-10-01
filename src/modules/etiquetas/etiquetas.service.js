@@ -1,5 +1,6 @@
 import { AppError } from "../../shared/errors/AppError.js";
 import { etiquetasRepository as repo } from "./etiquetas.repository.js";
+import { unidadConocida } from "../picking/picking.cantidades.js";
 
 // estado: sin_confirmar | desactualizada (cambió en SAP después de confirmarse) | unidad_individual | no_es_unidad.
 function vista(f) {
@@ -26,9 +27,10 @@ export async function confirmarEtiqueta(id, { esUnidadIndividual, observacion = 
     if (etiqueta.retiradoEnSap) {
       throw new AppError({ code: "ETIQUETA_RETIRADA", message: "SAP ya no lista este código de barras", statusCode: 409 });
     }
-    // "Manual" (-1) o sin unidad no identifica una presentación: no se confirma como unidad individual
-    // hasta que exista una regla para esos productos. Marcarla como "no es unidad" siempre se permite.
-    if (esUnidadIndividual && !(Number.isInteger(etiqueta.uomEntry) && etiqueta.uomEntry >= 0)) {
+    // Sin unidad no se identifica una presentación: no se confirma como unidad individual. "Manual" (-1) sí:
+    // es la unidad del artículo, y quien confirma decide si el código es de una unidad o de una caja.
+    // Marcarla como "no es unidad" siempre se permite.
+    if (esUnidadIndividual && !unidadConocida(etiqueta.uomEntry)) {
       throw new AppError({ code: "UNIDAD_NO_DEFINIDA", message: "El código no tiene una unidad de medida definida en SAP", statusCode: 409 });
     }
     await repo.guardarConfirmacion({
@@ -38,6 +40,19 @@ export async function confirmarEtiqueta(id, { esUnidadIndividual, observacion = 
     }, tx);
   });
   return { data: vista(await repo.obtener(id)) };
+}
+
+export function contarEtiquetas() {
+  return repo.contar();
+}
+
+export async function confirmarManualPendientes({ cantidadEsperada }, { aplicacion }) {
+  const { confirmadas, disponibles } = await repo.confirmarManualPendientes({ cantidadEsperada, confirmadaPor: aplicacion });
+  if (disponibles !== cantidadEsperada) {
+    throw new AppError({ code: "CANTIDAD_CAMBIO", statusCode: 409,
+      message: `Ahora hay ${disponibles} códigos con unidad Manual sin confirmar (antes ${cantidadEsperada}). Revisá la lista y volvé a intentar.` });
+  }
+  return { data: { confirmadas } };
 }
 
 export async function revocarConfirmacion(id) {
