@@ -5,8 +5,10 @@ const { observarRegistros } = await import("../../src/modules/sincronizacion/obs
 const { sincronizacionRepository: repo } = await import("../../src/modules/sincronizacion/sincronizacion.repository.js");
 function preparar(t, count = 1) {
   const escrituras = [];
-  const modelo = { count: async () => count, updateMany: async q => escrituras.push(q) };
-  t.mock.method(repo, "conBloqueo", async fn => fn({ productoCodigoBarras: modelo, pedido: modelo, unidadMedida: modelo }));
+  const modelo = { count: async (q) => { escrituras.cuentas = [...(escrituras.cuentas ?? []), q.where]; return count; }, updateMany: async q => escrituras.push(q) };
+  t.mock.method(repo, "conBloqueo", async fn => fn({ productoCodigoBarras: modelo, pedido: modelo, unidadMedida: modelo,
+    bodega: modelo, producto: modelo, documentoStock: modelo,
+    productoExistencia: { updateMany: async q => { escrituras.marcas = [...(escrituras.marcas ?? []), q]; } } }));
   t.mock.method(repo, "consultarEstado", async () => ({ empresa: "TEST", secuencia: 1 }));
   t.mock.method(repo, "existeOtraEmpresa", async () => false);
   return escrituras;
@@ -30,4 +32,16 @@ test("observación rechaza duplicados y origen distinto", async t => {
   preparar(t);
   await assert.rejects(observarRegistros("pedidos", { claves: [1, 1] }, "TEST"), { code: "SOLICITUD_INVALIDA" });
   await assert.rejects(observarRegistros("pedidos", { claves: [1] }, "OTRA"), { code: "REQUIERE_RECONCILIACION" });
+});
+test("observar documentos de stock cuenta solo los de su tipo; existencias solo comprueban el producto", async t => {
+  const escrituras = preparar(t);
+  await observarRegistros("salidasInventario", { claves: [77] }, "TEST");
+  assert.deepEqual(escrituras.cuentas[0], { tipo: "salidaInventario", docEntry: { in: [77] } });
+  assert.deepEqual(escrituras[0].where, { tipo: "salidaInventario", docEntry: { in: [77] } });
+  await observarRegistros("existencias", { claves: ["P1"] }, "TEST");
+  assert.deepEqual(escrituras.cuentas[1], { itemCode: { in: ["P1"] } });
+  assert.equal(escrituras.length, 1, "las existencias no tocan la fecha del producto");
+  assert.deepEqual(escrituras.marcas[0].where, { itemCode: { in: ["P1"] } }, "pero dejan constancia en sus filas por almacén");
+  await observarRegistros("almacenes", { claves: ["V05"] }, "TEST");
+  assert.deepEqual(Object.keys(escrituras[1].data), ["sincronizadoEn"]);
 });

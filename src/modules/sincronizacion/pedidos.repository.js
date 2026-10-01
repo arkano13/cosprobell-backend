@@ -1,5 +1,6 @@
 import { AppError } from "../../shared/errors/AppError.js";
 import { sesionCoincideConPedido } from "../picking/picking.pedido.js";
+import { registrarCambioPedido } from "../inventario/inventario.sap.js";
 
 // Solo campos que afectan a la preparación. Fechas y precios no invalidan escaneos.
 export function contenidoPreparacion(pedido) {
@@ -46,4 +47,5 @@ export async function guardarPedido(pedido, db) {
   }
   // Retira únicamente líneas del espejo SAP. Las de picking y su historial son independientes.
   await db.pedidoLinea.deleteMany({ where: { pedidoDocEntry: pedido.docEntry, lineNum: { notIn: lineas.map(l => l.lineNum) } } });
+  await registrarCambioPedido(pedido.docEntry, [...(anterior?.lineas ?? []), ...lineas].map((l) => l.itemCode), db);
 }

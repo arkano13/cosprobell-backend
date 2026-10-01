@@ -5,6 +5,8 @@ import { once } from "node:events";
 process.env.DATABASE_URL = "postgresql://test:test@127.0.0.1:1/test";
 const { default: app } = await import("../../src/app.js");
 const { prisma } = await import("../../src/infrastructure/database/prisma.js");
+// La lista de pedidos pregunta si el supervisor la filtró por almacenes: en estas pruebas no hay filtro.
+prisma.configuracion.findUnique = async () => null;
 const { operadoresRepository: repo } = await import("../../src/modules/operadores/operadores.repository.js");
 const { pedidosRepository } = await import("../../src/modules/pedidos/pedidos.repository.js");
 const { datosInicio } = await import("../../src/modules/picking/picking.controller.js");

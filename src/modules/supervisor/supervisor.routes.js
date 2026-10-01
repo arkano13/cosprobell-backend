@@ -3,6 +3,7 @@ import { validate } from "../../middleware/validate.js";
 import { soloSupervisor } from "../../middleware/authenticate.js";
 import { confirmacionBodySchema } from "../etiquetas/etiquetas.schemas.js";
 import { activoSchema, confirmacionMasivaSchema, etiquetasQuerySchema, idParamsSchema, nuevoOperadorSchema, pinSchema } from "./supervisor.schemas.js";
+import { almacenesSchema, registroCodigoSchema } from "../inventario/inventario.schemas.js";
 import * as c from "./supervisor.controller.js";
 
 // Panel del supervisor: solo operadores con rol supervisor y sesión iniciada con PIN. Se monta en /supervisor.
@@ -21,4 +22,7 @@ router.put("/operadores/:id/activo", validate({ params: idParamsSchema, body: ac
 router.get("/revisiones", c.revisiones);
 router.post("/revisiones/:id/anulacion", validate({ params: idParamsSchema }), c.anulacion);
 router.get("/sincronizacion", c.sincronizacion);
+router.get("/almacenes", c.almacenes);
+router.put("/almacenes", validate({ body: almacenesSchema }), c.elegirAlmacenes);
+router.post("/codigos", validate({ body: registroCodigoSchema }), c.registrarCodigo);
 export default router;

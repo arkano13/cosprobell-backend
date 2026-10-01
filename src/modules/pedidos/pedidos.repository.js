@@ -1,10 +1,12 @@
 import { prisma } from "../../infrastructure/database/prisma.js";
 export const pedidosRepository = {
-  listar({ cursor, limit, estado }) {
+  // almacenes: si viene, solo pedidos con alguna línea en esos almacenes de SAP.
+  listar({ cursor, limit, estado, almacenes = null }) {
     return prisma.pedido.findMany({
       where: { ...(cursor === undefined ? {} : { docEntry: { gt: cursor } }),
         ...(estado === "abiertos" ? { documentStatus: "bost_Open", cancelled: false,
-          docType: "dDocument_Items", OR: [{ cancelStatus: null }, { cancelStatus: "csNo" }] } : {}) },
+          docType: "dDocument_Items", OR: [{ cancelStatus: null }, { cancelStatus: "csNo" }] } : {}),
+        ...(almacenes ? { lineas: { some: { warehouseCode: { in: almacenes } } } } : {}) },
       select: { docEntry: true, docNum: true, cardCode: true, docDate: true, docDueDate: true,
         documentStatus: true, cancelled: true, sincronizadoEn: true,
         cliente: { select: { cardName: true } } },

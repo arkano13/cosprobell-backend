@@ -45,7 +45,7 @@ test("receptor bloquea pedido y sesiones antes de actualizar; no toca escaneos",
   assert.deepEqual(llamadas.slice(0, 2), ["bloqueo", "bloqueo"]);
   assert.deepEqual(llamadas[2], ["revision", { where: { pedidoDocEntry: 9, estado: "en_proceso" }, data: { estado: "requiere_revision" } }]);
   assert.equal(llamadas[3][1].update.docDate.toISOString(), "2026-09-28T00:00:00.000Z");
-  assert.deepEqual(llamadas.at(-1), ["retirar", { where: { pedidoDocEntry: 9, lineNum: { notIn: [0] } } }]);
+  assert.deepEqual(llamadas.find((l) => l[0] === "retirar"), ["retirar", { where: { pedidoDocEntry: 9, lineNum: { notIn: [0] } } }]);
 });
 test("recepción idéntica o cambio de precio conserva la sesión activa", async () => {
   const p = pedido(); const anterior = structuredClone(p); anterior.docTotal = 200;

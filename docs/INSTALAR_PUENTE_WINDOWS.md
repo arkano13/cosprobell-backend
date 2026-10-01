@@ -1,6 +1,6 @@
 # Instalar y ejecutar el puente en Windows
 
-El puente es un programa pequeño que corre **dentro de la red de Cosprobell**. Lee clientes, productos, unidades, códigos de barras y pedidos de artículos del Service Layer de SAP y envía al backend únicamente el contenido nuevo o modificado. Las frecuencias por entidad quedan pendientes de definir; no se activa una repetición automática por defecto. No abre puertos ni expone SAP a internet. Antes de programarlo, completar la guía `PRUEBAS_PEDIDOS_SCANNER.md` y medir la duración del recorrido.
+El puente es un programa pequeño que corre **dentro de la red de Cosprobell**. Lee clientes, productos, unidades, códigos de barras, pedidos de artículos, almacenes, existencias por almacén y documentos que mueven stock (entradas, salidas y devoluciones) del Service Layer de SAP y envía al backend únicamente el contenido nuevo o modificado. Las frecuencias por entidad quedan pendientes de definir; no se activa una repetición automática por defecto. No abre puertos ni expone SAP a internet. Antes de programarlo, completar la guía `PRUEBAS_PEDIDOS_SCANNER.md` y medir la duración del recorrido.
 
 ```text
 Red de Cosprobell                                        Internet
@@ -101,7 +101,32 @@ Para solicitar otro recorrido manual: `.\ejecutar-puente.cmd --forzar`. Para ree
 
 ## 5. Programar cuando se acuerden las frecuencias
 
-No instalar una tarea todavía. Tras medir la prueba, definir `BRIDGE_FREQUENCIES_JSON`: un objeto con segundos por entidad (`clientes`, `productos`, `unidades`, `codigosBarras`, `pedidos`). Las entidades omitidas solo realizan la carga inicial y sus continuaciones. Cada frecuencia se cuenta desde el último recorrido completo.
+No instalar una tarea todavía. Tras medir la prueba, definir `BRIDGE_FREQUENCIES_JSON`: un objeto con segundos por entidad (`clientes`, `productos`, `unidades`, `codigosBarras`, `pedidos`, `almacenes`, `existencias`, `entradasCompra`, `entradasInventario`, `salidasInventario`, `devolucionesProveedor`, `devolucionesCliente`). Las entidades omitidas solo realizan la carga inicial y sus continuaciones. Cada frecuencia se cuenta desde el último recorrido completo.
+
+### Inventario: almacenes, existencias y documentos
+
+| Entidad | Recurso de SAP | Qué trae | Frecuencia sugerida |
+|---|---|---|---|
+| `almacenes` | `Warehouses` | Código, nombre y si está inactivo | `86400` (una vez al día) |
+| `existencias` | `Items` (`ItemWarehouseInfoCollection`) | Existencia de cada artículo de inventario en cada almacén | `600` |
+| `entradasCompra` | `PurchaseDeliveryNotes` | Entradas de mercancía por compra | `900` |
+| `entradasInventario` | `InventoryGenEntries` | Entradas de mercancía | `900` |
+| `salidasInventario` | `InventoryGenExits` | Salidas de mercancía (vencidos, dañados, mermas) | `900` |
+| `devolucionesProveedor` | `PurchaseReturns` | Devoluciones al proveedor | `900` |
+| `devolucionesCliente` | `Returns` | Devoluciones de clientes | `900` |
+
+- **Existencias.** SAP lista en cada artículo todos los almacenes de la empresa (en la muestra, unos 100 por artículo, casi todos en cero). El puente consulta 20 artículos por página y envía solo los almacenes con algún valor. Con unos 1.000 artículos de inventario, un recorrido son unas 50 consultas: con `BRIDGE_MAX_REQUESTS=25` se completa en dos o tres arranques.
+- **Productos antes que existencias.** El backend rechaza la existencia de un artículo que todavía no recibió (`PRODUCTO_NO_SINCRONIZADO`). Usar para `productos` una frecuencia igual o menor que la de `existencias`, así los artículos nuevos llegan primero.
+- **Documentos.** Solo los de los últimos `BRIDGE_DOCUMENTOS_DIAS` días (30 por defecto, entre 1 y 365), de 10 en 10. No se usan para calcular nada: explican en la pantalla de inventario por qué SAP tiene más o menos que la bodega. Los anulados (y el documento que revierte la anulación) se guardan marcados y no se muestran como explicación.
+- **Almacenes de esta bodega.** El puente trae todos los almacenes; el supervisor marca en la app (Panel → Almacenes) cuáles son de esta bodega. El inventario solo compara contra la existencia de esos almacenes.
+
+Ejemplo, con los valores de las tablas:
+
+```
+BRIDGE_FREQUENCIES_JSON={"clientes":3600,"productos":600,"unidades":86400,"codigosBarras":3600,"pedidos":300,"almacenes":86400,"existencias":600,"entradasCompra":900,"entradasInventario":900,"salidasInventario":900,"devolucionesProveedor":900,"devolucionesCliente":900}
+```
+
+Ajustar `clientes`, `productos`, `unidades`, `codigosBarras` y `pedidos` a lo que ya tengan configurado; el ejemplo solo muestra el formato.
 
 La frecuencia de arranque de Windows es independiente: cada arranque revisa qué entidades están pendientes. `BRIDGE_INTERVAL_SECONDS` solo controla la espera del modo `--watch`; no configura Windows. Usar un único mecanismo. `--watch` exige frecuencias explícitas y no permite `--forzar` ni `--reconciliar`.
 

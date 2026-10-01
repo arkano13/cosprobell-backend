@@ -39,6 +39,7 @@ export function configurar(v) {
     maxConsultas: numero("BRIDGE_MAX_REQUESTS", 25, 1, 10000),
     maxDuracionMs: numero("BRIDGE_MAX_SECONDS", 120, 10, 3600) * 1000,
     pausaMs: numero("BRIDGE_REQUEST_DELAY_MS", 500, 100, 60000),
+    documentosDias: numero("BRIDGE_DOCUMENTOS_DIAS", 30, 1, 365),
     clave: v.BRIDGE_API_KEY, directorio: resolve(v.BRIDGE_STATE_DIR), intervaloMs: segundos * 1000,
     origen: createHash("sha256").update(JSON.stringify([sapUrl, backendUrl, empresa])).digest("hex") };
 }

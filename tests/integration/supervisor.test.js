@@ -5,6 +5,8 @@ import { once } from "node:events";
 process.env.DATABASE_URL = "postgresql://test:test@127.0.0.1:1/test";
 const { default: app } = await import("../../src/app.js");
 const { prisma } = await import("../../src/infrastructure/database/prisma.js");
+// La lista de pedidos pregunta si el supervisor la filtró por almacenes: en estas pruebas no hay filtro.
+prisma.configuracion.findUnique = async () => null;
 const { operadoresRepository: repo } = await import("../../src/modules/operadores/operadores.repository.js");
 const { etiquetasRepository } = await import("../../src/modules/etiquetas/etiquetas.repository.js");
 const { operadoresAdminRepository: adminRepo, listarOperadoresAdmin, crearOperador, cambiarPin, cambiarActivo } =
@@ -193,13 +195,21 @@ test("sincronización: última recepción por tipo de dato y cantidad de registr
     pedidos: { _max: { sincronizadoEn: f("2026-10-02T11:56:00Z") } }, pedidosAbiertos: 37,
     codigos: { _count: { _all: 3020 }, _max: { sincronizadoEn: null } }, unidades: 18,
     estados: [{ entidad: "codigosBarras", empresa: "PRUEBAS", actualizadoEn: f("2026-10-01T10:00:00Z") },
-      { entidad: "pedidos", empresa: "PRUEBAS", actualizadoEn: f("2026-10-02T11:50:00Z") }],
+      { entidad: "pedidos", empresa: "PRUEBAS", actualizadoEn: f("2026-10-02T11:50:00Z") },
+      { entidad: "salidasInventario", empresa: "PRUEBAS", actualizadoEn: f("2026-10-02T08:00:00Z") },
+      { entidad: "entradasCompra", empresa: "PRUEBAS", actualizadoEn: f("2026-10-02T07:00:00Z") }],
+    almacenes: { _count: { _all: 20 }, _max: { sincronizadoEn: f("2026-10-02T06:00:00Z") } },
+    existencias: { productos: 812, actualizadoEn: f("2026-10-02T11:40:00Z") },
+    documentos: { _count: { _all: 64 }, _max: { sincronizadoEn: null } },
   }) };
   const r = await estadoSincronizacion({ repo: repoFalso });
   assert.equal(r.empresa, "PRUEBAS");
   assert.deepEqual(r.entidades.map((e) => [e.entidad, e.registros, e.ultimaRecepcion?.toISOString() ?? null]), [
     ["pedidos", 37, "2026-10-02T11:56:00.000Z"], ["clientes", 1240, "2026-10-02T09:00:00.000Z"],
     ["productos", 2315, "2026-10-02T09:00:00.000Z"], ["unidades", 18, null], ["codigosBarras", 3020, "2026-10-01T10:00:00.000Z"],
+    ["almacenes", 20, "2026-10-02T06:00:00.000Z"], ["existencias", 812, "2026-10-02T11:40:00.000Z"],
+    // Documentos: el lote más reciente de cualquiera de los cinco tipos.
+    ["documentos", 64, "2026-10-02T08:00:00.000Z"],
   ]);
 });
 

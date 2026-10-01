@@ -1,8 +1,11 @@
 import { pedidosRepository as repo } from "./pedidos.repository.js";
 import { comprobarPedidoElegible, lineasParaPreparar } from "../picking/picking.pedido.js";
 import { AppError } from "../../shared/errors/AppError.js";
+import { almacenesParaPedidos } from "../inventario/inventario.service.js";
 export async function listarPedidos(query) {
-  const filas = await repo.listar(query);
+  // El supervisor puede dejar en la lista solo los pedidos de los almacenes de esta bodega.
+  const almacenes = await almacenesParaPedidos();
+  const filas = await repo.listar({ ...query, almacenes });
   const pagina = filas.slice(0, query.limit);
   // Un pedido preparado sigue abierto hasta que SAP registra la entrega; la bodega lo ve como "Preparado".
   const preparaciones = pagina.length ? await repo.preparaciones(pagina.map((p) => p.docEntry)) : [];

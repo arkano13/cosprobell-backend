@@ -599,3 +599,30 @@ Desplegar primero el backend (tiene migración) y después instalar la app 1.3.0
 Verificación: 351/351 pruebas del backend (12 nuevas de integración del panel) y 21/21 de la interfaz de la app. Recorrido real con Electron contra PostgreSQL y este backend: un operador no ve el panel y recibe 403; confirmación masiva de 2 códigos Manual a nombre de la supervisora; búsqueda con el código y confirmación individual; etiqueta que cambió en SAP; desbloqueo, alta con aviso de PIN fácil, cambio de PIN que cierra sesiones y desactivación; revisión con el cambio de cantidad (6 → 8), reinicio y nueva preparación con los datos actuales; aviso de códigos con más de 24 h sin datos; pedido con unidad Manual escaneado hasta completar la línea. Auditoría axe-core WCAG 2.2 A/AA sin problemas en las cuatro pestañas.
 
 Pendiente: saber cuántos códigos de barras trae SAP de Cosprobell (la ficha de producto revisada no tenía); sin códigos no hay nada que escanear. Frecuencias del puente y consultas por fecha de actualización, con recorrido completo nocturno a las 2:00 a. m., a decidir con las mediciones.
+
+## 28. Inventario de dos bodegas y códigos de barras desde la app (2026-10-01)
+
+SAP de Cosprobell no trae códigos de barras en los artículos (solo uno, de prueba), así que no había nada que escanear; y la bodega quería ordenar su inventario. Decisiones del usuario:
+
+- **Códigos: "las dos"**. El supervisor registra códigos desde la app (quedan con la unidad Manual y ya confirmados como unidad) y también se usa el código de la ficha del artículo de SAP (`Items.BarCode`).
+- **Dos bodegas**: la grande guarda las cajas por lote (cada caja con su etiqueta CJ-000123 impresa por la app); la pequeña, las unidades sueltas de donde salen los pedidos. SAP manda y la app nunca escribe en SAP; SAP no tiene lotes ni cajas. Sin "dar de baja": lo vencido o dañado se registra en SAP y aparece en "Por descontar", donde se elige de qué lote salió (lista de lotes).
+- **Varios almacenes en SAP** (el catálogo recibido tenía 20 de los ~100 códigos que usan los artículos: la Service Layer pagina de a 20 y el puente recorre todas las páginas). El supervisor marca los almacenes de esta bodega y el inventario compara solo contra ellos. Opción para ver en Pedidos solo los de esos almacenes.
+
+Backend:
+
+- Migración `20261002090000_inventario_bodegas` (solo agrega): `inventario_productos`, `inventario_cajas` (con CHECK de unidades no negativas), `inventario_movimientos`, `inventario_descuentos`, `documentos_stock` y sus líneas, `configuracion`; `bodegas.deEstaBodega` y `sincronizadoEn`; `productos_codigos_barras.origen`, `registradoPor` y `creadoEn`.
+- Rutas `/inventario/*` (operador o aplicación; cambiar lote, contar la pequeña y corregir una caja, solo supervisor) y `/supervisor/almacenes` y `/supervisor/codigos`. Detalle y reglas en `docs/INVENTARIO.md`.
+- Ecuación por producto: SAP (almacenes marcados) = grande + pequeña + preparado sin entregar + diferencia. Diferencia positiva: por ubicar (o sin contar); negativa: por descontar. Lo recibido antes que SAP se anota y se cierra solo. 15 minutos de espera tras un cambio en SAP.
+- Al finalizar una preparación, lo escaneado sale de la pequeña en la misma transacción.
+- Sincronización de almacenes, existencias por almacén y cinco tipos de documentos de stock (entradas por compra, entradas y salidas de mercancías, devoluciones a proveedor y de clientes). La existencia que cambia en los almacenes marcados avisa al inventario. El panel de Sincronización los muestra.
+- Candado por producto en cada operación; la reposición concurrente sobre una caja solo deja pasar una.
+
+Puente: entidades `almacenes`, `existencias` (20 artículos por página, solo almacenes con algún valor) y los cinco documentos (10 por página, últimos `BRIDGE_DOCUMENTOS_DIAS` días, 30 por defecto). Los documentos que revierten una cancelación llegan sin `Cancelled` (`CancelStatus` `csCancellation`): se marcan anulados, encontrado al probar con las muestras reales. Frecuencias sugeridas en `INSTALAR_PUENTE_WINDOWS.md`.
+
+App de escritorio 1.4.0: secciones Pedidos, Inventario y Panel; inicio del inventario con lector, recibir/ubicar/contar con etiquetas Code 128 e impresión, reponer, producto por lote y caja, por descontar con elección de lote y cambio de lote, por vencer, sin contar y movimientos; en el panel, Almacenes y Registrar un código.
+
+Desplegar primero el backend (tiene migración: en Railway no hay comando previo al despliegue, hay que aplicarla con `npx prisma migrate deploy`), después el puente nuevo y por último la app 1.4.0. Luego, el supervisor marca los almacenes.
+
+Verificación: 391/391 pruebas del backend y 26/26 de la app. Recorrido contra PostgreSQL real del backend completo (sincronización, conteo inicial, recepción con adelanto que SAP cierra después, reposición, picking con entrega en SAP, descuento con espera y cantidad exacta, cambio de lote, conteo, corrección, consultas, códigos, filtro de pedidos y cinco reposiciones simultáneas sobre una caja). Encontró y se corrigió un `BigInt` de una consulta que impedía responder la ficha del producto. Constructores del puente probados con las muestras reales de SAP (20 almacenes, existencias con 99 a 100 almacenes por artículo, entradas de compra con cancelaciones). Recorrido con la app Electron contra este backend: elegir almacenes, contar en cajas con 4 etiquetas cuyo código de barras se leyó con un decodificador (zxing), impresión solo de etiquetas, ubicar con confirmación de lo que excede, reponer con sugerencia de la caja que vence antes, descontar el lote vencido, cambiar lote, por vencer, registrar un código y su rechazo en otro producto, y el operador sin correcciones. Auditoría axe-core WCAG 2.2 A/AA sin problemas en todas las pantallas nuevas.
+
+Pendiente: el permiso "Iniciar sesión como proceso por lotes" de la cuenta del puente (lo gestiona sistemas por GPO). Elegir las frecuencias del puente. Probar la impresión con la impresora real de la bodega. Cuando se pase a la sociedad de producción de SAP, usar una base nueva.

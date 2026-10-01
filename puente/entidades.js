@@ -8,6 +8,12 @@ import { loteUnidadesSchema } from "../src/modules/sincronizacion/unidades.schem
 import { construirLoteUnidades } from "./unidades.js";
 import { loteCodigosBarrasSchema } from "../src/modules/sincronizacion/codigosBarras.schemas.js";
 import { construirLoteCodigosBarras } from "./codigosBarras.js";
+import { loteAlmacenesSchema } from "../src/modules/sincronizacion/almacenes.schemas.js";
+import { construirLoteAlmacenes } from "./almacenes.js";
+import { loteExistenciasSchema } from "../src/modules/sincronizacion/existencias.schemas.js";
+import { construirLoteExistencias } from "./existencias.js";
+import { loteDocumentosSchema } from "../src/modules/sincronizacion/documentos.schemas.js";
+import { crearConstructorDocumentos } from "./documentos.js";
 // recurso, campos, claveSap y filtro describen la consulta a Service Layer (recorrido por clave ascendente).
 // nombre es a la vez la ruta del backend, el campo del lote y el archivo de estado local.
 export const PRODUCTOS = { nombre: "productos", recurso: "Items", claveSap: "ItemCode", claveLocal: "itemCode",
@@ -37,5 +43,31 @@ export const CODIGOS_BARRAS = { nombre: "codigosBarras", recurso: "BarCodes", cl
   dependencias: ["productos", "unidades"],
   claveNumerica: true, campos: ["AbsEntry", "ItemNo", "Barcode", "UoMEntry"], filtro: null, depurarRetirados: true,
   schema: loteCodigosBarrasSchema, construirLote: construirLoteCodigosBarras };
-// Orden de cada ciclo: los códigos dependen de los productos y los pedidos de los clientes.
-export const ENTIDADES = [CLIENTES, PRODUCTOS, UNIDADES, CODIGOS_BARRAS, PEDIDOS];
+// Almacenes de SAP (Warehouses). El supervisor marca en la app cuáles son de esta bodega.
+export const ALMACENES = { nombre: "almacenes", recurso: "Warehouses", claveSap: "WarehouseCode", claveLocal: "warehouseCode",
+  campos: ["WarehouseCode", "WarehouseName", "Inactive"], filtro: null,
+  schema: loteAlmacenesSchema, construirLote: construirLoteAlmacenes };
+// Existencia por almacén de los artículos de inventario. Cada artículo trae una fila por almacén de la empresa,
+// por eso la página es más chica.
+export const EXISTENCIAS = { nombre: "existencias", recurso: "Items", claveSap: "ItemCode", claveLocal: "itemCode",
+  dependencias: ["productos", "almacenes"], tamanoPagina: 20,
+  campos: ["ItemCode", "ItemWarehouseInfoCollection"], filtro: "InventoryItem eq 'tYES'",
+  schema: loteExistenciasSchema, construirLote: construirLoteExistencias };
+// Documentos que mueven existencias, de los últimos BRIDGE_DOCUMENTOS_DIAS días (30 por defecto). Sirven para
+// explicar en el inventario por qué SAP tiene más o menos que la bodega. Los de marketing pueden ser de servicios.
+const fechaDesde = (config) => new Date(Date.now() - (config.documentosDias ?? 30) * 86_400_000).toISOString().slice(0, 10);
+const documento = (nombre, recurso, { marketing }) => ({ nombre, recurso, claveSap: "DocEntry", claveLocal: "docEntry",
+  claveNumerica: true, tamanoPagina: 10,
+  campos: ["DocEntry", "DocNum", "DocDate", "Comments", "Cancelled", "CancelStatus", "DocumentLines"],
+  filtro: (config) => `${marketing ? "DocType eq 'dDocument_Items' and " : ""}DocDate ge '${fechaDesde(config)}'`,
+  schema: loteDocumentosSchema(nombre), construirLote: crearConstructorDocumentos(nombre) });
+export const DOCUMENTOS = [
+  documento("entradasCompra", "PurchaseDeliveryNotes", { marketing: true }),
+  documento("entradasInventario", "InventoryGenEntries", { marketing: false }),
+  documento("salidasInventario", "InventoryGenExits", { marketing: false }),
+  documento("devolucionesProveedor", "PurchaseReturns", { marketing: true }),
+  documento("devolucionesCliente", "Returns", { marketing: true }),
+];
+// Orden de cada ciclo: los códigos dependen de los productos, los pedidos de los clientes y las existencias
+// de los productos y los almacenes.
+export const ENTIDADES = [CLIENTES, PRODUCTOS, UNIDADES, CODIGOS_BARRAS, PEDIDOS, ALMACENES, EXISTENCIAS, ...DOCUMENTOS];

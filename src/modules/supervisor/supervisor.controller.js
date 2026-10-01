@@ -2,6 +2,9 @@ import { listarEtiquetas, confirmarEtiqueta, revocarConfirmacion, contarEtiqueta
 import { listarOperadoresAdmin, crearOperador, cambiarPin, desbloquear, cambiarActivo } from "../operadores/operadores.admin.js";
 import { listarRevisiones, anularRevision } from "./revisiones.service.js";
 import { estadoSincronizacion } from "./sincronizacion.service.js";
+import { listarAlmacenes, elegirAlmacenes as elegir } from "../inventario/inventario.service.js";
+import { inventarioRepository } from "../inventario/inventario.repository.js";
+import { registrarCodigo as registrar } from "../etiquetas/codigos.service.js";
 
 const manejar = (accion) => async (req, res, next) => {
   try { res.json(await accion(req)); } catch (error) { next(error); }
@@ -9,11 +12,13 @@ const manejar = (accion) => async (req, res, next) => {
 const quien = (req) => ({ aplicacion: req.appNombre ?? null });
 
 export async function resumenSupervisor() {
-  const [etiquetas, revisiones, operadores] = await Promise.all([contarEtiquetas(), listarRevisiones(), listarOperadoresAdmin()]);
+  const [etiquetas, revisiones, operadores, almacenes] = await Promise.all([contarEtiquetas(), listarRevisiones(), listarOperadoresAdmin(),
+    inventarioRepository.almacenesDeEstaBodega()]);
   return { data: {
     etiquetas,
     revisiones: { enRevision: revisiones.enRevision.length, conDiferencias: revisiones.conDiferencias.length, sinEntrega: revisiones.sinEntrega.length },
     operadores: { total: operadores.length, bloqueados: operadores.filter((o) => o.estado === "bloqueado" || o.estado === "pausa").length },
+    almacenes: { elegidos: almacenes.length },
   } };
 }
 
@@ -30,3 +35,6 @@ export const activo = manejar(async (req) => ({ data: await cambiarActivo(req.pa
 export const revisiones = manejar(async () => ({ data: await listarRevisiones() }));
 export const anulacion = manejar(async (req) => ({ data: await anularRevision(req.params.id) }));
 export const sincronizacion = manejar(async () => ({ data: await estadoSincronizacion() }));
+export const almacenes = manejar(() => listarAlmacenes());
+export const elegirAlmacenes = manejar((req) => elegir(req.body, quien(req)));
+export const registrarCodigo = manejar((req) => registrar(req.body, quien(req)));

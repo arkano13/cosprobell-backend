@@ -8,7 +8,7 @@ function vista(f) {
     : f.esUnidadIndividual ? "unidad_individual" : "no_es_unidad";
   return {
     id: f.id, itemCode: f.itemCode, itemName: f.itemName, codigo: f.codigo, uomEntry: f.uomEntry,
-    unidad: f.uomCode ? { code: f.uomCode, nombre: f.uomNombre } : null, sapAbsEntry: f.sapAbsEntry, estado,
+    unidad: f.uomCode ? { code: f.uomCode, nombre: f.uomNombre } : null, sapAbsEntry: f.sapAbsEntry, origen: f.origen ?? "sap", estado,
     confirmacion: f.confirmada ? { esUnidadIndividual: f.esUnidadIndividual, confirmadaEn: f.confirmadaEn,
       confirmadaPor: f.confirmadaPor, observacion: f.observacion } : null,
   };
