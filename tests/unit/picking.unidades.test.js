@@ -23,7 +23,7 @@ const casos = [
     esperado: { uomEntry: 1, uomCode: "UN" },
   },
   {
-    nombre: "rechaza iniciar con referencia manual sin interpretarla",
+    nombre: "acepta la unidad Manual de SAP como unidad del artículo",
     entrada: { uomEntry: -1, uomCode: "Manual" },
     esperado: { uomEntry: -1, uomCode: "Manual" },
   },
@@ -75,7 +75,7 @@ for (const caso of casos) {
       prisma.pickingPedido.create = crearOriginal;
     });
 
-    if (caso.entrada.uomEntry === undefined || caso.entrada.uomEntry < 0) {
+    if (caso.entrada.uomEntry === undefined) {
       await assert.rejects(iniciarPicking({ pedidoDocEntry: 9001 }), { code: "UNIDAD_NO_DEFINIDA" });
       assert.equal(datosGuardados, undefined);
       assert.deepEqual(pedido, original);

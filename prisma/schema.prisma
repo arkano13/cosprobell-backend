@@ -694,6 +694,8 @@ model Operador {
   nombre           String           @unique
   pinHash          String
   activo           Boolean          @default(true)
+  // "operador" o "supervisor". El supervisor además administra etiquetas, operadores y revisiones.
+  rol              String           @default("operador")
   // PIN incorrectos seguidos. A los 5 se bloquea 15 minutos; a los 10, hasta que el supervisor lo desbloquee.
   intentosFallidos Int              @default(0)
   bloqueadoHasta   DateTime?

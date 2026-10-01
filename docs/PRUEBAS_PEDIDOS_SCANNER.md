@@ -16,18 +16,18 @@ Ambas horas son del reloj del backend, así que la comparación no depende del r
 
 Una actualización que cambie cliente, estado, cancelación, producto, bodega, cantidades o unidades de un pedido marca sus sesiones activas como `requiere_revision`. El bloqueo usa el mismo orden que iniciar picking: cabecera y después sesiones. Un escaneo simultáneo termina antes de la actualización o encuentra la sesión bloqueada después. La confirmación de un escaneo ya registrado sigue siendo recuperable con el mismo `operacionId`.
 
-No hay una función para reanudar automáticamente una sesión en revisión. Tampoco se reinicia un pedido finalizado: conservar esa restricción hasta definir entregas parciales y revisión supervisada.
+No hay una función para reanudar automáticamente una sesión en revisión: el supervisor la anula desde su panel (`POST /supervisor/revisiones/:id/anulacion`, estado `anulada`) y el pedido se vuelve a preparar con los datos actuales. Las sesiones anuladas no bloquean un nuevo inicio. No se reinicia un pedido finalizado: conservar esa restricción hasta definir entregas parciales.
 
 ## Reglas de preparación
 
 - Solo pedidos de artículos abiertos y no cancelados.
 - Solo líneas abiertas con cantidad pendiente positiva y entera.
 - Se usa `RemainingOpenQuantity`, no la cantidad original del pedido.
-- Unidad conocida: `Manual`, ausente o negativa bloquea la preparación.
+- Unidad conocida: la unidad **Manual** de SAP (`UoMEntry` -1, factor 1) cuenta como la unidad del artículo; ausente u otro valor negativo bloquea la preparación.
 - Cantidad de venta e inventario deben coincidir, tanto total como pendiente. Una conversión diferente requiere una definición posterior; no se convierte automáticamente.
 - Cada etiqueta todavía debe estar confirmada localmente como unidad individual y coincidir con la unidad de la línea.
 
-Esto es deliberadamente conservador: los ejemplos actuales de SAP están cerrados y utilizan unidades Manual. Sirven para verificar la importación, pero no aprobarán un picking real sin datos adecuados.
+Cosprobell usa la unidad Manual en todos sus artículos y pedidos, así que la regla Manual = unidad es la que habilita el picking real. La conversión sigue sin hacerse: si la cantidad de inventario no coincide con la de venta, la línea se bloquea igual.
 
 ## Consultas para la futura pantalla
 
@@ -53,9 +53,9 @@ Todas requieren `X-API-Key` de la aplicación; la clave del puente no sirve para
 Un código importado de SAP no sirve para picking hasta que alguien confirme que corresponde a **una unidad individual** del producto y de la unidad de medida indicados. La confirmación guarda una foto (producto, código, unidad), la hora y la aplicación que confirmó. Si después SAP cambia ese código, la etiqueta pasa a `desactualizada`, vuelve a aparecer entre las pendientes y el escaneo responde `CONFIRMACION_DESACTUALIZADA` hasta confirmarla de nuevo.
 
 - Estados en `GET /etiquetas`: `sin_confirmar`, `desactualizada`, `unidad_individual` y `no_es_unidad`. Se muestran el producto, el código y la unidad (`code` y nombre del catálogo de SAP).
-- No se confirma como unidad individual un código con unidad "Manual" (-1) o sin unidad (`UNIDAD_NO_DEFINIDA`); sí se puede marcar como "no es unidad".
+- Un código con unidad "Manual" (-1) se confirma como unidad individual del artículo; desde el panel del supervisor se pueden confirmar todos juntos. Sin unidad (`UNIDAD_NO_DEFINIDA`) no se confirma como unidad individual; sí se puede marcar como "no es unidad".
 - Los códigos retirados en SAP no aparecen ni se pueden confirmar (`ETIQUETA_RETIRADA`).
-- Permiso: variable `ETIQUETAS_APPS_AUTORIZADAS` del backend, con los nombres de las API keys autorizadas separados por coma (por ejemplo `supervisor-etiquetas`). Si está vacía, nadie puede confirmar (`FUNCION_NO_HABILITADA`). Conviene que el escáner de bodega use otra API key sin este permiso. La API key identifica la aplicación, no a la persona.
+- Permiso en `/etiquetas`: variable `ETIQUETAS_APPS_AUTORIZADAS` del backend, con los nombres de las API keys autorizadas separados por coma (por ejemplo `supervisor-etiquetas`). Si está vacía, nadie puede confirmar (`FUNCION_NO_HABILITADA`). Conviene que el escáner de bodega use otra API key sin este permiso. La API key identifica la aplicación, no a la persona. Desde la app de escritorio confirma el supervisor con su sesión (`/supervisor/etiquetas`), y queda su nombre.
 
 `preparacion.datosValidos` comprueba datos del pedido, no permisos de despacho ni disponibilidad de etiquetas ni sesiones previas. El inicio y el escaneo realizan sus propias comprobaciones.
 

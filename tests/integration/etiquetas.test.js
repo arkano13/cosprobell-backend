@@ -75,7 +75,6 @@ test("confirmar guarda la foto actual del código y quién confirmó", async (t)
 });
 
 for (const [nombre, etiqueta, body, status, code] of [
-  ["unidad Manual como individual", { id: 3, itemCode: "P1", codigo: "7401", uomEntry: -1, retiradoEnSap: false }, { esUnidadIndividual: true }, 409, "UNIDAD_NO_DEFINIDA"],
   ["código sin unidad como individual", { id: 3, itemCode: "P1", codigo: "7401", uomEntry: null, retiradoEnSap: false }, { esUnidadIndividual: true }, 409, "UNIDAD_NO_DEFINIDA"],
   ["código retirado en SAP", { id: 3, itemCode: "P1", codigo: "7401", uomEntry: 1, retiradoEnSap: true }, { esUnidadIndividual: false }, 409, "ETIQUETA_RETIRADA"],
   ["código inexistente", null, { esUnidadIndividual: false }, 404, "ETIQUETA_NO_ENCONTRADA"],
@@ -87,6 +86,15 @@ for (const [nombre, etiqueta, body, status, code] of [
     assert.deepEqual(f.guardadas, []);
   });
 }
+
+test("la unidad Manual se puede confirmar como unidad individual", async (t) => {
+  const headers = comoApp(t, "supervisor-etiquetas");
+  const f = simularBloqueo(t, { id: 3, itemCode: "P1", codigo: "7401", uomEntry: -1, retiradoEnSap: false });
+  t.mock.method(repo, "obtener", async () => fila({ uomEntry: -1, confirmada: true, esUnidadIndividual: true }));
+  const r = await confirmar(headers, 3, { esUnidadIndividual: true });
+  assert.equal(r.status, 200); assert.equal((await r.json()).data.estado, "unidad_individual");
+  assert.equal(f.guardadas[0].uomEntryConfirmado, -1);
+});
 
 test("la unidad Manual sí puede marcarse como 'no es unidad'", async (t) => {
   const headers = comoApp(t, "supervisor-etiquetas");

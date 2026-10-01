@@ -1,10 +1,14 @@
 import { AppError } from "../../shared/errors/AppError.js";
 
-function unidadConocida(valor) {
+// SAP usa -1 ("Manual") cuando el artículo no tiene grupo de unidades: se vende de a una unidad del artículo.
+// Se acepta como unidad conocida: la equivalencia 1:1 la confirman las cantidades de venta e inventario de la
+// línea (lineasParaPreparar) y cada código de barras lo confirma una persona como unidad individual.
+export const UNIDAD_MANUAL = -1;
+
+export function unidadConocida(valor) {
   return (
     Number.isInteger(valor) &&
-    valor >= 0 &&
-    valor <= 2_147_483_647
+    (valor === UNIDAD_MANUAL || (valor >= 0 && valor <= 2_147_483_647))
   );
 }
 

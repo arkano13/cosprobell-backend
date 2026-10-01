@@ -13,6 +13,8 @@ export const INTENTOS_PARA_BLOQUEO = 10;
 export const BLOQUEO_INDEFINIDO = new Date("9999-12-31T00:00:00.000Z");
 
 const reloj = () => new Date();
+export const ROLES = ["operador", "supervisor"];
+const datosOperador = (o) => ({ id: o.id, nombre: o.nombre, rol: o.rol ?? "operador" });
 
 export function listarOperadores({ repo = operadoresRepository } = {}) {
   return repo.listarActivos();
@@ -46,7 +48,7 @@ export async function iniciarSesion({ operadorId, pin, aplicacion = null }, { re
   const token = randomBytes(32).toString("hex");
   const expiraEn = new Date(momento.getTime() + DURACION_SESION_MS);
   await repo.crearSesion({ operadorId: operador.id, tokenHash: hashToken(token), aplicacion, expiraEn });
-  return { token, expiraEn, operador: { id: operador.id, nombre: operador.nombre } };
+  return { token, expiraEn, operador: datosOperador(operador) };
 }
 
 // Devuelve el operador de una sesión vigente, o null si el token no sirve.
@@ -54,7 +56,7 @@ export async function autenticarSesion(token, { repo = operadoresRepository, aho
   if (typeof token !== "string" || !/^[0-9a-f]{64}$/.test(token)) return null;
   const sesion = await repo.buscarSesion(hashToken(token));
   if (!sesion || sesion.cerradaEn || sesion.expiraEn <= ahora() || !sesion.operador?.activo) return null;
-  return { sesionId: sesion.id, operador: { id: sesion.operador.id, nombre: sesion.operador.nombre } };
+  return { sesionId: sesion.id, operador: datosOperador(sesion.operador) };
 }
 
 export async function cerrarSesion(sesionId, { repo = operadoresRepository, ahora = reloj } = {}) {

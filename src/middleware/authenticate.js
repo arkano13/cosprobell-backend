@@ -61,5 +61,11 @@ export function soloAplicaciones(req, res, next) {
   return next();
 }
 
+// Panel del supervisor: solo un operador con rol supervisor y sesión iniciada con PIN.
+export function soloSupervisor(req, res, next) {
+  if (req.operador?.rol !== "supervisor") return res.status(403).json({ error: "Solo un supervisor puede usar esta función" });
+  return next();
+}
+
 // Credencial independiente de las aplicaciones de consulta.
 export { requireBridgeAuth } from "./bridgeAuth.js";

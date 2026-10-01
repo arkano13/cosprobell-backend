@@ -131,7 +131,8 @@ const rechazos = [
     const p = producto(); p.codigosBarras[0].uomEntry = 2; return { productos: [p] };
   } },
   { nombre: "producto ajeno", code: "PRODUCTO_FUERA_DEL_PEDIDO", preparar: () => ({ lineas: [linea({ itemCode: "OTRO" })] }) },
-  { nombre: "unidad manual", code: "UNIDAD_NO_DEFINIDA", preparar: () => ({ lineas: [linea({ uomEntry: -1 })] }) },
+  { nombre: "unidad no definida", code: "UNIDAD_NO_DEFINIDA", preparar: () => ({ lineas: [linea({ uomEntry: null })] }) },
+  { nombre: "línea Manual con etiqueta de otra unidad", code: "UNIDAD_INCOMPATIBLE", preparar: () => ({ lineas: [linea({ uomEntry: -1 })] }) },
   { nombre: "unidad incompatible", code: "UNIDAD_INCOMPATIBLE", preparar: () => ({ lineas: [linea({ uomEntry: 2 })] }) },
   { nombre: "cantidad fraccionaria", code: "CANTIDADES_INVALIDAS", preparar: () => ({ lineas: [linea({ cantidadPedida: 1.5 })] }) },
   { nombre: "cantidad completa", code: "CANTIDAD_COMPLETADA", preparar: () => ({ lineas: [linea({ cantidadEscaneada: 3 })] }) },

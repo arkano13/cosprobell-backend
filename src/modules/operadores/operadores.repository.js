@@ -30,7 +30,7 @@ export const operadoresRepository = {
   },
 
   buscarSesion(tokenHash) {
-    return prisma.sesionOperador.findUnique({ where: { tokenHash }, include: { operador: { select: { id: true, nombre: true, activo: true } } } });
+    return prisma.sesionOperador.findUnique({ where: { tokenHash }, include: { operador: { select: { id: true, nombre: true, activo: true, rol: true } } } });
   },
 
   cerrarSesion(id, cuando) {

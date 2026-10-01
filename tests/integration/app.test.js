@@ -687,7 +687,8 @@ const rechazosHttp = [
   { nombre: "etiqueta desconocida", cambios: { desconocida: true }, status: 404 },
   { nombre: "caja", cambios: { caja: true }, status: 409 },
   { nombre: "etiqueta sin confirmar", cambios: { sinConfirmar: true }, status: 409 },
-  { nombre: "unidad manual", cambios: { linea: { uomEntry: -1 } }, status: 409 },
+  { nombre: "unidad no definida", cambios: { linea: { uomEntry: null } }, status: 409 },
+  { nombre: "línea Manual con etiqueta de otra unidad", cambios: { linea: { uomEntry: -1 } }, status: 409 },
   { nombre: "cantidad completa", cambios: { linea: { cantidadEscaneada: 3 } }, status: 409 },
   { nombre: "sesión cerrada", cambios: { estado: "completo" }, status: 400 },
 ];

@@ -16,6 +16,7 @@ import pagosRoutes from "./modules/pagos/pagos.routes.js";
 import errorHandler from "./middleware/errorHandler.js";
 import { requireAppAuth, soloAplicaciones } from "./middleware/authenticate.js";
 import operadoresRoutes from "./modules/operadores/operadores.routes.js";
+import supervisorRoutes from "./modules/supervisor/supervisor.routes.js";
 
 const app = express();
 app.use(helmet());
@@ -30,6 +31,8 @@ app.use(operadoresRoutes);
 app.use(requireAppAuth);
 app.use(pickingRoutes);
 app.use(pedidosRoutes);
+// Panel del supervisor (rol supervisor con sesión de PIN).
+app.use("/supervisor", supervisorRoutes);
 // Un operador solo llega hasta pedidos y picking.
 app.use(soloAplicaciones);
 app.use(productosRoutes);
