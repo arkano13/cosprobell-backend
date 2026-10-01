@@ -93,7 +93,7 @@ Solo lectura de SAP. Sirven para comparar el inventario de la bodega con SAP; el
 
 `POST /integracion/existencias` recibe la existencia de un artículo en cada almacén (`Items.ItemWarehouseInfoCollection`): `{ "itemCode": "P1", "almacenes": [{ "warehouseCode": "V05", "inStock": 10, "committed": 2, "ordered": 0 }] }`. Reglas:
 
-- Reemplaza las filas del artículo: un almacén que no llega queda en cero (se borra su fila). El puente envía solo los almacenes con algún valor distinto de cero; un artículo sin ninguno llega con `almacenes: []`.
+- Reemplaza las filas del artículo: un almacén que no llega queda en cero (se borra su fila). Conviene enviar solo los almacenes con algún valor distinto de cero; un artículo sin ninguno se envía con `almacenes: []`.
 - El producto y los almacenes deben estar sincronizados: si no, `409 PRODUCTO_NO_SINCRONIZADO` o `409 ALMACEN_NO_SINCRONIZADO`.
 - Si cambia lo que suman los almacenes marcados de esta bodega, avisa al inventario: el producto queda "SAP actualizándose" 15 minutos y, si subió, descuenta primero lo que la bodega recibió antes que SAP.
 - Observar existencias sin cambios comprueba el producto y actualiza `actualizadoEn` de sus filas (lo usa el panel de Sincronización).

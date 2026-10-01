@@ -52,7 +52,7 @@ Con **En Pedidos, mostrar solo los pedidos que salen de los almacenes marcados**
 
 ## Datos que necesita del puente
 
-Almacenes (`Warehouses`), existencias por almacén (`Items.ItemWarehouseInfoCollection`, solo artículos de inventario) y los documentos que mueven stock de los últimos 30 días (entradas por compra, entradas y salidas de mercancías, devoluciones). Frecuencias sugeridas y detalle en `INSTALAR_PUENTE_WINDOWS.md` y `INTEGRACION_PUENTE.md`.
+Almacenes (`Warehouses`), existencias por almacén (`Items.ItemWarehouseInfoCollection`, solo artículos de inventario) y, para explicar diferencias, los documentos que mueven stock (entradas por compra, entradas y salidas de mercancías, devoluciones). El backend ya los recibe; formato en `INTEGRACION_PUENTE.md`. El envío desde el puente está pendiente.
 
 ## Tablas
 
