@@ -78,6 +78,11 @@ export const almacenesSchema = z.object({
   almacenPequena: codigoAlmacen.nullable().optional(),
 }).strict();
 export const bodegaParamsSchema = z.object({ bodega: z.enum(["grande", "pequena"]) });
+export const almacenParamsSchema = z.object({ codigo: codigoAlmacen });
+export const almacenQuerySchema = z.object({
+  buscar: z.string().trim().min(1).max(60).optional(),
+  pagina: z.coerce.number().int().min(0).max(10_000).default(0), limit: limit(50),
+}).strict();
 export const bodegaQuerySchema = z.object({
   buscar: z.string().trim().min(1).max(60).optional(), filtro: z.enum(["todos", "registrados", "sin_registrar"]).default("todos"),
   pagina: z.coerce.number().int().min(0).max(10_000).default(0), limit: limit(50),

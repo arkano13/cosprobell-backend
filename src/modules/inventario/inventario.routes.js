@@ -14,6 +14,8 @@ router.get("/pendientes", c.pendientes);
 router.get("/pendientes/inicial", validate({ query: v.conteoInicialQuerySchema }), c.conteoInicial);
 router.get("/existencias", validate({ query: v.existenciasQuerySchema }), c.existencias);
 router.get("/bodegas/:bodega", validate({ params: v.bodegaParamsSchema, query: v.bodegaQuerySchema }), c.bodega);
+router.get("/almacenes", c.almacenes);
+router.get("/almacenes/:codigo/productos", validate({ params: v.almacenParamsSchema, query: v.almacenQuerySchema }), c.productosDeAlmacen);
 router.get("/cajas/:codigo", validate({ params: v.cajaParamsSchema }), c.caja);
 router.get("/por-vencer", validate({ query: v.porVencerQuerySchema }), c.porVencer);
 router.get("/movimientos", validate({ query: v.movimientosQuerySchema }), c.movimientos);

@@ -460,6 +460,34 @@ export async function elegirAlmacenes({ almacenes, pedidosSoloDeEstaBodega, alma
   return listarAlmacenes();
 }
 
+// Almacenes de SAP para elegir cuál ver: los marcados primero, después los que tienen existencia. Dice qué bodega es
+// cada uno, si está asignado.
+export async function listarAlmacenesSap() {
+  const almacenes = await repo.almacenes();
+  const porBodega = await almacenesPorBodega(almacenes.filter((a) => a.deEstaBodega).map((a) => a.warehouseCode));
+  const bodega = (codigo) => (codigo === porBodega.grande ? "grande" : codigo === porBodega.pequena ? "pequena" : null);
+  return { data: almacenes.filter((a) => a.deEstaBodega || a.productos > 0).map((a) => ({ warehouseCode: a.warehouseCode,
+    warehouseName: a.warehouseName, inactive: a.inactive, deEstaBodega: a.deEstaBodega, bodega: bodega(a.warehouseCode),
+    productos: a.productos, unidades: a.unidades })) };
+}
+
+// Los productos que SAP tiene en un almacén: en stock, comprometido (en pedidos), pedido (a proveedores) y disponible.
+export async function listarProductosDeAlmacen(codigo, { buscar, pagina, limit }) {
+  const { data: almacenes } = await listarAlmacenesSap();
+  const almacen = almacenes.find((a) => a.warehouseCode === codigo)
+    ?? (await repo.almacenes()).find((a) => a.warehouseCode === codigo);
+  if (!almacen) throw falla("ALMACEN_DESCONOCIDO", 404, `Almacén desconocido: ${codigo}`);
+  const [filas, existenciasSapAl] = await Promise.all([repo.productosDeAlmacen(codigo), repo.existenciasSapAl()]);
+  const texto = buscar?.toLowerCase();
+  const redondo = (n) => Math.round((n ?? 0) * 1000) / 1000;
+  const vistas = filas.map((f) => ({ itemCode: f.itemCode, itemName: f.itemName, enStock: redondo(f.enStock), comprometido: redondo(f.comprometido),
+    pedido: redondo(f.pedido), disponible: redondo(f.enStock - f.comprometido + f.pedido) }));
+  const resumen = { productos: vistas.filter((v) => v.enStock !== 0).length, unidades: redondo(vistas.reduce((t, v) => t + v.enStock, 0)) };
+  const elegidas = vistas.filter((v) => !texto || v.itemCode.toLowerCase().includes(texto) || v.itemName.toLowerCase().includes(texto));
+  return { data: elegidas.slice(pagina * limit, (pagina + 1) * limit), total: elegidas.length, resumen, existenciasSapAl,
+    almacen: { warehouseCode: almacen.warehouseCode, warehouseName: almacen.warehouseName, deEstaBodega: almacen.deEstaBodega, bodega: almacen.bodega ?? null } };
+}
+
 // Lo que hay en la bodega grande o en la pequeña, producto por producto y lote por lote, con lo que SAP tiene en el
 // almacén asignado a esa bodega (con la fecha de las existencias). Sin almacén asignado, sap es null.
 export async function listarBodega(bodega, { buscar, filtro, pagina, limit }) {

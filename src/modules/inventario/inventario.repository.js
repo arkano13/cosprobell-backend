@@ -128,6 +128,15 @@ export const inventarioRepository = {
       ORDER BY pr."itemName", pr."itemCode"`;
   },
 
+  // Lo que SAP tiene en un almacén, producto por producto (en stock, comprometido y pedido).
+  productosDeAlmacen(codigo, db = prisma) {
+    return db.$queryRaw`
+      SELECT e."itemCode", p."itemName", e."inStock"::float AS "enStock", e.committed::float AS comprometido, e.ordered::float AS pedido
+      FROM productos_existencias e JOIN productos p ON p."itemCode" = e."itemCode"
+      WHERE e."warehouseCode" = ${codigo} AND (e."inStock" <> 0 OR e.committed <> 0 OR e.ordered <> 0)
+      ORDER BY p."itemName", e."itemCode"`;
+  },
+
   // Almacenes de SAP con lo que sirve para reconocerlos: productos con existencia, unidades y líneas de pedidos abiertos.
   almacenes(db = prisma) {
     return db.$queryRaw`
