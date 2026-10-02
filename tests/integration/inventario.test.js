@@ -372,6 +372,38 @@ test("bodega: lo que hay en la grande por producto y lote, con lo que SAP tiene 
   assert.equal((await pedir("/inventario/bodegas/otra", headers)).status, 400);
 });
 
+test("almacenes de SAP: la lista y los productos que tiene cada uno", async (t) => {
+  const headers = conSesion(t);
+  t.mock.method(repo, "almacenes", async () => [
+    { warehouseCode: "01", warehouseName: "Principal", inactive: false, deEstaBodega: true, productos: 2, unidades: 130 },
+    { warehouseCode: "02", warehouseName: "Despacho", inactive: false, deEstaBodega: true, productos: 1, unidades: 12 },
+    { warehouseCode: "V05", warehouseName: "Vendedor", inactive: false, deEstaBodega: false, productos: 1, unidades: 4 },
+    { warehouseCode: "TR", warehouseName: "Tránsito", inactive: true, deEstaBodega: false, productos: 0, unidades: 0 },
+  ]);
+  t.mock.method(repo, "almacenesDeEstaBodega", async () => ["01", "02"]);
+  t.mock.method(repo, "opcion", async () => ({ grande: "01", pequena: "02" }));
+  t.mock.method(repo, "existenciasSapAl", async () => null);
+  const pedidos = [];
+  t.mock.method(repo, "productosDeAlmacen", async (codigo) => {
+    pedidos.push(codigo);
+    return [{ itemCode: "A1", itemName: "Acondicionador", enStock: 100, comprometido: 30, pedido: 10 },
+      { itemCode: "S1", itemName: "Shampoo", enStock: 30, comprometido: 0, pedido: 0 },
+      { itemCode: "Z1", itemName: "Solo pedido", enStock: 0, comprometido: 0, pedido: 24 }];
+  });
+  // Sin almacenes vacíos que no son de esta bodega; dice qué bodega es cada uno.
+  const lista = await (await pedir("/inventario/almacenes", headers)).json();
+  assert.deepEqual(lista.data.map((a) => [a.warehouseCode, a.bodega]), [["01", "grande"], ["02", "pequena"], ["V05", null]]);
+  const r = await pedir("/inventario/almacenes/01/productos", headers);
+  assert.equal(r.status, 200);
+  const cuerpo = await r.json();
+  assert.deepEqual(cuerpo.data[0], { itemCode: "A1", itemName: "Acondicionador", enStock: 100, comprometido: 30, pedido: 10, disponible: 80 });
+  assert.deepEqual([cuerpo.total, cuerpo.resumen, cuerpo.almacen.bodega], [3, { productos: 2, unidades: 130 }, "grande"]);
+  const buscado = await (await pedir("/inventario/almacenes/V05/productos?buscar=sham", headers)).json();
+  assert.deepEqual([buscado.data.map((v) => v.itemCode), buscado.almacen.bodega, pedidos.at(-1)], [["S1"], null, "V05"]);
+  assert.equal((await pedir("/inventario/almacenes/ZZ/productos", headers)).status, 404);
+  assert.equal((await pedir("/inventario/almacenes/01/productos")).status, 401);
+});
+
 test("panel: registrar un código de barras", async (t) => {
   assert.equal((await enviar("/supervisor/codigos", conSesion(t, "operador"), "POST", { codigo: "7401", itemCode: "P1" })).status, 403);
   t.mock.restoreAll();
