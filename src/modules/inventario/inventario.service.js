@@ -7,6 +7,7 @@ import { retirarLotes, contarLotes } from "./inventario.lotes.js";
 import { clasificar, codigoCaja, repartirEnCajas, cajaParaUsarAntes, textoAsignacion } from "./inventario.calculo.js";
 
 const OPCION_FILTRAR_PEDIDOS = "pedidosSoloDeEstaBodega";
+const OPCION_ALMACENES_POR_BODEGA = "almacenesPorBodega";
 const falla = (code, statusCode, message) => new AppError({ code, statusCode, message });
 const sinProducto = () => falla("PRODUCTO_NO_ENCONTRADO", 404, "Producto no encontrado");
 const sinCaja = () => falla("CAJA_NO_ENCONTRADA", 404, "No hay una caja con ese código");
@@ -203,12 +204,23 @@ export async function listarDescuentos({ antesDe, limit }) {
 
 // Mercadería que entra: en cajas a la grande, o suelta a la grande (un bulto) o a la pequeña. Si supera lo que
 // SAP tiene por ubicar, solo se acepta confirmando que llegó antes que SAP la registre ("adelantado").
+// Cajas a crear en la grande: { unidades, lote, vencimiento, suelto }. Vacío si va a la pequeña.
+function piezasRecepcion(entrada) {
+  const { modo, lote = null, vencimiento = null } = entrada;
+  const repetir = (n, pieza) => Array.from({ length: n }, () => ({ ...pieza }));
+  if (modo === "cajas") return repetir(entrada.cajas, { unidades: entrada.unidadesPorCaja, lote, vencimiento, suelto: false });
+  if (modo === "suelto") return entrada.destino === "grande" ? [{ unidades: entrada.unidades, lote, vencimiento, suelto: true }] : [];
+  const piezas = entrada.grupos.flatMap((g) => repetir(g.cajas, { unidades: g.unidadesPorCaja, lote: g.lote ?? null,
+    vencimiento: g.vencimiento ?? null, suelto: false }));
+  const b = entrada.bulto;
+  return b ? [...piezas, { unidades: b.unidades, lote: b.lote ?? null, vencimiento: b.vencimiento ?? null, suelto: true }] : piezas;
+}
+
 export async function recibir(entrada, { aplicacion }) {
   const { itemCode, modo, lote = null, vencimiento = null, adelantar = false } = entrada;
-  const cajas = modo === "cajas" ? entrada.cajas : 1;
-  const porCaja = modo === "cajas" ? entrada.unidadesPorCaja : entrada.unidades;
-  const total = cajas * porCaja;
-  const destino = modo === "cajas" ? "grande" : entrada.destino;
+  const destino = modo === "suelto" ? entrada.destino : "grande";
+  const piezas = piezasRecepcion(entrada);
+  const total = destino === "grande" ? piezas.reduce((t, p) => t + p.unidades, 0) : entrada.unidades;
   return repo.conProducto(itemCode, async (tx) => {
     const estado = await estadoDe(itemCode, tx);
     const comparacionDisponible = await repo.comparacionDisponible(tx);
@@ -222,14 +234,14 @@ export async function recibir(entrada, { aplicacion }) {
     const g = randomUUID();
     let creadas = [];
     if (destino === "grande") {
-      const ids = await repo.reservarIdsCajas(cajas, tx);
+      const ids = await repo.reservarIdsCajas(piezas.length, tx);
       const ahora = new Date();
-      creadas = ids.map(({ id }) => ({ id, codigo: codigoCaja(id), itemCode, lote, suelto: modo === "suelto",
-        vencimiento: vencimiento ? new Date(`${vencimiento}T00:00:00.000Z`) : null, unidadesIniciales: porCaja, unidades: porCaja,
-        recibidaEn: ahora, recibidaPor: aplicacion }));
+      creadas = ids.map(({ id }, i) => ({ id, codigo: codigoCaja(id), itemCode, lote: piezas[i].lote, suelto: piezas[i].suelto,
+        vencimiento: piezas[i].vencimiento ? new Date(`${piezas[i].vencimiento}T00:00:00.000Z`) : null,
+        unidadesIniciales: piezas[i].unidades, unidades: piezas[i].unidades, recibidaEn: ahora, recibidaPor: aplicacion }));
       await repo.crearCajas(creadas, tx);
-      await repo.registrarMovimientos(creadas.map((c) => ({ grupo: g, tipo: "recepcion", itemCode, bodega: "grande", cantidad: porCaja,
-        cajaId: c.id, lote, hechoPor: aplicacion, observacion: excede > 0 ? "Recibido antes que SAP" : null })), tx);
+      await repo.registrarMovimientos(creadas.map((c) => ({ grupo: g, tipo: "recepcion", itemCode, bodega: "grande", cantidad: c.unidades,
+        cajaId: c.id, lote: c.lote, hechoPor: aplicacion, observacion: excede > 0 ? "Recibido antes que SAP" : null })), tx);
     } else {
       await exigirSaldoConciliado(itemCode, tx);
       const saldo = await repo.sumarLotePequena(itemCode, lote, vencimiento, total, tx);
@@ -413,20 +425,58 @@ export async function descontarPorPicking({ pickingId, lineas, lotes = [], hecho
 
 // ---------- Almacenes de esta bodega (supervisor) ----------
 
-export async function listarAlmacenes() {
-  const [almacenes, filtrar] = await Promise.all([repo.almacenes(), repo.opcion(OPCION_FILTRAR_PEDIDOS)]);
-  return { data: { almacenes, pedidosSoloDeEstaBodega: filtrar === true } };
+// Qué almacén de SAP es cada bodega. Solo vale si el almacén sigue marcado como de esta bodega.
+async function almacenesPorBodega(marcados = null) {
+  const [guardado, vigentes] = await Promise.all([repo.opcion(OPCION_ALMACENES_POR_BODEGA),
+    marcados ?? repo.almacenesDeEstaBodega()]);
+  const vale = (codigo) => (typeof codigo === "string" && vigentes.includes(codigo) ? codigo : null);
+  return { grande: vale(guardado?.grande), pequena: vale(guardado?.pequena) };
 }
 
-export async function elegirAlmacenes({ almacenes, pedidosSoloDeEstaBodega }, { aplicacion }) {
+export async function listarAlmacenes() {
+  const [almacenes, filtrar] = await Promise.all([repo.almacenes(), repo.opcion(OPCION_FILTRAR_PEDIDOS)]);
+  const porBodega = await almacenesPorBodega(almacenes.filter((a) => a.deEstaBodega).map((a) => a.warehouseCode));
+  return { data: { almacenes, pedidosSoloDeEstaBodega: filtrar === true, almacenGrande: porBodega.grande, almacenPequena: porBodega.pequena } };
+}
+
+export async function elegirAlmacenes({ almacenes, pedidosSoloDeEstaBodega, almacenGrande, almacenPequena }, { aplicacion }) {
   const conocidos = new Set((await repo.almacenes()).map((a) => a.warehouseCode));
   const desconocidos = almacenes.filter((c) => !conocidos.has(c));
   if (desconocidos.length) throw falla("ALMACEN_DESCONOCIDO", 400, `Almacén desconocido: ${desconocidos.join(", ")}`);
+  for (const [codigo, bodega] of [[almacenGrande, "grande"], [almacenPequena, "pequeña"]]) {
+    if (codigo && !almacenes.includes(codigo)) throw falla("ALMACEN_NO_MARCADO", 400, `El almacén de la bodega ${bodega} (${codigo}) tiene que estar marcado`);
+  }
+  if (almacenGrande && almacenGrande === almacenPequena) throw falla("ALMACEN_REPETIDO", 400, "La bodega grande y la pequeña tienen que ser almacenes distintos");
+  // Lo que no se envía queda como estaba, salvo que ese almacén se haya desmarcado.
+  const anterior = await repo.opcion(OPCION_ALMACENES_POR_BODEGA);
+  const elegir = (nuevo, previo) => { const c = nuevo !== undefined ? nuevo : previo ?? null; return c && almacenes.includes(c) ? c : null; };
+  const porBodega = { grande: elegir(almacenGrande, anterior?.grande), pequena: elegir(almacenPequena, anterior?.pequena) };
+  if (porBodega.grande && porBodega.grande === porBodega.pequena) porBodega.pequena = null;
   await repo.transaccion(async (tx) => {
     await repo.marcarAlmacenes(almacenes, tx);
     await repo.guardarOpcion(OPCION_FILTRAR_PEDIDOS, pedidosSoloDeEstaBodega, aplicacion, tx);
+    await repo.guardarOpcion(OPCION_ALMACENES_POR_BODEGA, porBodega, aplicacion, tx);
   });
   return listarAlmacenes();
+}
+
+// Lo que hay en la bodega grande o en la pequeña, producto por producto y lote por lote, con lo que SAP tiene en el
+// almacén asignado a esa bodega (con la fecha de las existencias). Sin almacén asignado, sap es null.
+export async function listarBodega(bodega, { buscar, filtro, pagina, limit }) {
+  const porBodega = await almacenesPorBodega();
+  const almacen = porBodega[bodega];
+  const [filas, existenciasSapAl] = await Promise.all([repo.contenidoBodega(bodega, almacen), repo.existenciasSapAl()]);
+  const texto = buscar?.toLowerCase();
+  const vistas = filas.map((f) => ({ itemCode: f.itemCode, itemName: f.itemName, unidades: f.unidades, cajas: f.cajas,
+    lotes: f.lotes.map((l) => ({ ...l, vencimiento: fechaIso(l.vencimiento) })), sap: almacen ? Math.round(f.sap ?? 0) : null }));
+  const resumen = { productos: vistas.filter((v) => v.unidades !== 0).length, unidades: vistas.reduce((t, v) => t + v.unidades, 0),
+    cajas: vistas.reduce((t, v) => t + v.cajas, 0) };
+  const buscadas = vistas.filter((v) => !texto || v.itemCode.toLowerCase().includes(texto) || v.itemName.toLowerCase().includes(texto));
+  const cumple = { todos: () => true, registrados: (v) => v.unidades !== 0, sin_registrar: (v) => v.unidades === 0 && (v.sap ?? 0) > 0 };
+  const conteos = Object.fromEntries(Object.entries(cumple).map(([nombre, f]) => [nombre, buscadas.filter(f).length]));
+  const elegidas = buscadas.filter(cumple[filtro]);
+  return { data: elegidas.slice(pagina * limit, (pagina + 1) * limit), total: elegidas.length, conteos, resumen,
+    bodega, almacen, existenciasSapAl };
 }
 
 // Para la lista de pedidos: los almacenes por los que filtrar, o null si no se filtra.

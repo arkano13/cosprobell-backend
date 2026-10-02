@@ -29,13 +29,22 @@ export const movimientosQuerySchema = z.object({ itemCode: itemCode.optional(), 
 export const descuentosQuerySchema = z.object({ antesDe: id.optional(), limit: limit(30) }).strict();
 
 // En cajas: N cajas iguales a la grande, cada una con su etiqueta. Suelto: un bulto a la grande o unidades a la pequeña.
+// Grupos: varias filas de cajas iguales, cada una con su lote, y lo que sobra como un bulto; todo junto a la grande.
+const grupoCajas = z.object({ cajas: z.number().int().min(1).max(200), unidadesPorCaja: unidades, lote,
+  vencimiento: fecha.nullable().optional() }).strict();
+const totalRecepcion = (r) => (r.modo === "cajas" ? r.cajas * r.unidadesPorCaja : r.modo === "suelto" ? r.unidades
+  : r.grupos.reduce((t, g) => t + g.cajas * g.unidadesPorCaja, 0) + (r.bulto?.unidades ?? 0));
 export const recepcionSchema = z.discriminatedUnion("modo", [
   z.object({ operacionId, modo: z.literal("cajas"), itemCode, cajas: z.number().int().min(1).max(200), unidadesPorCaja: unidades,
     lote, vencimiento: fecha.nullable().optional(), adelantar: z.boolean().default(false) }).strict(),
   z.object({ operacionId, modo: z.literal("suelto"), itemCode, unidades, destino: z.enum(["grande", "pequena"]),
     lote, vencimiento: fecha.nullable().optional(), adelantar: z.boolean().default(false) }).strict(),
-]).refine((r) => r.modo === "cajas" ? r.cajas * r.unidadesPorCaja <= 1_000_000 : true,
-  { message: "Demasiadas unidades en una sola recepción", path: ["unidadesPorCaja"] });
+  z.object({ operacionId, modo: z.literal("grupos"), itemCode, grupos: z.array(grupoCajas).min(1).max(50),
+    bulto: z.object({ unidades, lote, vencimiento: fecha.nullable().optional() }).strict().nullable().optional(),
+    adelantar: z.boolean().default(false) }).strict(),
+]).refine((r) => totalRecepcion(r) <= 1_000_000, { message: "Demasiadas unidades en una sola recepción", path: ["unidadesPorCaja"] })
+  .refine((r) => r.modo !== "grupos" || r.grupos.reduce((t, g) => t + g.cajas, 0) <= 500,
+    { message: "Hasta 500 cajas en una sola recepción", path: ["grupos"] });
 
 export const reposicionSchema = z.object({ operacionId, caja: cajaParamsSchema.shape.codigo, unidades }).strict();
 
@@ -59,10 +68,19 @@ export const correccionCajaSchema = z.object({ operacionId, unidades: z.number()
 // Panel del supervisor.
 // Solo se aceptan almacenes que ya están en la tabla (el servicio lo revisa); el largo no se limita a los 8 de SAP
 // para no rechazar los que llegaron por otra vía (datos sembrados).
+const codigoAlmacen = z.string().trim().min(1).max(50);
 export const almacenesSchema = z.object({
-  almacenes: z.array(z.string().trim().min(1).max(50)).max(500)
+  almacenes: z.array(codigoAlmacen).max(500)
     .refine((lista) => new Set(lista).size === lista.length, "Hay almacenes repetidos"),
   pedidosSoloDeEstaBodega: z.boolean(),
+  // Qué almacén marcado es la bodega grande y cuál la pequeña. Sin enviar, queda como estaba.
+  almacenGrande: codigoAlmacen.nullable().optional(),
+  almacenPequena: codigoAlmacen.nullable().optional(),
+}).strict();
+export const bodegaParamsSchema = z.object({ bodega: z.enum(["grande", "pequena"]) });
+export const bodegaQuerySchema = z.object({
+  buscar: z.string().trim().min(1).max(60).optional(), filtro: z.enum(["todos", "registrados", "sin_registrar"]).default("todos"),
+  pagina: z.coerce.number().int().min(0).max(10_000).default(0), limit: limit(50),
 }).strict();
 export const registroCodigoSchema = z.object({
   codigo: z.string().trim().min(1).max(64).regex(/^[\x20-\x7E]+$/, "El código solo puede tener letras, números y símbolos"),
