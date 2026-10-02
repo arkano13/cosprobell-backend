@@ -11,6 +11,7 @@ export const producto = manejar((req) => s.consultarProducto(req.params.itemCode
 export const pendientes = manejar(() => s.listarPendientes());
 export const conteoInicial = manejar((req) => s.listarConteoInicial(req.validatedQuery));
 export const existencias = manejar((req) => s.listarExistencias(req.validatedQuery));
+export const bodega = manejar((req) => s.listarBodega(req.params.bodega, req.validatedQuery));
 export const caja = manejar((req) => s.consultarCaja(req.params.codigo));
 export const porVencer = manejar((req) => s.listarPorVencer(req.validatedQuery));
 export const movimientos = manejar((req) => s.listarMovimientos(req.validatedQuery));

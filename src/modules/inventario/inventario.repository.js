@@ -101,6 +101,30 @@ export const inventarioRepository = {
       ORDER BY pr."itemName", pr."itemCode"`;
   },
 
+  // Lo que hay en una bodega, por producto y lote, con lo que SAP tiene en el almacén asignado a esa bodega (si hay).
+  // Incluye los productos que SAP tiene en ese almacén y en la bodega no están registrados.
+  contenidoBodega(bodega, almacen, db = prisma) {
+    const lotes = bodega === "grande"
+      ? Prisma.sql`SELECT "itemCode", lote, vencimiento, SUM(unidades)::int AS unidades, COUNT(*)::int AS cajas
+          FROM inventario_cajas WHERE unidades > 0 GROUP BY "itemCode", lote, vencimiento`
+      : Prisma.sql`SELECT "itemCode", lote, vencimiento, unidades, 0 AS cajas FROM inventario_pequena_lotes WHERE unidades > 0`;
+    const totales = bodega === "grande"
+      ? Prisma.sql`SELECT "itemCode", SUM(unidades)::int AS unidades, SUM(cajas)::int AS cajas FROM l GROUP BY "itemCode"`
+      : Prisma.sql`SELECT "itemCode", pequena AS unidades, 0 AS cajas FROM inventario_productos WHERE pequena <> 0
+          UNION SELECT l."itemCode", 0, 0 FROM l WHERE NOT EXISTS (SELECT 1 FROM inventario_productos ip WHERE ip."itemCode" = l."itemCode")`;
+    return db.$queryRaw`
+      WITH l AS (${lotes}), t AS (${totales}),
+           s AS (SELECT "itemCode", SUM("inStock")::float AS sap FROM productos_existencias WHERE "warehouseCode" = ${almacen} GROUP BY "itemCode")
+      SELECT pr."itemCode", pr."itemName", COALESCE(t.unidades, 0)::int AS unidades, COALESCE(t.cajas, 0)::int AS cajas, s.sap,
+             COALESCE((SELECT JSONB_AGG(JSONB_BUILD_OBJECT('lote', l.lote, 'vencimiento', l.vencimiento, 'unidades', l.unidades, 'cajas', l.cajas)
+                       ORDER BY l.vencimiento NULLS LAST, l.lote NULLS LAST) FROM l WHERE l."itemCode" = pr."itemCode"), '[]'::jsonb) AS lotes
+      FROM productos pr
+      LEFT JOIN t ON t."itemCode" = pr."itemCode"
+      LEFT JOIN s ON s."itemCode" = pr."itemCode"
+      WHERE t."itemCode" IS NOT NULL OR COALESCE(s.sap, 0) <> 0
+      ORDER BY pr."itemName", pr."itemCode"`;
+  },
+
   // Almacenes de SAP con lo que sirve para reconocerlos: productos con existencia, unidades y líneas de pedidos abiertos.
   almacenes(db = prisma) {
     return db.$queryRaw`
