@@ -224,7 +224,7 @@ test("cambiar lote: devuelve lo restado y lo resta del lote elegido", async (t) 
 
 test("panel: elegir almacenes solo con códigos conocidos y guardar el filtro de pedidos", async (t) => {
   const headers = conSesion(t, "supervisor");
-  t.mock.method(repo, "almacenes", async () => [{ warehouseCode: "01" }, { warehouseCode: "V05" }]);
+  t.mock.method(repo, "almacenes", async () => [{ warehouseCode: "01" }, { warehouseCode: "V05" }, { warehouseCode: "BOD-CENTRAL" }]);
   t.mock.method(repo, "opcion", async () => true);
   const marcados = [], opciones = [];
   t.mock.method(repo, "transaccion", async (op) => op({}));
@@ -238,6 +238,10 @@ test("panel: elegir almacenes solo con códigos conocidos y guardar el filtro de
   assert.deepEqual(marcados, [["V05"]]);
   assert.deepEqual(opciones, [["pedidosSoloDeEstaBodega", true, "operador:Luis Pérez"]]);
   assert.equal((await r.json()).data.pedidosSoloDeEstaBodega, true);
+  // Un código de más de 8 caracteres que existe en la tabla también se puede marcar.
+  const largo = await enviar("/supervisor/almacenes", headers, "PUT", { almacenes: ["BOD-CENTRAL"], pedidosSoloDeEstaBodega: false });
+  assert.equal(largo.status, 200);
+  assert.deepEqual(marcados.at(-1), ["BOD-CENTRAL"]);
   t.mock.restoreAll();
   assert.equal((await enviar("/supervisor/almacenes", conSesion(t, "operador"), "PUT", { almacenes: [], pedidosSoloDeEstaBodega: false })).status, 403);
 });

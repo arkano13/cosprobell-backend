@@ -52,8 +52,10 @@ export const conteoSchema = z.object({ operacionId, unidades: z.number().int().m
 export const correccionCajaSchema = z.object({ operacionId, unidades: z.number().int().min(0).max(1_000_000) }).strict();
 
 // Panel del supervisor.
+// Solo se aceptan almacenes que ya están en la tabla (el servicio lo revisa); el largo no se limita a los 8 de SAP
+// para no rechazar los que llegaron por otra vía (datos sembrados).
 export const almacenesSchema = z.object({
-  almacenes: z.array(z.string().trim().min(1).max(8)).max(500)
+  almacenes: z.array(z.string().trim().min(1).max(50)).max(500)
     .refine((lista) => new Set(lista).size === lista.length, "Hay almacenes repetidos"),
   pedidosSoloDeEstaBodega: z.boolean(),
 }).strict();
