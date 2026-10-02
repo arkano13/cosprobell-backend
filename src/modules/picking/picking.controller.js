@@ -71,7 +71,7 @@ export async function escanear(req, res, next) {
 
 export async function finalizar(req, res, next) {
   try {
-    const picking = await finalizarPicking(req.params.id);
+    const picking = await finalizarPicking(req.params.id, req.body);
 
     return res.json({
       data: picking,

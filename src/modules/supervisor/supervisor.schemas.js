@@ -11,7 +11,8 @@ export const etiquetasQuerySchema = z.object({
   cursor: id.optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 }).strict();
-export const confirmacionMasivaSchema = z.object({ cantidadEsperada: z.number().int().min(1).max(1_000_000) }).strict();
+export const confirmacionMasivaSchema = z.object({ cantidadEsperada: z.number().int().min(1).max(1_000_000),
+  versionEsperada: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
 export const nuevoOperadorSchema = z.object({
   nombre: z.string().max(80), pin, rol: z.enum(ROLES).default("operador"),
 }).strict();

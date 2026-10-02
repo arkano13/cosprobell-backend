@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { AppError } from "../../shared/errors/AppError.js";
 import { inventarioRepository as repo } from "./inventario.repository.js";
+import { retirarLotes, contarLotes } from "./inventario.lotes.js";
 import { clasificar, codigoCaja, repartirEnCajas, cajaParaUsarAntes, textoAsignacion } from "./inventario.calculo.js";
 
 const OPCION_FILTRAR_PEDIDOS = "pedidosSoloDeEstaBodega";
@@ -12,7 +13,16 @@ const sinCaja = () => falla("CAJA_NO_ENCONTRADA", 404, "No hay una caja con ese 
 const numero = (n) => Number(n).toLocaleString("es-HN");
 const fechaIso = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
 
-function vistaEstado(f, ahora = Date.now()) {
+async function exigirSaldoConciliado(itemCode, tx) {
+  const saldo = await repo.estadoProducto(itemCode, tx);
+  if (saldo && saldo.pequena < 0) throw falla("CONTEO_REQUERIDO", 409,
+    `${itemCode}: hay un saldo negativo antiguo. El supervisor debe registrar el conteo por lote antes de mover mercancía.`);
+}
+
+function vistaEstado(f, ahora = Date.now(), comparacionDisponible = true) {
+  if (!comparacionDisponible) return { itemCode: f.itemCode, itemName: f.itemName, activo: f.activo,
+    grande: f.grande, pequena: f.pequena, sinEntrega: null, enSap: null, diferencia: null, faltaEnSap: null,
+    estado: "sin_comparacion_sap" };
   const c = clasificar(f, ahora);
   return { itemCode: f.itemCode, itemName: f.itemName, activo: f.activo, grande: f.grande, pequena: f.pequena,
     sinEntrega: f.sinEntrega, enSap: c.enSap, diferencia: c.diferencia, faltaEnSap: c.faltaEnSap, estado: c.estado };
@@ -25,6 +35,8 @@ async function exigirAlmacenes() {
   const almacenes = await repo.almacenesDeEstaBodega();
   if (!almacenes.length) throw falla("ALMACENES_SIN_ELEGIR", 409,
     "Falta elegir los almacenes de SAP de esta bodega (Panel del supervisor → Almacenes)");
+  if (!(await repo.comparacionDisponible())) throw falla("COMPARACION_SAP_NO_DISPONIBLE", 409,
+    "Faltan datos recientes de almacenes y existencias de SAP. El inventario local sigue disponible.");
   return almacenes;
 }
 async function estadoDe(itemCode, tx) {
@@ -37,11 +49,12 @@ async function estadoDe(itemCode, tx) {
 
 export async function resumenInventario() {
   const almacenes = await repo.almacenesDeEstaBodega();
+  const comparacionDisponible = await repo.comparacionDisponible();
   const [bodegas, estados, porVencer, movimientos] = await Promise.all([
     repo.resumenBodegas(), almacenes.length ? repo.estados() : [], repo.porVencer(60), repo.movimientos({ limite: 8 })]);
-  const vistas = estados.map((f) => vistaEstado(f));
+  const vistas = estados.map((f) => vistaEstado(f, Date.now(), comparacionDisponible));
   const contar = (estado) => vistas.filter((v) => v.estado === estado).length;
-  return { data: { almacenes, ...bodegas,
+  return { data: { almacenes, comparacionDisponible, ...bodegas,
     pendientes: { porUbicar: contar("por_ubicar"), porDescontar: contar("por_descontar"), actualizando: contar("actualizando"),
       conteoInicial: contar("conteo_inicial"), faltaEnSap: vistas.filter((v) => v.faltaEnSap > 0).length },
     porVencer: { vencidos: porVencer.filter((l) => l.vencido).length, proximos: porVencer.filter((l) => !l.vencido).length },
@@ -56,9 +69,10 @@ export async function consultarProducto(itemCode) {
   const producto = await repo.producto(itemCode);
   if (!producto) throw sinProducto();
   const almacenes = await repo.almacenesDeEstaBodega();
-  const [estado, cajas, movimientos, documentos, ultima] = await Promise.all([
-    almacenes.length ? estadoDe(itemCode) : null, repo.cajasDe(itemCode), repo.movimientos({ itemCode, limite: 15 }),
-    repo.documentosRecientes([itemCode], { dias: 60, porProducto: 8 }), repo.ultimaRecepcion(itemCode)]);
+  const comparacionDisponible = await repo.comparacionDisponible();
+  const [estado, cajas, movimientos, documentos, ultima, lotesPequena] = await Promise.all([
+    comparacionDisponible ? estadoDe(itemCode) : null, repo.cajasDe(itemCode), repo.movimientos({ itemCode, limite: 15 }),
+    repo.documentosRecientes([itemCode], { dias: 60, porProducto: 8 }), repo.ultimaRecepcion(itemCode), repo.lotesPequena(itemCode)]);
   // Bodega grande agrupada por lote (y vencimiento), con sus cajas.
   const lotes = new Map();
   for (const c of cajas) {
@@ -69,10 +83,10 @@ export async function consultarProducto(itemCode) {
     l.unidades += c.unidades; l.cajas.push(vistaCaja(c));
   }
   return { data: {
-    itemCode: producto.itemCode, itemName: producto.itemName, almacenes, estado,
+    itemCode: producto.itemCode, itemName: producto.itemName, almacenes, comparacionDisponible, estado,
     pequena: producto.inventario?.pequena ?? 0, enInventario: Boolean(producto.inventario),
     codigos: producto.codigosBarras.map((c) => ({ id: c.id, codigo: c.codigo, origen: c.origen, confirmado: c.confirmacionPicking?.esUnidadIndividual === true })),
-    lotes: [...lotes.values()], movimientos, documentos,
+    lotes: [...lotes.values()], lotesPequena, movimientos, documentos,
     sugerencia: ultima ? { unidadesPorCaja: ultima.unidadesIniciales } : null,
   } };
 }
@@ -128,8 +142,8 @@ export async function listarMovimientos({ itemCode, antesDe, limit }) {
 function asignacionDe(movimientos) {
   const netos = new Map();
   for (const m of movimientos) {
-    const clave = m.bodega === "pequena" ? "pequena" : `caja:${m.cajaId}`;
-    const actual = netos.get(clave) ?? { tipo: m.bodega === "pequena" ? "pequena" : "lote", lote: m.lote, cajaId: m.cajaId, codigo: m.caja?.codigo ?? null, unidades: 0 };
+    const clave = m.bodega === "pequena" ? `pequena:${m.pequenaLoteId ?? "antiguo"}` : `caja:${m.cajaId}`;
+    const actual = netos.get(clave) ?? { tipo: m.bodega === "pequena" ? "pequena" : "lote", lote: m.lote, pequenaLoteId: m.pequenaLoteId, cajaId: m.cajaId, codigo: m.caja?.codigo ?? null, unidades: 0 };
     actual.unidades -= m.cantidad;
     netos.set(clave, actual);
   }
@@ -139,9 +153,10 @@ function resumirAsignacion(asignacion) {
   const porLote = new Map();
   for (const a of asignacion) {
     const clave = a.tipo === "pequena" ? "pequena" : `lote:${a.lote ?? ""}`;
-    const actual = porLote.get(clave) ?? { tipo: a.tipo, lote: a.tipo === "pequena" ? null : a.lote, unidades: 0, cajas: [] };
+    const actual = porLote.get(clave) ?? { tipo: a.tipo, lote: a.tipo === "pequena" ? null : a.lote, unidades: 0, cajas: [], lotesPequena: [] };
     actual.unidades += a.unidades;
     if (a.codigo) actual.cajas.push(a.codigo);
+    if (a.tipo === "pequena") actual.lotesPequena.push({ pequenaLoteId: a.pequenaLoteId ?? null, lote: a.lote ?? null, unidades: a.unidades });
     porLote.set(clave, actual);
   }
   return [...porLote.values()];
@@ -163,7 +178,6 @@ export async function listarDescuentos({ antesDe, limit }) {
 // Mercadería que entra: en cajas a la grande, o suelta a la grande (un bulto) o a la pequeña. Si supera lo que
 // SAP tiene por ubicar, solo se acepta confirmando que llegó antes que SAP la registre ("adelantado").
 export async function recibir(entrada, { aplicacion }) {
-  await exigirAlmacenes();
   const { itemCode, modo, lote = null, vencimiento = null, adelantar = false } = entrada;
   const cajas = modo === "cajas" ? entrada.cajas : 1;
   const porCaja = modo === "cajas" ? entrada.unidadesPorCaja : entrada.unidades;
@@ -171,7 +185,8 @@ export async function recibir(entrada, { aplicacion }) {
   const destino = modo === "cajas" ? "grande" : entrada.destino;
   return repo.conProducto(itemCode, async (tx) => {
     const estado = await estadoDe(itemCode, tx);
-    const porUbicar = Math.max(0, estado.diferencia);
+    const comparacionDisponible = await repo.comparacionDisponible(tx);
+    const porUbicar = comparacionDisponible ? Math.max(0, estado.diferencia) : total;
     const excede = total - porUbicar;
     if (excede > 0 && !adelantar) throw falla("EXCEDE_POR_UBICAR", 409, porUbicar === 0
       ? `SAP todavía no registró mercadería por ubicar de este producto. Si llegó antes que SAP, confirmá que se reciba igual.`
@@ -190,32 +205,38 @@ export async function recibir(entrada, { aplicacion }) {
       await repo.registrarMovimientos(creadas.map((c) => ({ grupo: g, tipo: "recepcion", itemCode, bodega: "grande", cantidad: porCaja,
         cajaId: c.id, lote, hechoPor: aplicacion, observacion: excede > 0 ? "Recibido antes que SAP" : null })), tx);
     } else {
+      await exigirSaldoConciliado(itemCode, tx);
+      const saldo = await repo.sumarLotePequena(itemCode, lote, vencimiento, total, tx);
       await repo.cambiarPequena(itemCode, total, tx);
       await repo.registrarMovimientos([{ grupo: g, tipo: "recepcion", itemCode, bodega: "pequena", cantidad: total, lote,
+        pequenaLoteId: saldo.id,
         hechoPor: aplicacion, observacion: excede > 0 ? "Recibido antes que SAP" : null }], tx);
     }
     return { data: { cajas: creadas.map(vistaCaja), unidades: total, destino, adelantado: Math.max(0, excede) } };
-  });
+  }, { operacionId: entrada.operacionId, tipo: "recibir", entrada, aplicacion });
 }
 
 // De una caja de la grande a la pequeña.
-export async function reponer({ caja: codigo, unidades }, { aplicacion }) {
+export async function reponer(entrada, { aplicacion }) {
+  const { caja: codigo, unidades } = entrada;
   const caja = await repo.cajaPorCodigo(codigo);
   if (!caja) throw sinCaja();
   return repo.conProducto(caja.itemCode, async (tx) => {
     const actual = await repo.cajaBloqueada(caja.id, tx);
+    await exigirSaldoConciliado(caja.itemCode, tx);
     if (unidades > actual.unidades) throw falla("CAJA_INSUFICIENTE", 409, `La caja ${codigo} tiene ${numero(actual.unidades)} unidades`);
     await repo.activar(caja.itemCode, tx);
     await repo.cambiarUnidadesCaja(caja.id, -unidades, tx);
+    const saldo = await repo.sumarLotePequena(caja.itemCode, actual.lote, actual.vencimiento, unidades, tx);
     await repo.cambiarPequena(caja.itemCode, unidades, tx);
     const g = randomUUID();
     await repo.registrarMovimientos([
       { grupo: g, tipo: "reposicion", itemCode: caja.itemCode, bodega: "grande", cantidad: -unidades, cajaId: caja.id, lote: caja.lote, hechoPor: aplicacion },
-      { grupo: g, tipo: "reposicion", itemCode: caja.itemCode, bodega: "pequena", cantidad: unidades, cajaId: caja.id, lote: caja.lote, hechoPor: aplicacion },
+      { grupo: g, tipo: "reposicion", itemCode: caja.itemCode, bodega: "pequena", cantidad: unidades, cajaId: caja.id, lote: actual.lote, pequenaLoteId: saldo.id, hechoPor: aplicacion },
     ], tx);
     const estado = await repo.estadoProducto(caja.itemCode, tx);
     return { data: { caja: vistaCaja({ ...actual, unidades: actual.unidades - unidades }), pequena: estado.pequena } };
-  });
+  }, { operacionId: entrada.operacionId, tipo: "reponer", entrada, aplicacion });
 }
 
 // Resta las unidades asignadas (de cajas de un lote o de la pequeña) dentro de la transacción del producto.
@@ -226,8 +247,9 @@ async function aplicarAsignaciones(itemCode, asignaciones, { tipo, grupo, descue
       const estado = await repo.estadoProducto(itemCode, tx);
       if ((estado?.pequena ?? 0) < a.unidades) throw falla("PEQUENA_INSUFICIENTE", 409,
         `La bodega pequeña tiene ${numero(estado?.pequena ?? 0)} unidades de este producto`);
+      const partes = await retirarLotes(itemCode, a.unidades, a.lotes, tx);
       await repo.cambiarPequena(itemCode, -a.unidades, tx);
-      movimientos.push({ grupo, tipo, itemCode, bodega: "pequena", cantidad: -a.unidades, descuentoId, hechoPor });
+      movimientos.push(...partes.map(p => ({ grupo, tipo, itemCode, bodega: "pequena", ...p, descuentoId, hechoPor })));
       continue;
     }
     const cajas = await repo.cajasDeLoteBloqueadas(itemCode, a.lote ?? null, tx);
@@ -244,10 +266,11 @@ async function aplicarAsignaciones(itemCode, asignaciones, { tipo, grupo, descue
 const sumar = (asignaciones) => asignaciones.reduce((t, a) => t + a.unidades, 0);
 
 // SAP descontó y la bodega elige de qué lotes (o de la pequeña) salió. Solo con la diferencia estable y exacta.
-export async function descontar({ itemCode, unidades, asignaciones }, { aplicacion }) {
-  await exigirAlmacenes();
+export async function descontar(entrada, { aplicacion }) {
+  const { itemCode, unidades, asignaciones } = entrada;
   if (sumar(asignaciones) !== unidades) throw falla("ASIGNACION_INCOMPLETA", 400, `Hay que asignar exactamente ${numero(unidades)} unidades`);
   return repo.conProducto(itemCode, async (tx) => {
+    await exigirAlmacenes();
     const estado = await estadoDe(itemCode, tx);
     if (estado.estado === "actualizando") throw falla("SAP_ACTUALIZANDO", 409, "SAP se está actualizando para este producto. Probá en unos minutos.");
     if (estado.diferencia >= 0 || -estado.diferencia !== unidades) throw falla("CANTIDAD_CAMBIO", 409,
@@ -258,11 +281,12 @@ export async function descontar({ itemCode, unidades, asignaciones }, { aplicaci
     const descuento = await repo.crearDescuento({ itemCode, unidades, documentos, hechoPor: aplicacion }, tx);
     const retirar = await aplicarAsignaciones(itemCode, asignaciones, { tipo: "descuento", grupo: randomUUID(), descuentoId: descuento.id, hechoPor: aplicacion }, tx);
     return { data: { id: descuento.id, unidades, retirar } };
-  });
+  }, { operacionId: entrada.operacionId, tipo: "descontar", entrada, aplicacion });
 }
 
 // "Cambiar lote": devuelve lo restado a sus cajas (o a la pequeña) y lo resta según la nueva elección.
-export async function reasignarDescuento(id, { asignaciones }, { aplicacion }) {
+export async function reasignarDescuento(id, entrada, { aplicacion }) {
+  const { asignaciones } = entrada;
   const previo = await repo.descuento(id);
   if (!previo) throw falla("DESCUENTO_NO_ENCONTRADO", 404, "Descuento no encontrado");
   if (sumar(asignaciones) !== previo.unidades) throw falla("ASIGNACION_INCOMPLETA", 400, `Hay que asignar exactamente ${numero(previo.unidades)} unidades`);
@@ -272,38 +296,49 @@ export async function reasignarDescuento(id, { asignaciones }, { aplicacion }) {
     const g = randomUUID();
     const devolver = [];
     for (const a of actual) {
-      if (a.tipo === "pequena") await repo.cambiarPequena(descuento.itemCode, a.unidades, tx);
+      if (a.tipo === "pequena") {
+        if (!a.pequenaLoteId) throw falla("DESCUENTO_SIN_LOTE", 409, "Este descuento antiguo no identifica el lote. Requiere conciliación antes de reasignarlo.");
+        const saldo = await repo.cambiarLotePequena(a.pequenaLoteId, descuento.itemCode, a.unidades, tx);
+        if (!saldo) throw falla("LOTE_NO_ENCONTRADO", 409, "No se encontró el lote original del descuento.");
+        await repo.cambiarPequena(descuento.itemCode, a.unidades, tx);
+      }
       else await repo.cambiarUnidadesCaja(a.cajaId, a.unidades, tx);
       devolver.push({ grupo: g, tipo: "reasignacion", itemCode: descuento.itemCode, bodega: a.tipo === "pequena" ? "pequena" : "grande",
-        cantidad: a.unidades, cajaId: a.cajaId ?? null, lote: a.lote ?? null, descuentoId: id, hechoPor: aplicacion, observacion: "Devuelto al cambiar el lote" });
+        cantidad: a.unidades, cajaId: a.cajaId ?? null, pequenaLoteId: a.pequenaLoteId ?? null, lote: a.lote ?? null, descuentoId: id, hechoPor: aplicacion, observacion: "Devuelto al cambiar el lote" });
     }
     await repo.registrarMovimientos(devolver, tx);
     const retirar = await aplicarAsignaciones(descuento.itemCode, asignaciones, { tipo: "reasignacion", grupo: g, descuentoId: id, hechoPor: aplicacion }, tx);
     await repo.corregirDescuento(id, { corregidoPor: aplicacion, corregidoEn: new Date(),
       anterior: textoAsignacion(resumirAsignacion(actual)) }, tx);
     return { data: { id, retirar } };
-  });
+  }, { operacionId: entrada.operacionId, tipo: "reasignarDescuento", entrada, aplicacion, id });
 }
 
 // Conteo de la bodega pequeña (supervisor): deja el número contado.
-export async function contarPequena(itemCode, { unidades }, { aplicacion }) {
-  await exigirAlmacenes();
+export async function contarPequena(itemCode, entrada, { aplicacion }) {
+  const { unidades } = entrada;
   return repo.conProducto(itemCode, async (tx) => {
     await estadoDe(itemCode, tx);
     await repo.activar(itemCode, tx);
     const estado = await repo.estadoProducto(itemCode, tx);
     const delta = unidades - estado.pequena;
+    const partes = await contarLotes(itemCode, unidades, entrada.lotes, tx);
     if (delta !== 0) {
       await repo.cambiarPequena(itemCode, delta, tx);
-      await repo.registrarMovimientos([{ grupo: randomUUID(), tipo: "conteo", itemCode, bodega: "pequena", cantidad: delta,
-        hechoPor: aplicacion, observacion: `Contado: ${unidades}` }], tx);
     }
+    const grupo = randomUUID();
+    const movimientos = partes.map(p => ({ grupo, tipo: "conteo", itemCode, bodega: "pequena", ...p,
+      hechoPor: aplicacion, observacion: `Contado: ${unidades}` }));
+    if (estado.pequena < 0) movimientos.push({ grupo, tipo: "conteo", itemCode, bodega: "pequena",
+      cantidad: -estado.pequena, hechoPor: aplicacion, observacion: "Conciliación del saldo negativo anterior al control por lotes" });
+    await repo.registrarMovimientos(movimientos, tx);
     return { data: { itemCode, pequena: unidades, cambio: delta } };
-  });
+  }, { operacionId: entrada.operacionId, tipo: "contarPequena", entrada, aplicacion, itemCode });
 }
 
 // Corrección de una caja (supervisor): deja las unidades que realmente tiene.
-export async function corregirCaja(id, { unidades }, { aplicacion }) {
+export async function corregirCaja(id, entrada, { aplicacion }) {
+  const { unidades } = entrada;
   const caja = await repo.cajaPorId(id);
   if (!caja) throw sinCaja();
   return repo.conProducto(caja.itemCode, async (tx) => {
@@ -315,26 +350,36 @@ export async function corregirCaja(id, { unidades }, { aplicacion }) {
         cajaId: id, lote: caja.lote, hechoPor: aplicacion, observacion: `Caja con ${unidades} unidades` }], tx);
     }
     return { data: vistaCaja({ ...actual, unidades }) };
-  });
+  }, { operacionId: entrada.operacionId, tipo: "corregirCaja", entrada, aplicacion, id });
 }
 
-// Al finalizar un picking: lo escaneado sale de la bodega pequeña. Solo productos que ya están en el inventario;
-// el resto entra con su conteo inicial. Corre dentro de la transacción que cierra la preparación.
-export async function descontarPorPicking({ pickingId, lineas, hechoPor = null }, tx) {
+// Al finalizar: exigir existencias físicas registradas y descontar los lotes elegidos en la misma transacción.
+export async function descontarPorPicking({ pickingId, lineas, lotes = [], hechoPor = null }, tx) {
   const porProducto = new Map();
   for (const l of lineas) {
-    const unidades = Math.round(l.cantidadEscaneada ?? 0);
+    const unidades = l.cantidadEscaneada ?? 0;
+    if (!Number.isSafeInteger(unidades) || unidades < 0) throw falla("CANTIDAD_INVALIDA", 409, "El despacho requiere unidades individuales enteras.");
     if (unidades > 0) porProducto.set(l.itemCode, (porProducto.get(l.itemCode) ?? 0) + unidades);
   }
-  if (!porProducto.size) return [];
   const itemCodes = [...porProducto.keys()].sort();
+  if (new Set(lotes.map(l => l.itemCode)).size !== lotes.length || lotes.some(l => !porProducto.has(l.itemCode))) {
+    throw falla("ASIGNACION_LOTES_INVALIDA", 409, "La selección contiene productos repetidos o no escaneados.");
+  }
+  if (!porProducto.size) return [];
   await repo.bloquearProductos(itemCodes, tx);
   const movimientos = [];
+  // Revisar todos antes de descontar el primero.
   for (const itemCode of itemCodes) {
-    if (!(await repo.estadoProducto(itemCode, tx))) continue;
+    const estado = await repo.estadoProducto(itemCode, tx);
     const unidades = porProducto.get(itemCode);
+    if ((estado?.pequena ?? 0) < unidades) throw falla("PEQUENA_INSUFICIENTE", 409,
+      `${itemCode}: hay ${numero(estado?.pequena ?? 0)} unidades en la pequeña y se necesitan ${numero(unidades)}. Primero registrá la reposición desde la grande.`);
+  }
+  for (const itemCode of itemCodes) {
+    const unidades = porProducto.get(itemCode);
+    const partes = await retirarLotes(itemCode, unidades, lotes.find(l => l.itemCode === itemCode)?.lotes, tx);
     await repo.cambiarPequena(itemCode, -unidades, tx);
-    movimientos.push({ grupo: `picking-${pickingId}-${itemCode}`, tipo: "picking", itemCode, bodega: "pequena", cantidad: -unidades, pickingId, hechoPor });
+    movimientos.push(...partes.map(p => ({ grupo: `picking-${pickingId}-${itemCode}`, tipo: "picking", itemCode, bodega: "pequena", ...p, pickingId, hechoPor })));
   }
   await repo.registrarMovimientos(movimientos, tx);
   return movimientos;

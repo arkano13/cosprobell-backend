@@ -626,3 +626,31 @@ Desplegar primero el backend (tiene migración: en Railway no hay comando previo
 Verificación: 391/391 pruebas del backend (385 después de retirar las del puente) y 26/26 de la app. Recorrido contra PostgreSQL real del backend completo (sincronización, conteo inicial, recepción con adelanto que SAP cierra después, reposición, picking con entrega en SAP, descuento con espera y cantidad exacta, cambio de lote, conteo, corrección, consultas, códigos, filtro de pedidos y cinco reposiciones simultáneas sobre una caja). Encontró y se corrigió un `BigInt` de una consulta que impedía responder la ficha del producto. Recorrido con la app Electron contra este backend: elegir almacenes, contar en cajas con 4 etiquetas cuyo código de barras se leyó con un decodificador (zxing), impresión solo de etiquetas, ubicar con confirmación de lo que excede, reponer con sugerencia de la caja que vence antes, descontar el lote vencido, cambiar lote, por vencer, registrar un código y su rechazo en otro producto, y el operador sin correcciones. Auditoría axe-core WCAG 2.2 A/AA sin problemas en todas las pantallas nuevas.
 
 Pendiente: el permiso "Iniciar sesión como proceso por lotes" de la cuenta del puente (lo gestiona sistemas por GPO). Elegir las frecuencias del puente. Probar la impresión con la impresora real de la bodega. Cuando se pase a la sociedad de producción de SAP, usar una base nueva.
+
+## 29. Correcciones de la revisión del backend (2026-10-01)
+
+- Recepciones, reposiciones, descuentos, reasignaciones, conteos y correcciones requieren `operacionId`. El resultado se guarda junto al movimiento en una transacción: reintentar con el mismo UUID y contenido no duplica cantidades. Reutilizarlo con otros datos o usuario produce conflicto. Los conteos antiguos no vuelven a sobrescribir el inventario al reintentarlos.
+- Recepciones y conteos funcionan sin almacenes ni existencias de SAP. El resumen y la ficha indican `comparacionDisponible`; no se interpretan datos ausentes como cero. Los descuentos basados en diferencias requieren almacenes elegidos y datos recibidos en los últimos 30 minutos. El puente actual no envía esas entidades, por lo que la comparación queda deshabilitada. Antes de habilitar esas entidades falta una señal de recorrido completo: la antigüedad de un lote no acredita que todo esté sincronizado.
+- Migración `20261002100000_operaciones_inventario_y_codigos_ficha`: agrega `inventario_operaciones` y recupera asociaciones del código principal de productos que ya estaban sincronizados. Conserva asociaciones activas equivalentes y no confirma etiquetas automáticamente.
+- La confirmación masiva de etiquetas comprueba cantidad y versión del conjunto revisado. Cambiar un código manteniendo el mismo número de etiquetas ahora produce `ETIQUETAS_CAMBIARON`.
+- Contrato de la app: conservar UUID y cuerpo por acción al reintentar; en confirmación masiva enviar `versionEsperada` desde `versionManual` del resumen. Coordinar la actualización del frontend: una versión que omita estos campos recibirá 400. Detalle en `docs/INVENTARIO.md`.
+
+Verificado: **404/404 pruebas**, validación del esquema Prisma y prueba con PostgreSQL 18 temporal en localhost. Se aplicaron todas las migraciones sobre una base vacía; se verificaron recuperación de códigos, ausencia de duplicados y de confirmaciones automáticas, recepción/reposición simultáneas, conflicto por reutilización y repetición de conteo después de otro movimiento. No se aplicaron migraciones en Railway ni se cambió el servidor de SAP.
+
+Pendiente de decisión funcional: permitir o bloquear existencias negativas al finalizar picking, y conservar lotes separados dentro de la bodega pequeña. No se cambian esas reglas en esta corrección. Los cambios del puente recuperados del stash se conservaron.
+
+## 30. Despacho sin negativos y lotes en la pequeña (2026-10-01)
+
+Decisiones confirmadas por el usuario: si faltan unidades en la pequeña, exigir reposición desde la grande antes de finalizar; conservar los lotes también en la pequeña.
+
+- El cierre verifica todos los productos, incluidos los que todavía no tienen inventario. Un faltante devuelve `PEQUENA_INSUFICIENTE` y conserva la preparación abierta. La salida y el cierre ocurren en una sola transacción con candados por producto.
+- Nueva tabla `inventario_pequena_lotes`; reposición conserva lote y vencimiento de la caja. Recepciones, conteos, descuentos, reasignaciones y picking mantienen los saldos por lote. Los movimientos guardan el identificador del lote y las consultas muestran el detalle.
+- Varios lotes disponibles requieren selección explícita al finalizar: el código de barras del producto no permite adivinar el lote físico. Con un único lote se puede conservar el cierre sin selección adicional. Se rechazan lotes ajenos, duplicados, insuficientes o cuya suma no coincide.
+- Conteos por lote pueden corregir la distribución sin alterar el total. Un descuento reasignado devuelve al lote original. Los vencimientos también incluyen existencias de la pequeña.
+- Migración `20261002110000_lotes_pequena_sin_negativos`: saldos anteriores positivos quedan sin lote identificado; negativos anteriores se conservan para conteo. No se borran ni se convierten en cero. Se impiden nuevos negativos y se exige conciliar los antiguos antes de reponer.
+
+Verificado: **419/419 pruebas**. PostgreSQL 18 temporal local: todas las migraciones, saldos antiguos, corrección de negativos, reposición idempotente, selección física de lote, dos pedidos compitiendo por existencias, rollback de un pedido con faltantes, conteos, vencimientos, descuentos y reasignaciones con rollback. Se generó el cliente Prisma actualizado. No se modificaron Railway ni SAP.
+
+Antes de desplegar: aplicar migraciones en la base del backend y actualizar la app para enviar `operacionId`, `versionEsperada`, selección de lotes al finalizar y conteos por lote. Contratos en `docs/INVENTARIO.md`. El frontend no se modificó en esta sesión.
+
+Puente: se conserva versionado; sus cambios locales previos quedan fuera del commit sugerido del backend. Separarlo en un repositorio propio requiere trasladar también los contratos compartidos, pruebas y empaquetado; ignorar solo su carpeta dejaría referencias rotas en un clon nuevo.

@@ -1,5 +1,11 @@
 import { z } from "zod";
 import { safeString } from "../../shared/validation/safeString.js";
+import { seleccionLotesSchema } from "../inventario/inventario.schemas.js";
+
+export const finalizarBodySchema = z.object({
+  lotes: z.array(z.object({ itemCode: z.string().trim().min(1).max(50), lotes: seleccionLotesSchema }).strict())
+    .max(1000).refine(filas => new Set(filas.map(f => f.itemCode)).size === filas.length, "No repetir productos").default([]),
+}).strict().default({ lotes: [] });
 
 export const iniciarBodySchema = z.object({
   pedidoDocEntry: z.coerce.number().int().positive(),

@@ -46,8 +46,8 @@ export function contarEtiquetas() {
   return repo.contar();
 }
 
-export async function confirmarManualPendientes({ cantidadEsperada }, { aplicacion }) {
-  const { confirmadas, disponibles } = await repo.confirmarManualPendientes({ cantidadEsperada, confirmadaPor: aplicacion });
+export async function confirmarManualPendientes({ cantidadEsperada, versionEsperada }, { aplicacion }) {
+  const { confirmadas, disponibles } = await repo.confirmarManualPendientes({ cantidadEsperada, versionEsperada, confirmadaPor: aplicacion });
   if (disponibles !== cantidadEsperada) {
     throw new AppError({ code: "CANTIDAD_CAMBIO", statusCode: 409,
       message: `Ahora hay ${disponibles} códigos con unidad Manual sin confirmar (antes ${cantidadEsperada}). Revisá la lista y volvé a intentar.` });

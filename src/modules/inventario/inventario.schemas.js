@@ -1,7 +1,10 @@
 import { z } from "zod";
 
 const id = z.coerce.number().int().min(1).max(2147483647);
+const operacionId = z.string().uuid();
 const unidades = z.number().int().min(1).max(1_000_000);
+export const seleccionLotesSchema = z.array(z.object({ pequenaLoteId: id, unidades }).strict()).min(1).max(200)
+  .refine(filas => new Set(filas.map(f => f.pequenaLoteId)).size === filas.length, "No repetir lotes");
 const itemCode = z.string().trim().min(1).max(50);
 const lote = z.string().trim().min(1).max(60).nullable().optional();
 const fecha = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha con formato AAAA-MM-DD")
@@ -22,28 +25,31 @@ export const descuentosQuerySchema = z.object({ antesDe: id.optional(), limit: l
 
 // En cajas: N cajas iguales a la grande, cada una con su etiqueta. Suelto: un bulto a la grande o unidades a la pequeña.
 export const recepcionSchema = z.discriminatedUnion("modo", [
-  z.object({ modo: z.literal("cajas"), itemCode, cajas: z.number().int().min(1).max(200), unidadesPorCaja: unidades,
+  z.object({ operacionId, modo: z.literal("cajas"), itemCode, cajas: z.number().int().min(1).max(200), unidadesPorCaja: unidades,
     lote, vencimiento: fecha.nullable().optional(), adelantar: z.boolean().default(false) }).strict(),
-  z.object({ modo: z.literal("suelto"), itemCode, unidades, destino: z.enum(["grande", "pequena"]),
+  z.object({ operacionId, modo: z.literal("suelto"), itemCode, unidades, destino: z.enum(["grande", "pequena"]),
     lote, vencimiento: fecha.nullable().optional(), adelantar: z.boolean().default(false) }).strict(),
 ]).refine((r) => r.modo === "cajas" ? r.cajas * r.unidadesPorCaja <= 1_000_000 : true,
   { message: "Demasiadas unidades en una sola recepción", path: ["unidadesPorCaja"] });
 
-export const reposicionSchema = z.object({ caja: cajaParamsSchema.shape.codigo, unidades }).strict();
+export const reposicionSchema = z.object({ operacionId, caja: cajaParamsSchema.shape.codigo, unidades }).strict();
 
 const asignacion = z.discriminatedUnion("tipo", [
   z.object({ tipo: z.literal("lote"), lote: z.string().trim().min(1).max(60).nullable(), unidades }).strict(),
-  z.object({ tipo: z.literal("pequena"), unidades }).strict(),
+  z.object({ tipo: z.literal("pequena"), unidades, lotes: seleccionLotesSchema.optional() }).strict(),
 ]);
 const asignaciones = z.array(asignacion).min(1).max(50).refine((lista) => {
   const claves = lista.map((a) => (a.tipo === "pequena" ? "pequena" : `lote:${a.lote ?? ""}`));
   return new Set(claves).size === claves.length;
 }, "Cada lote (y la pequeña) va una sola vez");
 
-export const descuentoSchema = z.object({ itemCode, unidades, asignaciones }).strict();
-export const reasignacionSchema = z.object({ asignaciones }).strict();
-export const conteoSchema = z.object({ unidades: z.number().int().min(0).max(1_000_000) }).strict();
-export const correccionCajaSchema = z.object({ unidades: z.number().int().min(0).max(1_000_000) }).strict();
+export const descuentoSchema = z.object({ operacionId, itemCode, unidades, asignaciones }).strict();
+export const reasignacionSchema = z.object({ operacionId, asignaciones }).strict();
+export const conteoSchema = z.object({ operacionId, unidades: z.number().int().min(0).max(1_000_000),
+  lotes: z.array(z.object({ lote, vencimiento: fecha.nullable().optional(), unidades: z.number().int().min(0).max(1_000_000) }).strict())
+    .max(200).refine(filas => new Set(filas.map(f => JSON.stringify([f.lote ?? null, f.vencimiento ?? null]))).size === filas.length, "No repetir lotes").optional(),
+}).strict();
+export const correccionCajaSchema = z.object({ operacionId, unidades: z.number().int().min(0).max(1_000_000) }).strict();
 
 // Panel del supervisor.
 export const almacenesSchema = z.object({

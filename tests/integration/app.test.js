@@ -641,7 +641,11 @@ function prepararEscaneoHttp(t, cambios = {}) {
   });
   sustituir(t, prisma, "$transaction", async (operacion) => operacion(tx));
   t.mock.method(inventarioRepository, "bloquearProductos", async () => {});
-  t.mock.method(inventarioRepository, "estadoProducto", async () => null);
+  t.mock.method(inventarioRepository, "estadoProducto", async () => ({ pequena: 10 }));
+  t.mock.method(inventarioRepository, "lotesPequena", async () => [{ id: 1, lote: "L1", unidades: 10 }]);
+  t.mock.method(inventarioRepository, "cambiarLotePequena", async () => ({ id: 1, lote: "L1" }));
+  t.mock.method(inventarioRepository, "cambiarPequena", async () => 1);
+  t.mock.method(inventarioRepository, "registrarMovimientos", async () => {});
   t.mock.method(pickingEtiquetasRepository, "buscarProductos", async (codigo, db) => {
     assert.equal(db, tx);
     assert.equal(codigo, "00123");
@@ -746,6 +750,30 @@ for (const cantidad of [2, 3]) {
     assert.ok(data.fechaFin);
   });
 }
+
+test("HTTP finalizar rechaza faltantes y pide reponer desde la grande", async (t) => {
+  const headers = autenticar(t);
+  prepararEscaneoHttp(t, { linea: { cantidadEscaneada: 3 } });
+  t.mock.method(inventarioRepository, "estadoProducto", async () => ({ pequena: 2 }));
+  const r = await fetch(`${baseUrl}/picking/25/finalizar`, { method: "POST", headers });
+  assert.equal(r.status, 409);
+  assert.match((await r.json()).error, /reposición desde la grande/);
+  assert.equal(inventarioRepository.cambiarPequena.mock.callCount(), 0);
+});
+
+test("HTTP finalizar exige lote cuando hay varios y admite el elegido", async (t) => {
+  const headers = { ...autenticar(t), "Content-Type": "application/json" };
+  prepararEscaneoHttp(t, { linea: { cantidadEscaneada: 3 } });
+  t.mock.method(inventarioRepository, "lotesPequena", async () => [{ id: 1, lote: "A", unidades: 5 }, { id: 2, lote: "B", unidades: 5 }]);
+  t.mock.method(inventarioRepository, "cambiarLotePequena", async id => ({ id, lote: id === 1 ? "A" : "B" }));
+  const sinLote = await fetch(`${baseUrl}/picking/25/finalizar`, { method: "POST", headers, body: "{}" });
+  assert.equal(sinLote.status, 409);
+  assert.equal(inventarioRepository.cambiarPequena.mock.callCount(), 0);
+  const conLote = await fetch(`${baseUrl}/picking/25/finalizar`, { method: "POST", headers,
+    body: JSON.stringify({ lotes: [{ itemCode: "PROD-001", lotes: [{ pequenaLoteId: 2, unidades: 3 }] }] }) });
+  assert.equal(conLote.status, 200);
+  assert.equal(inventarioRepository.registrarMovimientos.mock.calls[0].arguments[0][0].pequenaLoteId, 2);
+});
 
 
 test("HTTP repetir el mismo operacionId devuelve la misma respuesta y no incrementa", async (t) => {

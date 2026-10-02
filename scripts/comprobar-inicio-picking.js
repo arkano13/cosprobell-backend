@@ -5,15 +5,21 @@ import { iniciarPicking, finalizarPicking } from "../src/modules/picking/picking
 import { pickingRepository } from "../src/modules/picking/picking.repository.js";
 
 const cardCode = `TEST-INICIO-${randomUUID()}`;
+const itemCode = `TEST-${randomUUID()}`;
 const docEntry = -randomInt(100000, 2000000000);
 let creado = false;
 try {
   await prisma.$transaction(async (tx) => {
     await tx.cliente.create({ data: { cardCode, cardName: "Prueba temporal de inicio" } });
+    await tx.producto.create({ data: { itemCode, itemName: "Producto temporal de inicio" } });
+    await tx.inventarioProducto.create({ data: { itemCode, pequena: 5 } });
+    await tx.inventarioPequenaLote.create({ data: { itemCode, clave: JSON.stringify([itemCode, "DEMO", null]), lote: "DEMO", unidades: 5 } });
     await tx.pedido.create({ data: {
       docEntry, docNum: docEntry, cardCode, docDate: new Date(), docTotal: 0,
       documentStatus: "bost_Open", cancelled: false, cancelStatus: "csNo",
-      lineas: { create: [{ lineNum: 0, itemCode: "TEST-INICIO", quantity: 5, uomEntry: 1, uomCode: "UN" }] },
+      docType: "dDocument_Items",
+      lineas: { create: [{ lineNum: 0, itemCode, quantity: 5, uomEntry: 1, uomCode: "UN",
+        lineStatus: "bost_Open", remainingOpenQuantity: 5, remainingOpenInventoryQuantity: 5, inventoryQuantity: 5 }] },
     } });
   }, { maxWait: 10000, timeout: 20000 });
   creado = true;
@@ -89,6 +95,10 @@ try {
         await tx.pedidoLinea.deleteMany({ where: { pedidoDocEntry: docEntry } });
         await tx.pedido.delete({ where: { docEntry } });
         await tx.cliente.delete({ where: { cardCode } });
+        await tx.inventarioMovimiento.deleteMany({ where: { itemCode } });
+        await tx.inventarioPequenaLote.deleteMany({ where: { itemCode } });
+        await tx.inventarioProducto.delete({ where: { itemCode } });
+        await tx.producto.delete({ where: { itemCode } });
       }, { maxWait: 10000, timeout: 20000 });
       console.log("Datos temporales eliminados.");
     }

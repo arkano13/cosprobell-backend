@@ -102,6 +102,7 @@ model Producto {
   existencias   ProductoExistencia[]
   codigosBarras ProductoCodigoBarras[]
   inventario    InventarioProducto?
+  lotesPequena  InventarioPequenaLote[]
   cajas         InventarioCaja[]
 
   @@map("productos")
@@ -799,6 +800,8 @@ model InventarioMovimiento {
   cajaId      Int?
   caja        InventarioCaja?      @relation(fields: [cajaId], references: [id])
   lote        String?
+  pequenaLoteId Int?
+  pequenaLote InventarioPequenaLote? @relation(fields: [pequenaLoteId], references: [id])
   pickingId   Int?
   descuentoId Int?
   descuento   InventarioDescuento? @relation(fields: [descuentoId], references: [id])
@@ -810,7 +813,23 @@ model InventarioMovimiento {
   @@index([creadoEn])
   @@index([grupo])
   @@index([descuentoId])
+  @@index([pequenaLoteId], map: "inventario_movimientos_pequena_lote_idx")
   @@map("inventario_movimientos")
+}
+
+model InventarioPequenaLote {
+  id Int @id @default(autoincrement())
+  clave String @unique
+  itemCode String
+  producto Producto @relation(fields: [itemCode], references: [itemCode])
+  lote String?
+  vencimiento DateTime? @db.Date
+  unidades Int
+  creadoEn DateTime @default(now())
+  movimientos InventarioMovimiento[]
+
+  @@index([itemCode], map: "inventario_pequena_lotes_producto_idx")
+  @@map("inventario_pequena_lotes")
 }
 
 // Lo que SAP descontó y la bodega asignó a lotes o a la bodega pequeña.
@@ -873,4 +892,13 @@ model Configuracion {
   actualizadoPor String?
 
   @@map("configuracion")
+}
+
+model InventarioOperacion {
+  id String @id @db.Uuid
+  hash String
+  respuesta Json
+  creadoEn DateTime @default(now())
+
+  @@map("inventario_operaciones")
 }

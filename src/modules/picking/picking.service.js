@@ -233,7 +233,7 @@ export async function consultarHistorialPicking(id, query = {}) {
   };
 }
 
-export async function finalizarPicking(id) {
+export async function finalizarPicking(id, { lotes = [] } = {}) {
   return conSesionBloqueada(id, async ({ tx, sesion }) => {
     comprobarSesionActiva(sesion);
 
@@ -254,7 +254,7 @@ export async function finalizarPicking(id) {
       : "completo";
 
     // Lo preparado sale de la bodega pequeña junto con el cierre: si algo falla, no se cierra.
-    await descontarPorPicking({ pickingId: id, lineas: picking.lineas, hechoPor: picking.usuarioId ?? null }, tx);
+    await descontarPorPicking({ pickingId: id, lineas: picking.lineas, lotes, hechoPor: picking.usuarioId ?? null }, tx);
 
     return pickingRepository.guardarFinalizacion(
       id,

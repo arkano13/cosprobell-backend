@@ -77,9 +77,9 @@ test("confirmación masiva: solo si la cantidad sigue siendo la que vio el super
   t.mock.method(etiquetasRepository, "confirmarManualPendientes", async (datos) => {
     llamadas.push(datos); return datos.cantidadEsperada === 12 ? { confirmadas: 12, disponibles: 12 } : { confirmadas: 0, disponibles: 12 };
   });
-  const bien = await enviar("/supervisor/etiquetas/confirmacion-manual", headers, "POST", { cantidadEsperada: 12 });
+  const bien = await enviar("/supervisor/etiquetas/confirmacion-manual", headers, "POST", { cantidadEsperada: 12, versionEsperada: "a".repeat(64) });
   assert.equal(bien.status, 200); assert.deepEqual((await bien.json()).data, { confirmadas: 12 });
-  const distinta = await enviar("/supervisor/etiquetas/confirmacion-manual", headers, "POST", { cantidadEsperada: 10 });
+  const distinta = await enviar("/supervisor/etiquetas/confirmacion-manual", headers, "POST", { cantidadEsperada: 10, versionEsperada: "a".repeat(64) });
   assert.equal(distinta.status, 409); assert.equal((await distinta.json()).error.code, "CANTIDAD_CAMBIO");
   assert.equal((await enviar("/supervisor/etiquetas/confirmacion-manual", headers, "POST", { cantidadEsperada: 0 })).status, 400);
   assert.deepEqual(llamadas.map((l) => l.confirmadaPor), ["operador:Carmen Díaz", "operador:Carmen Díaz"]);

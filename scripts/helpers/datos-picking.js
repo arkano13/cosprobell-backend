@@ -24,6 +24,9 @@ export async function conDatosPicking(cantidades, operacion) {
       { itemCode, itemName: "Shampoo de demostración" },
       { itemCode: otroItemCode, itemName: "Otro producto de demostración" },
     ] });
+    const unidades = cantidades.reduce((suma, cantidad) => suma + cantidad, 0);
+    await tx.inventarioProducto.create({ data: { itemCode, pequena: unidades } });
+    await tx.inventarioPequenaLote.create({ data: { itemCode, clave: JSON.stringify([itemCode, "DEMO", null]), lote: "DEMO", unidades } });
     for (const etiqueta of [
       { itemCode, codigo, uomEntry: unidadId, individual: true },
       { itemCode, codigo: cajaCodigo, uomEntry: cajaId, individual: false },
@@ -63,6 +66,9 @@ export async function conDatosPicking(cantidades, operacion) {
       await tx.pickingPedidoLinea.deleteMany({ where: { pickingId: sesionId } });
       await tx.pickingPedido.delete({ where: { id: sesionId } });
       const filtro = { itemCode: { in: [itemCode, otroItemCode] } };
+      await tx.inventarioMovimiento.deleteMany({ where: filtro });
+      await tx.inventarioPequenaLote.deleteMany({ where: filtro });
+      await tx.inventarioProducto.deleteMany({ where: filtro });
       const etiquetas = await tx.productoCodigoBarras.findMany({ where: filtro, select: { id: true } });
       await tx.confirmacionEtiquetaPicking.deleteMany({ where: {
         codigoBarrasId: { in: etiquetas.map((etiqueta) => etiqueta.id) },

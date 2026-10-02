@@ -1,6 +1,7 @@
 // Consultas del inventario. Los cambios de un producto se hacen con su candado tomado (conProducto).
 import { Prisma } from "../../../generated/prisma/client.js";
 import { prisma } from "../../infrastructure/database/prisma.js";
+import { ejecutarUnaVez } from "./inventario.operacion.js";
 
 const literal = (texto) => texto.replace(/[\\%_]/g, (c) => `\\${c}`);
 
@@ -25,12 +26,44 @@ const SIN_ENTREGA = Prisma.sql`
   GROUP BY l."itemCode"`;
 
 export const inventarioRepository = {
+  lotesPequena(itemCode, db = prisma) {
+    return db.$queryRaw`SELECT * FROM inventario_pequena_lotes WHERE "itemCode" = ${itemCode} AND unidades > 0
+      ORDER BY vencimiento ASC NULLS LAST, id`;
+  },
+  async sumarLotePequena(itemCode, lote, vencimiento, unidades, tx) {
+    const fecha = vencimiento ? new Date(vencimiento).toISOString().slice(0, 10) : null;
+    const clave = JSON.stringify([itemCode, lote ?? null, fecha]);
+    const [fila] = await tx.$queryRaw`
+      INSERT INTO inventario_pequena_lotes (clave, "itemCode", lote, vencimiento, unidades)
+      VALUES (${clave}, ${itemCode}, ${lote ?? null}, ${fecha}::date, ${unidades})
+      ON CONFLICT (clave) DO UPDATE SET unidades = inventario_pequena_lotes.unidades + EXCLUDED.unidades
+      RETURNING *`;
+    return fila;
+  },
+  async cambiarLotePequena(id, itemCode, delta, tx) {
+    const filas = await tx.$queryRaw`UPDATE inventario_pequena_lotes SET unidades = unidades + ${delta}
+      WHERE id = ${id} AND "itemCode" = ${itemCode} AND unidades + ${delta} >= 0 RETURNING *`;
+    return filas[0] ?? null;
+  },
+  async comparacionDisponible(db = prisma) {
+    // Conservador: sin recorridos recientes de ambas entidades no se autoriza
+    // convertir una diferencia con SAP en un descuento físico.
+    const [fila] = await db.$queryRaw`
+      SELECT EXISTS (SELECT 1 FROM bodegas WHERE "deEstaBodega")
+        AND (SELECT COUNT(*) = 2 FROM sincronizacion_estados
+             WHERE entidad IN ('almacenes', 'existencias')
+               AND "actualizadoEn" >= now() - interval '30 minutes') AS disponible`;
+    return fila?.disponible === true;
+  },
   // Una operación por producto a la vez: recepciones, reposiciones, descuentos y picking no se pisan.
-  conProducto(itemCodes, operacion) {
+  conProducto(itemCodes, operacion, solicitud = null) {
     const lista = [...new Set([].concat(itemCodes))].sort();
     return prisma.$transaction(async (tx) => {
-      for (const itemCode of lista) await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`inventario:${itemCode}`}))::text`;
-      return operacion(tx);
+      const ejecutar = async () => {
+        for (const itemCode of lista) await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`inventario:${itemCode}`}))::text`;
+        return operacion(tx);
+      };
+      return solicitud ? ejecutarUnaVez(tx, solicitud, ejecutar) : ejecutar();
     }, { isolationLevel: "ReadCommitted", maxWait: 10_000, timeout: 30_000 });
   },
   transaccion(operacion) {
@@ -197,9 +230,13 @@ export const inventarioRepository = {
              COALESCE(SUM(m.cantidad) FILTER (WHERE m.bodega = 'grande'), 0)::int AS grande,
              COALESCE(SUM(m.cantidad) FILTER (WHERE m.bodega = 'pequena'), 0)::int AS pequena,
              COUNT(DISTINCT m."cajaId")::int AS cajas, MIN(m.lote) AS lote, COUNT(DISTINCT m.lote)::int AS lotes,
+             COALESCE(JSONB_AGG(jsonb_build_object('pequenaLoteId', m."pequenaLoteId", 'lote', m.lote,
+               'vencimiento', lp.vencimiento, 'cantidad', m.cantidad) ORDER BY m.id)
+               FILTER (WHERE m."pequenaLoteId" IS NOT NULL), '[]'::jsonb) AS "lotesPequena",
              MAX(m."creadoEn") AS "creadoEn", MIN(m."hechoPor") AS "hechoPor", MIN(pe."docNum") AS "docNum", MIN(m.observacion) AS observacion
       FROM inventario_movimientos m
       JOIN productos p ON p."itemCode" = m."itemCode"
+      LEFT JOIN inventario_pequena_lotes lp ON lp.id = m."pequenaLoteId"
       LEFT JOIN picking_pedidos pp ON pp.id = m."pickingId"
       LEFT JOIN pedidos pe ON pe."docEntry" = pp."pedidoDocEntry"
       WHERE ${Prisma.join(condiciones, " AND ")}
@@ -230,13 +267,18 @@ export const inventarioRepository = {
 
   porVencer(dias, db = prisma) {
     return db.$queryRaw`
-      SELECT c."itemCode", p."itemName", c.lote, c.vencimiento, COUNT(*)::int AS cajas, SUM(c.unidades)::int AS unidades,
-             COALESCE(MAX(ip.pequena), 0)::int AS pequena, (c.vencimiento < CURRENT_DATE) AS vencido,
+      WITH saldos AS (
+        SELECT "itemCode", lote, vencimiento, unidades, 1 AS cajas, 0 AS pequena FROM inventario_cajas WHERE unidades > 0
+        UNION ALL
+        SELECT "itemCode", lote, vencimiento, 0 AS unidades, 0 AS cajas, unidades AS pequena
+        FROM inventario_pequena_lotes WHERE unidades > 0
+      )
+      SELECT c."itemCode", p."itemName", c.lote, c.vencimiento, SUM(c.cajas)::int AS cajas, SUM(c.unidades)::int AS unidades,
+             SUM(c.pequena)::int AS pequena, (c.vencimiento < CURRENT_DATE) AS vencido,
              (c.vencimiento - CURRENT_DATE)::int AS dias
-      FROM inventario_cajas c
+      FROM saldos c
       JOIN productos p ON p."itemCode" = c."itemCode"
-      LEFT JOIN inventario_productos ip ON ip."itemCode" = c."itemCode"
-      WHERE c.unidades > 0 AND c.vencimiento IS NOT NULL AND c.vencimiento <= CURRENT_DATE + ${dias}::int
+      WHERE c.vencimiento IS NOT NULL AND c.vencimiento <= CURRENT_DATE + ${dias}::int
       GROUP BY c."itemCode", p."itemName", c.lote, c.vencimiento
       ORDER BY c.vencimiento, p."itemName"`;
   },

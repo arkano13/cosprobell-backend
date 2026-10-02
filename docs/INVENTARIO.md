@@ -3,13 +3,17 @@
 Dos cuartos, uno al lado del otro:
 
 - **Bodega grande**: las cajas tal como llegan, cada una con su lote, su vencimiento (si lo trae) y una etiqueta propia **CJ-000123** que imprime la app.
-- **Bodega pequeña**: las unidades sueltas que se sacan de las cajas y se apilan. De acá salen los pedidos.
+- **Bodega pequeña**: las unidades sueltas que se sacan de las cajas, conservando lote y vencimiento. De acá salen los pedidos. Los lotes deben seguir identificables físicamente.
 
 **SAP manda.** El backend solo lee de SAP (por el puente) y nunca escribe. SAP no tiene lotes ni cajas: existen solo en esta base. No hay "dar de baja" en la app: lo vencido, dañado o devuelto se registra primero en SAP.
 
 ## Contra qué se compara
 
-SAP de Cosprobell tiene muchos almacenes (en la muestra, unos 100 códigos por artículo). El supervisor marca en la app cuáles son de esta bodega (**Panel → Almacenes**, `PUT /supervisor/almacenes`). Hasta que marque alguno, el inventario no se compara y no se puede recibir (`409 ALMACENES_SIN_ELEGIR`).
+El supervisor marca en la app cuáles almacenes de SAP corresponden a esta bodega (**Panel → Almacenes**, `PUT /supervisor/almacenes`). Las recepciones, reposiciones, conteos y correcciones funcionan con el inventario local aunque no haya almacenes elegidos o existencias de SAP disponibles.
+
+El resumen y la ficha indican `comparacionDisponible`. La comparación requiere almacenes elegidos y recepción de datos de `almacenes` y `existencias` en los últimos 30 minutos. El puente actual no envía esas entidades: la comparación permanecerá deshabilitada. Los pendientes y descuentos basados en diferencias se rechazan con `ALMACENES_SIN_ELEGIR` o `COMPARACION_SAP_NO_DISPONIBLE`. La ausencia de datos no representa existencias cero.
+
+Este control de antigüedad es conservador: una recepción reciente no demuestra que terminó un recorrido completo. Antes de habilitar el envío de estas entidades debe incorporarse la confirmación de recorridos completos y coordinarse su frecuencia; no basta con enviar un lote parcial.
 
 Para cada producto:
 
@@ -38,13 +42,48 @@ SAP (almacenes marcados) = grande + pequeña + preparado sin entregar + diferenc
 
 Reglas:
 
-- **Recibir**: si se recibe más de lo que SAP tiene por ubicar, responde `409 EXCEDE_POR_UBICAR`; con `adelantar: true` se acepta y se anota como recibido antes que SAP. Cada caja recibe su código al crearse; la respuesta trae los datos para las etiquetas.
+- **Recibir**: sin comparación disponible, registra la entrada física local. Con comparación disponible, si se recibe más de lo que SAP tiene por ubicar, responde `409 EXCEDE_POR_UBICAR`; con `adelantar: true` se acepta y se anota como recibido antes que SAP. Cada caja recibe su código al crearse; la respuesta trae los datos para las etiquetas.
 - **Descontar**: solo con la diferencia estable y exacta (`409 SAP_ACTUALIZANDO` o `409 CANTIDAD_CAMBIO`); hay que asignar exactamente lo que SAP descontó. Dentro de un lote se resta primero de la caja abierta y después de las cerradas en orden de llegada. La respuesta dice qué cajas sacar del estante.
 - **Cambiar lote**: devuelve lo restado a sus cajas (o a la pequeña) y resta según lo nuevo. Guarda quién, cuándo y cuál era la asignación anterior.
-- **Picking**: al finalizar una preparación, lo escaneado sale de la pequeña, en la misma transacción que cierra la preparación (solo productos que ya están en el inventario).
-- **Conteo y corrección** dejan el número contado; si no coincide con SAP, queda como diferencia visible.
+- **Picking**: al finalizar, todos los productos escaneados deben tener suficientes unidades registradas en la pequeña. Si faltan, responde 409 y exige reponer desde la grande; la preparación permanece abierta. No se descuenta automáticamente de la grande ni se omiten productos sin inventario. Si hay varios lotes, se exige indicar cuáles salieron; un lote único se identifica automáticamente. El cierre y los descuentos se confirman juntos.
+- **Conteo y corrección** dejan el número contado. La diferencia con SAP solo se muestra cuando la comparación está disponible.
 - Cada cambio de un producto toma su candado (`pg_advisory_xact_lock`): dos operaciones del mismo producto no se pisan. La base impide cajas con unidades negativas.
 - **Movimientos**: cada operación queda registrada con tipo, bodega, cantidad, caja, lote, quién y cuándo, agrupada por operación.
+
+## Lotes en la pequeña y existencias anteriores
+
+`inventario_pequena_lotes` conserva cantidades por producto, lote y vencimiento. Reponer desde una caja conserva esos datos. La ficha del producto devuelve `lotesPequena` con los identificadores que usa la selección de despacho. El historial de movimientos también incluye `lotesPequena`; los vencimientos separan las unidades de la grande y las de la pequeña de ese lote.
+
+Al finalizar picking, el cuerpo puede incluir:
+
+```json
+{
+  "lotes": [
+    { "itemCode": "P1", "lotes": [
+      { "pequenaLoteId": 12, "unidades": 3 },
+      { "pequenaLoteId": 15, "unidades": 2 }
+    ] }
+  ]
+}
+```
+
+La suma debe coincidir con lo escaneado por producto. `LOTES_REQUERIDOS` pide selección física; `LOTE_INSUFICIENTE` pide actualizar las existencias. No se elige un lote por vencimiento sin confirmación del trabajador.
+
+Para contar, `PUT /inventario/productos/:itemCode/pequena` admite `lotes: [{ lote, vencimiento, unidades }]` junto al total `unidades` y `operacionId`. Con varios lotes, el detalle es obligatorio. Un conteo puede corregir la distribución aunque el total no cambie. En descuentos y reasignaciones, una asignación `tipo: "pequena"` admite `lotes: [{ pequenaLoteId, unidades }]`.
+
+La migración `20261002110000_lotes_pequena_sin_negativos` conserva los saldos positivos anteriores como lote desconocido (`lote: null`). Hace falta un conteo para distribuirlos cuando corresponda; no reconstruye lotes históricos. Los negativos antiguos se conservan para conciliarlos mediante conteo y se bloquean nuevos negativos con una restricción de base. Las recepciones a la pequeña y reposiciones exigen corregir un negativo antiguo antes de continuar. Los descuentos antiguos sin identificación de lote no se reasignan automáticamente.
+
+La app necesita incorporar la selección y conteo por lotes, además de los identificadores de operación descritos abajo. Estas modificaciones se hicieron en el backend; los comandos de migración no actualizan la interfaz.
+
+## Reintentos y contrato del frontend
+
+Las seis operaciones físicas (recepción, reposición, descuento, reasignación, conteo y corrección) requieren `operacionId`, un UUID generado por la app, por ejemplo con `crypto.randomUUID()`. Se genera **una vez por acción**, y se conservan el UUID y el cuerpo al reintentar por pérdida de conexión. Una nueva acción lleva otro UUID. No generar uno nuevo automáticamente en cada petición HTTP.
+
+El backend guarda el resultado en `inventario_operaciones` dentro de la misma transacción que modifica las cantidades. Dos envíos simultáneos con el mismo UUID y datos reciben el resultado de una sola operación. Reutilizarlo con otros datos, otra ruta de operación o usuario responde `409 OPERACION_REUTILIZADA`. Un conteo repetido devuelve su respuesta original: no vuelve a fijar la cantidad ni borra movimientos posteriores. Las operaciones se conservan sin caducidad automática.
+
+La confirmación masiva de etiquetas exige `cantidadEsperada` y `versionEsperada`: usar `manualSinConfirmar` y `versionManual` del resumen de etiquetas que revisó el supervisor. Si cambió el conjunto, aunque tenga la misma cantidad, se devuelve `409 ETIQUETAS_CAMBIARON`; actualizar la revisión antes de confirmar otra vez.
+
+**Despliegue coordinado:** aplicar `20261002100000_operaciones_inventario_y_codigos_ficha` antes de usar el backend actualizado y adaptar la app a estos campos. Una app anterior recibirá 400 en estas operaciones. La migración también recupera códigos principales de productos ya sincronizados sin crear asociaciones activas duplicadas ni confirmar etiquetas automáticamente. No requiere reenviar todo el catálogo desde SAP.
 
 ## Pedidos por almacén
 

@@ -6,6 +6,7 @@ import {
   idParamsSchema,
   escanearBodySchema,
   historialQuerySchema,
+  finalizarBodySchema,
 } from "./picking.schemas.js";
 
 import {
@@ -41,7 +42,7 @@ router.post(
 
 router.post(
   "/picking/:id/finalizar",
-  validate({ params: idParamsSchema }),
+  validate({ params: idParamsSchema, body: finalizarBodySchema }),
   finalizar
 );
 

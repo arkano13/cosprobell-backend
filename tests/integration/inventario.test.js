@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
@@ -23,7 +24,42 @@ function conSesion(t, rol = "operador") {
   return { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" };
 }
 const pedir = (ruta, headers, opciones = {}) => fetch(`${url}${ruta}`, { headers, ...opciones });
-const enviar = (ruta, headers, metodo, cuerpo) => pedir(ruta, headers, { method: metodo, body: JSON.stringify(cuerpo) });
+const enviar = (ruta, headers, metodo, cuerpo) => pedir(ruta, headers, { method: metodo, body: JSON.stringify((ruta.startsWith("/inventario/") ? { operacionId: randomUUID(), ...cuerpo } : cuerpo)) });
+
+test("recepción local: funciona sin almacenes SAP y conserva la operación para deduplicar", async (t) => {
+  const hecho = inventario(t, { almacenes: [] });
+  const operacionId = randomUUID();
+  const r = await enviar("/inventario/recepciones", conSesion(t), "POST", {
+    operacionId, itemCode: "P1", modo: "suelto", destino: "pequena", unidades: 12,
+  });
+  assert.equal(r.status, 201);
+  assert.deepEqual(hecho.pequena, [12]);
+  assert.deepEqual(hecho.adelantado, []);
+  assert.equal(repo.conProducto.mock.calls[0].arguments[2].operacionId, operacionId);
+});
+
+test("conteo local: funciona sin almacenes ni existencias SAP", async (t) => {
+  const hecho = inventario(t, { almacenes: [], pequena: 2 });
+  const r = await enviar("/inventario/productos/P1/pequena", conSesion(t, "supervisor"), "PUT", { unidades: 8 });
+  assert.equal(r.status, 200);
+  assert.deepEqual(hecho.pequena, [6]);
+});
+
+test("movimiento sin operacionId se rechaza antes de tocar inventario", async (t) => {
+  const hecho = inventario(t);
+  const r = await pedir("/inventario/recepciones", conSesion(t), { method: "POST",
+    body: JSON.stringify({ itemCode: "P1", modo: "suelto", destino: "pequena", unidades: 12 }) });
+  assert.equal(r.status, 400);
+  assert.deepEqual(hecho.movimientos, []);
+});
+
+test("comparación SAP: existencias no disponibles bloquean descuentos basados en diferencias", async (t) => {
+  inventario(t);
+  t.mock.method(repo, "comparacionDisponible", async () => false);
+  const r = await pedir("/inventario/pendientes", conSesion(t));
+  assert.equal(r.status, 409);
+  assert.equal((await r.json()).error.code, "COMPARACION_SAP_NO_DISPONIBLE");
+});
 
 // Inventario falso: un producto con lo que SAP tiene en los almacenes elegidos y lo que hay en cada bodega.
 function inventario(t, { sap = 0, grande = 0, pequena = 0, activo = true, sapCambioEn = null, cajas = [], almacenes = ["01"] } = {}) {
@@ -31,6 +67,7 @@ function inventario(t, { sap = 0, grande = 0, pequena = 0, activo = true, sapCam
   const hecho = { cajas: [], movimientos: [], pequena: [], adelantado: [], cajaCambios: [], descuentos: [] };
   const tx = {};
   t.mock.method(repo, "almacenesDeEstaBodega", async () => almacenes);
+  t.mock.method(repo, "comparacionDisponible", async () => almacenes.length > 0);
   t.mock.method(repo, "conProducto", async (_itemCodes, op) => op(tx));
   t.mock.method(repo, "estados", async () => [estado]);
   t.mock.method(repo, "activar", async () => {});
@@ -41,6 +78,17 @@ function inventario(t, { sap = 0, grande = 0, pequena = 0, activo = true, sapCam
   t.mock.method(repo, "registrarMovimientos", async (lista) => hecho.movimientos.push(...lista));
   t.mock.method(repo, "cambiarPequena", async (itemCode, delta) => hecho.pequena.push(delta));
   t.mock.method(repo, "estadoProducto", async () => ({ itemCode: "P1", pequena }));
+  const saldos = [{ id: 71, itemCode: "P1", lote: null, vencimiento: null, unidades: pequena }];
+  t.mock.method(repo, "lotesPequena", async () => saldos.filter(s => s.unidades > 0).map(s => ({ ...s })));
+  t.mock.method(repo, "sumarLotePequena", async (itemCode, lote, vencimiento, unidades) => {
+    let fila = saldos.find(s => s.lote === (lote ?? null));
+    if (!fila) { fila = { id: saldos.length + 71, itemCode, lote: lote ?? null, vencimiento, unidades: 0 }; saldos.push(fila); }
+    fila.unidades += unidades; return { ...fila };
+  });
+  t.mock.method(repo, "cambiarLotePequena", async (id, itemCode, delta) => {
+    const fila = saldos.find(s => s.id === id); if (!fila || fila.unidades + delta < 0) return null;
+    fila.unidades += delta; return { ...fila };
+  });
   t.mock.method(repo, "cajasDeLoteBloqueadas", async (itemCode, lote) => cajas.filter((c) => c.lote === lote));
   t.mock.method(repo, "cambiarUnidadesCaja", async (id, delta) => hecho.cajaCambios.push([id, delta]));
   t.mock.method(repo, "documentosRecientes", async () => [{ itemCode: "P1", tipo: "salidaInventario", docNum: 1377 }]);

@@ -1,5 +1,11 @@
 import { Prisma } from "../../../generated/prisma/client.js";
 import { prisma } from "../../infrastructure/database/prisma.js";
+import { createHash } from "node:crypto";
+import { AppError } from "../../shared/errors/AppError.js";
+
+export const versionEtiquetas = filas => createHash("sha256").update(JSON.stringify(
+  [...filas].sort((a, b) => a.id - b.id).map(c => [c.id, c.itemCode, c.codigo, c.uomEntry])
+)).digest("hex");
 
 // Una confirmación está desactualizada si el código cambió después de confirmarse (producto, código o unidad).
 const DESACTUALIZADA = Prisma.sql`(k."itemCodeConfirmado" <> c."itemCode" OR k."codigoConfirmado" <> c.codigo
@@ -46,18 +52,25 @@ export const etiquetasRepository = {
       FROM productos_codigos_barras c
       LEFT JOIN confirmaciones_etiquetas_picking k ON k."codigoBarrasId" = c.id
       WHERE c."retiradoEnSap" = false`;
-    return fila;
+    const pendientes = await db.$queryRaw`
+      SELECT c.id, c."itemCode", c.codigo, c."uomEntry" FROM productos_codigos_barras c
+      WHERE NOT c."retiradoEnSap" AND c."uomEntry" = -1
+        AND NOT EXISTS (SELECT 1 FROM confirmaciones_etiquetas_picking k WHERE k."codigoBarrasId" = c.id)
+      ORDER BY c.id`;
+    return { ...fila, manualSinConfirmar: pendientes.length, versionManual: versionEtiquetas(pendientes) };
   },
   // Confirma como unidad todos los códigos sin confirmar con unidad Manual. Bloquea esas filas como la
-  // confirmación individual y solo aplica si siguen siendo los que vio el supervisor (misma cantidad).
-  confirmarManualPendientes({ cantidadEsperada, confirmadaPor }) {
+  // confirmación individual y solo aplica si siguen siendo los que vio el supervisor (cantidad y contenido).
+  confirmarManualPendientes({ cantidadEsperada, versionEsperada, confirmadaPor }) {
     return prisma.$transaction(async (tx) => {
       const filas = await tx.$queryRaw`
-        SELECT c.id FROM productos_codigos_barras c
+        SELECT c.id, c."itemCode", c.codigo, c."uomEntry" FROM productos_codigos_barras c
         WHERE c."retiradoEnSap" = false AND c."uomEntry" = -1
           AND NOT EXISTS (SELECT 1 FROM confirmaciones_etiquetas_picking k WHERE k."codigoBarrasId" = c.id)
         ORDER BY c.id FOR UPDATE OF c`;
       if (filas.length !== cantidadEsperada) return { confirmadas: 0, disponibles: filas.length };
+      if (versionEtiquetas(filas) !== versionEsperada) throw new AppError({ code: "ETIQUETAS_CAMBIARON",
+        statusCode: 409, message: "Los códigos cambiaron. Actualizá la lista antes de confirmar." });
       const ids = filas.map((f) => f.id);
       const confirmadas = ids.length ? await tx.$executeRaw`
         INSERT INTO confirmaciones_etiquetas_picking ("codigoBarrasId", "esUnidadIndividual", "itemCodeConfirmado",
