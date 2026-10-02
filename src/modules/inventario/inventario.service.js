@@ -117,6 +117,32 @@ export async function listarConteoInicial({ buscar, pagina, limit }) {
   return { data: todos.slice(pagina * limit, (pagina + 1) * limit), total: todos.length };
 }
 
+// Todos los productos de las bodegas: los registrados en la grande o la pequeña y los que SAP tiene en los almacenes
+// de esta bodega. Lo de SAP va con la fecha en que llegó; el estado frente a SAP, solo con comparación disponible.
+const FILTRAR = {
+  todos: () => true,
+  grande: (v) => v.grande > 0,
+  pequena: (v) => v.pequena !== 0,
+  solo_sap: (v) => v.grande === 0 && v.pequena === 0 && v.sap > 0,
+  diferencia: (v) => v.estado === "por_ubicar" || v.estado === "por_descontar",
+};
+export async function listarExistencias({ buscar, filtro, pagina, limit }) {
+  const [almacenes, comparacionDisponible, existenciasSapAl, filas] = await Promise.all([
+    repo.almacenesDeEstaBodega(), repo.comparacionDisponible(), repo.existenciasSapAl(), repo.estados()]);
+  const conSap = almacenes.length > 0;
+  const texto = buscar?.toLowerCase();
+  const vistas = filas.map((f) => {
+    const e = conSap && comparacionDisponible ? vistaEstado(f) : null;
+    return { itemCode: f.itemCode, itemName: f.itemName, grande: f.grande, cajas: f.cajas ?? 0, pequena: f.pequena,
+      sinEntrega: f.sinEntrega, sap: conSap ? Math.round(f.sap ?? 0) : null, estado: e?.estado ?? null, diferencia: e?.diferencia ?? null };
+  }).filter((v) => v.grande !== 0 || v.pequena !== 0 || v.sinEntrega !== 0 || (v.sap ?? 0) !== 0)
+    .filter((v) => !texto || v.itemCode.toLowerCase().includes(texto) || v.itemName.toLowerCase().includes(texto));
+  const conteos = Object.fromEntries(Object.entries(FILTRAR).map(([nombre, cumple]) => [nombre, vistas.filter(cumple).length]));
+  const elegidas = vistas.filter(FILTRAR[filtro]);
+  return { data: elegidas.slice(pagina * limit, (pagina + 1) * limit), total: elegidas.length, conteos,
+    almacenes, comparacionDisponible, existenciasSapAl };
+}
+
 export async function consultarCaja(codigo) {
   const caja = await repo.cajaPorCodigo(codigo);
   if (!caja) throw sinCaja();

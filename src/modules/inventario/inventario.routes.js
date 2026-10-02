@@ -12,6 +12,7 @@ router.get("/productos", validate({ query: v.buscarQuerySchema }), c.productos);
 router.get("/productos/:itemCode", validate({ params: v.itemCodeParamsSchema }), c.producto);
 router.get("/pendientes", c.pendientes);
 router.get("/pendientes/inicial", validate({ query: v.conteoInicialQuerySchema }), c.conteoInicial);
+router.get("/existencias", validate({ query: v.existenciasQuerySchema }), c.existencias);
 router.get("/cajas/:codigo", validate({ params: v.cajaParamsSchema }), c.caja);
 router.get("/por-vencer", validate({ query: v.porVencerQuerySchema }), c.porVencer);
 router.get("/movimientos", validate({ query: v.movimientosQuerySchema }), c.movimientos);

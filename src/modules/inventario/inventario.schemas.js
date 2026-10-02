@@ -19,6 +19,11 @@ export const buscarQuerySchema = z.object({ buscar: z.string().trim().min(1).max
 export const conteoInicialQuerySchema = z.object({
   buscar: z.string().trim().min(1).max(60).optional(), pagina: z.coerce.number().int().min(0).max(10_000).default(0), limit: limit(50),
 }).strict();
+export const FILTROS_EXISTENCIAS = ["todos", "grande", "pequena", "solo_sap", "diferencia"];
+export const existenciasQuerySchema = z.object({
+  buscar: z.string().trim().min(1).max(60).optional(), filtro: z.enum(FILTROS_EXISTENCIAS).default("todos"),
+  pagina: z.coerce.number().int().min(0).max(10_000).default(0), limit: limit(50),
+}).strict();
 export const porVencerQuerySchema = z.object({ dias: z.coerce.number().int().min(0).max(365).default(60) }).strict();
 export const movimientosQuerySchema = z.object({ itemCode: itemCode.optional(), antesDe: id.optional(), limit: limit(30) }).strict();
 export const descuentosQuerySchema = z.object({ antesDe: id.optional(), limit: limit(30) }).strict();
