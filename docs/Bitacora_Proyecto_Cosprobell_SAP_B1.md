@@ -654,3 +654,13 @@ Verificado: **419/419 pruebas**. PostgreSQL 18 temporal local: todas las migraci
 Antes de desplegar: aplicar migraciones en la base del backend y actualizar la app para enviar `operacionId`, `versionEsperada`, selección de lotes al finalizar y conteos por lote. Contratos en `docs/INVENTARIO.md`. El frontend no se modificó en esta sesión.
 
 Puente: se conserva versionado; sus cambios locales previos quedan fuera del commit sugerido del backend. Separarlo en un repositorio propio requiere trasladar también los contratos compartidos, pruebas y empaquetado; ignorar solo su carpeta dejaría referencias rotas en un clon nuevo.
+
+## Ampliación del puente: almacenes y existencias (2026-10-02)
+
+Se incorporaron almacenes y existencias por artículo/almacén, activables con BRIDGE_INVENTORY_ENABLED. Conserva el estado anterior y el inventario físico local. SAP se consulta por páginas; al backend se envían cambios y se confirman códigos sin cambios. Se transmite correctamente la transición a cero y se conserva el presupuesto compartido.
+
+Se registran inicio y fin de recorridos para impedir comparaciones sobre cargas parciales. Requiere la migración 20261002120000_recorridos_inventario antes de desplegar el backend. Documentos de movimientos quedan pendientes.
+
+Verificado: 443/443 pruebas y esquema Prisma válido. Muestras locales de SAP: 20 almacenes y 5 artículos. PostgreSQL temporal local: pausa/reanudación, actualización sin cambios, transición de 12 a cero, conservación de la pequeña y caducidad de comparación. No se desplegó en Railway ni se consultó SAP real en esta sesión.
+
+Paquete independiente: dist/puente-inventario. Procedimiento completo en docs/ACTUALIZAR_ALMACENES_EXISTENCIAS.md. Antes de activar, actualizar backend y paquete del servidor preservando configuración y estado; verificar sondeo y primera carga de ambas entidades.

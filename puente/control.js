@@ -18,7 +18,7 @@ export function crearControl(config, { ahora = Date.now, dormir = esperar } = {}
 }
 
 export function entidadPendiente(estado, nombre, config, ahora = Date.now()) {
-  if (estado.pendiente || estado.cursor !== null || estado.inicioRecorrido || estado.porRevisar) return true;
+  if (estado.pendiente || estado.cursor !== null || estado.inicioRecorrido || estado.porRevisar || estado.recorridoId) return true;
   if (!estado.ultimoCompleto) return true;
   if (config.forzar) return true;
   const intervalo = config.frecuencias?.[nombre];

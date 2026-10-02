@@ -1,6 +1,7 @@
 import { ErrorPuente } from "./http.js";
 import { PRODUCTOS } from "./entidades.js";
 import { separarCambios, claveHuella } from "./huellas.js";
+import { randomUUID } from "node:crypto";
 export async function sincronizar({ config, almacen, sap, backend, entidad = PRODUCTOS, detenido = () => false }) {
   let estado = almacen.estado;
   const guardar = async (siguiente) => { await almacen.guardar(siguiente); almacen.estado = estado = siguiente; };
@@ -10,6 +11,16 @@ export async function sincronizar({ config, almacen, sap, backend, entidad = PRO
   const coincide = remoto === estado.secuencia || (estado.pendiente && remoto === estado.pendiente.lote.secuencia);
   if (!coincide) throw new ErrorPuente("REQUIERE_RECONCILIACION");
   let lotes = 0, terminado = false;
+  if (entidad.confirmarRecorrido) {
+    if (!estado.recorridoId) {
+      // Al actualizar desde una versión anterior, confirmar primero cualquier lote pendiente
+      // y recorrer desde el inicio. Conservar secuencias y caché, sin editar archivos a mano.
+      await guardar({ ...estado, cursor: estado.pendiente ? estado.cursor : null,
+        reiniciarRecorrido: Boolean(estado.pendiente), recorridoId: randomUUID(), finalizando: false });
+    }
+    await backend.recorrido(entidad, "iniciar", estado.recorridoId);
+    if (estado.finalizando) terminado = true;
+  }
   // Al empezar un recorrido se anota la hora del backend. Al terminarlo:
   // - pedidos: los que el backend tiene abiertos y no se actualizaron desde entonces ya no figuran abiertos
   //   en SAP (se cerraron o cancelaron); se piden uno por uno para registrar su estado actual.
@@ -18,13 +29,14 @@ export async function sincronizar({ config, almacen, sap, backend, entidad = PRO
   if (conInicio && estado.cursor === null && !estado.pendiente && !estado.porRevisar && !estado.inicioRecorrido) {
     await guardar({ ...estado, inicioRecorrido: await backend.hora() });
   }
-  while (!detenido()) {
+  while (!detenido() && !terminado) {
     if (estado.pendiente) {
       await backend.enviar(estado.pendiente.lote, entidad);
       if (estado.pendiente.observados?.length) await backend.observar(estado.pendiente.observados, entidad);
       if (estado.pendiente.huellas) await almacen.confirmarHuellas(estado.pendiente.huellas);
-      await guardar({ ...estado, secuencia: estado.pendiente.lote.secuencia, cursor: estado.pendiente.cursor,
-        pendiente: null }); lotes++;
+      await guardar({ ...estado, secuencia: estado.pendiente.lote.secuencia,
+        cursor: estado.reiniciarRecorrido ? null : estado.pendiente.cursor,
+        ...(estado.reiniciarRecorrido ? { reiniciarRecorrido: false } : {}), pendiente: null }); lotes++;
       continue;
     }
     if (estado.porRevisar) {
@@ -75,6 +87,12 @@ export async function sincronizar({ config, almacen, sap, backend, entidad = PRO
     } else await guardar({ ...estado, pendiente: { lote, cursor } });
   }
   if (!terminado) return { completo: false, lotes, ultimaSecuencia: estado.secuencia };
-  await guardar({ ...estado, cursor: null, ultimoCompleto: new Date().toISOString(), ...(conInicio ? { porRevisar: null, inicioRecorrido: null } : {}) });
+  if (entidad.confirmarRecorrido) {
+    await guardar({ ...estado, finalizando: true });
+    await backend.recorrido(entidad, "finalizar", estado.recorridoId, estado.secuencia);
+  }
+  await guardar({ ...estado, cursor: null, ultimoCompleto: new Date().toISOString(),
+    ...(entidad.confirmarRecorrido ? { recorridoId: null, finalizando: false } : {}),
+    ...(conInicio ? { porRevisar: null, inicioRecorrido: null } : {}) });
   return { completo: true, lotes, ultimaSecuencia: estado.secuencia };
 }

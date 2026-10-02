@@ -27,6 +27,19 @@ async function sincronizarCodigoFicha(itemCode, barCode, db) {
   await db.productoCodigoBarras.create({ data: { itemCode, codigo: barCode, uomEntry: UNIDAD_MANUAL, origen: "ficha", sincronizadoEn: new Date() } });
 }
 export const sincronizacionRepository = {
+  async consultarRecorrido(entidad, db) {
+    const [fila] = await db.$queryRaw`SELECT * FROM sincronizacion_recorridos WHERE entidad = ${entidad}`;
+    return fila ?? null;
+  },
+  iniciarRecorrido(entidad, empresa, recorridoId, db) {
+    return db.$executeRaw`INSERT INTO sincronizacion_recorridos (entidad, empresa, "recorridoId")
+      VALUES (${entidad}, ${empresa}, ${recorridoId}::uuid)
+      ON CONFLICT (entidad) DO UPDATE SET empresa = EXCLUDED.empresa, "recorridoId" = EXCLUDED."recorridoId",
+        "iniciadoEn" = now(), "finalizadoEn" = NULL, secuencia = NULL`;
+  },
+  finalizarRecorrido(entidad, secuencia, db) {
+    return db.$executeRaw`UPDATE sincronizacion_recorridos SET "finalizadoEn" = now(), secuencia = ${secuencia} WHERE entidad = ${entidad}`;
+  },
   guardarPedido,
   conBloqueo(operacion, db = prisma) {
     return db.$transaction(async (tx) => {
@@ -39,7 +52,9 @@ export const sincronizacionRepository = {
     return db.pedido.findMany({ where: { documentStatus: "bost_Open" }, select: { docEntry: true, sincronizadoEn: true }, orderBy: { docEntry: "asc" } });
   },
   async existeOtraEmpresa(empresa, db = prisma) {
-    const filas = await db.$queryRaw`SELECT 1 FROM sincronizacion_estados WHERE empresa <> ${empresa} LIMIT 1`;
+    const filas = await db.$queryRaw`SELECT 1 FROM (
+      SELECT empresa FROM sincronizacion_estados UNION ALL SELECT empresa FROM sincronizacion_recorridos
+    ) origen WHERE empresa <> ${empresa} LIMIT 1`;
     return filas.length > 0;
   },
   async consultarEstado(entidad, db = prisma) {
@@ -97,6 +112,7 @@ export const sincronizacionRepository = {
   // Reemplaza la existencia del artículo en cada almacén. Si cambia lo que suman los almacenes de esta
   // bodega, el inventario se entera (puede haber mercadería por ubicar o por descontar).
   async guardarExistencias({ itemCode, almacenes }, db) {
+    await db.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`inventario:${itemCode}`}))::text`;
     const producto = await db.producto.findUnique({ where: { itemCode }, select: { itemCode: true } });
     if (!producto) throw new AppError({ code: "PRODUCTO_NO_SINCRONIZADO",
       message: "Debe sincronizar el producto antes de recibir sus existencias", statusCode: 409 });
@@ -131,6 +147,9 @@ export const sincronizacionRepository = {
     if (lineas.length) await db.documentoStockLinea.createMany({ data: lineas.map((l) => ({ tipo, docEntry, ...l })) });
   },
   async guardarEstado({ entidad, empresa, secuencia, hash, cantidad }, db) {
+    if (["almacenes", "existencias"].includes(entidad)) {
+      await db.$executeRaw`UPDATE sincronizacion_recorridos SET "finalizadoEn" = NULL, secuencia = NULL WHERE entidad = ${entidad}`;
+    }
     await db.$executeRaw`
       INSERT INTO sincronizacion_estados (entidad, empresa, secuencia, hash, cantidad, "actualizadoEn")
       VALUES (${entidad}, ${empresa}, ${secuencia}, ${hash}, ${cantidad}, now())

@@ -11,9 +11,9 @@ Dos cuartos, uno al lado del otro:
 
 El supervisor marca en la app cuáles almacenes de SAP corresponden a esta bodega (**Panel → Almacenes**, `PUT /supervisor/almacenes`). Las recepciones, reposiciones, conteos y correcciones funcionan con el inventario local aunque no haya almacenes elegidos o existencias de SAP disponibles.
 
-El resumen y la ficha indican `comparacionDisponible`. La comparación requiere almacenes elegidos y recepción de datos de `almacenes` y `existencias` en los últimos 30 minutos. El puente actual no envía esas entidades: la comparación permanecerá deshabilitada. Los pendientes y descuentos basados en diferencias se rechazan con `ALMACENES_SIN_ELEGIR` o `COMPARACION_SAP_NO_DISPONIBLE`. La ausencia de datos no representa existencias cero.
+El resumen y la ficha indican `comparacionDisponible`. La comparación requiere almacenes elegidos y recorridos completos: almacenes iniciado en las últimas 48 horas y existencias en los últimos 30 minutos. Los pendientes y descuentos basados en diferencias se rechazan con `ALMACENES_SIN_ELEGIR` o `COMPARACION_SAP_NO_DISPONIBLE`. La ausencia de datos no representa existencias cero.
 
-Este control de antigüedad es conservador: una recepción reciente no demuestra que terminó un recorrido completo. Antes de habilitar el envío de estas entidades debe incorporarse la confirmación de recorridos completos y coordinarse su frecuencia; no basta con enviar un lote parcial.
+El puente confirma el inicio y el fin de cada recorrido. Durante una actualización incompleta o si quedan existencias sin observar, la comparación permanece deshabilitada. Activación y actualización de la instalación: `ACTUALIZAR_ALMACENES_EXISTENCIAS.md`.
 
 Para cada producto:
 
@@ -91,7 +91,7 @@ Con **En Pedidos, mostrar solo los pedidos que salen de los almacenes marcados**
 
 ## Datos que necesita del puente
 
-Almacenes (`Warehouses`), existencias por almacén (`Items.ItemWarehouseInfoCollection`, solo artículos de inventario) y, para explicar diferencias, los documentos que mueven stock (entradas por compra, entradas y salidas de mercancías, devoluciones). El backend ya los recibe; formato en `INTEGRACION_PUENTE.md`. El envío desde el puente está pendiente.
+Almacenes (`Warehouses`) y existencias por almacén (`Items.ItemWarehouseInfoCollection`) se habilitan con `BRIDGE_INVENTORY_ENABLED=true`. Los artículos que dejan de ser inventariables limpian su copia anterior de existencias. Los documentos que mueven stock pueden explicar diferencias; su envío desde el puente sigue pendiente. Contratos en `INTEGRACION_PUENTE.md`.
 
 ## Tablas
 

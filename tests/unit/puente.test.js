@@ -30,7 +30,7 @@ for (const datos of [{ ...fila(), Valid: null }, { ...fila(), Frozen: true }, { 
   test("rechaza producto SAP incompleto o incompatible", () => assert.throws(() => construirLote([datos], "TEST", 1), { code: "PRODUCTO_SAP_INVALIDO" }));
 }
 test("indica el producto y el campo SAP inválido sin incluir el valor", () => {
-  for (const [datos, campo] of [[{ ...fila("P2"), ItemName: null }, "ItemName"], [{ ...fila("P2"), BarCode: "7401 " }, "BarCode"],
+  for (const [datos, campo] of [[{ ...fila("P2"), ItemName: 42 }, "ItemName"], [{ ...fila("P2"), BarCode: "7401 " }, "BarCode"],
     [{ ...fila("P2"), Frozen: true }, "Frozen"], [fila(" P2"), "ItemCode"]]) {
     assert.throws(() => construirLote([fila(), datos], "TEST", 1), (e) => {
       assert.equal(e.code, "PRODUCTO_SAP_INVALIDO"); assert.deepEqual(e.detalle, { itemCode: datos.ItemCode, campo }); return true;
@@ -198,14 +198,14 @@ test("recorrido HTTP simulado: login, páginas, lotes, estado y logout", async (
 const clienteSap = (code = "C1", name = "Cliente Uno") => ({ CardCode: code, CardName: name, Valid: "tYES", Frozen: "tNO" });
 test("clientes: transforma BusinessPartners e informa código y campo inválidos", () => {
   assert.deepEqual(construirLoteClientes([clienteSap("C001")], "TEST", 1).clientes, [{ cardCode: "C001", cardName: "Cliente Uno", valid: true, frozen: false }]);
-  for (const [datos, campo] of [[{ ...clienteSap("C2"), CardName: null }, "CardName"], [{ ...clienteSap("C2"), Valid: "Y" }, "Valid"], [clienteSap("C2 "), "CardCode"]]) {
+  for (const [datos, campo] of [[{ ...clienteSap("C2"), CardName: 42 }, "CardName"], [{ ...clienteSap("C2"), Valid: "Y" }, "Valid"], [clienteSap("C2 "), "CardCode"]]) {
     assert.throws(() => construirLoteClientes([clienteSap(), datos], "TEST", 1), (e) => {
       assert.equal(e.code, "CLIENTE_SAP_INVALIDO"); assert.deepEqual(e.detalle, { cardCode: datos.CardCode, campo }); return true;
     });
   }
 });
 test("clientes se sincronizan antes que productos", () => {
-  assert.deepEqual(ENTIDADES.map((e) => e.nombre), ["clientes", "productos", "unidades", "codigosBarras", "pedidos"]);
+  assert.deepEqual(ENTIDADES.map((e) => e.nombre), ["clientes", "productos", "unidades", "codigosBarras", "pedidos", "almacenes", "existencias"]);
 });
 test("clientes: consulta solo clientes de SAP y combina el filtro con el cursor", async () => {
   const urls = [];

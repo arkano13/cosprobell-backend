@@ -9,6 +9,15 @@ export function crearClienteBackend(config, fetchImpl = fetch) {
   const headers = { Authorization: `Bearer ${config.clave}`, "Content-Type": "application/json" };
   const pedir = (ruta, opciones = { headers }) => solicitar(`${config.backendUrl}/integracion/${ruta}`, opciones, fetchImpl, codigoDelBackend);
   return {
+    async recorrido(entidad, accion, recorridoId, secuencia) {
+      const { data } = await leerJson(await pedir(`${entidad.nombre}/recorrido/${accion}`, {
+        method: "POST", headers, body: JSON.stringify({ recorridoId, ...(accion === "finalizar" ? { secuencia } : {}) }),
+      }));
+      if (data?.recorridoId !== recorridoId || (accion === "finalizar" && data.completo !== true)) {
+        throw new ErrorPuente("CONFIRMACION_INVALIDA");
+      }
+      return data;
+    },
     async observar(claves, entidad) {
       const { data } = await leerJson(await pedir(`${entidad.nombre}/observados`, {
         method: "POST", headers, body: JSON.stringify({ claves }),

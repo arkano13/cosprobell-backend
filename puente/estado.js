@@ -35,6 +35,10 @@ export async function abrirAlmacen(config, entidad) {
     estado = { version: 1, origen: config.origen, secuencia: 0, cursor: null, pendiente: null };
     await guardar(estado);
   }
+  if ((estado.recorridoId != null && (typeof estado.recorridoId !== "string" || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(estado.recorridoId))) ||
+      (estado.finalizando !== undefined && typeof estado.finalizando !== "boolean") ||
+      (estado.reiniciarRecorrido !== undefined && typeof estado.reiniciarRecorrido !== "boolean") ||
+      (estado.finalizando && (!estado.recorridoId || estado.pendiente))) throw new ErrorPuente("ESTADO_LOCAL_INCOMPATIBLE");
   if (estado.version !== 1 || estado.origen !== config.origen || !Number.isSafeInteger(estado.secuencia) || estado.secuencia < 0 ||
       !(estado.cursor === null || (entidad.claveNumerica
         ? Number.isInteger(estado.cursor) && estado.cursor >= 0 && estado.cursor <= 2147483647

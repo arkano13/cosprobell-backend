@@ -7,7 +7,13 @@ import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const raiz = fileURLToPath(new URL("..", import.meta.url));
-const destino = join(raiz, "dist", "puente-cosprobell");
+const args = process.argv.slice(2);
+if (args.length > 1 || (args.length && !/^--destino=[a-z][a-z0-9-]{0,63}$/.test(args[0]))) {
+  throw new Error("Uso: npm run empaquetar:puente -- --destino=puente-inventario");
+}
+const nombreDestino = args[0]?.slice("--destino=".length) ?? "puente-cosprobell";
+if (/^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/i.test(nombreDestino)) throw new Error("Nombre de destino inválido");
+const destino = join(raiz, "dist", nombreDestino);
 const copiar = (desde, hacia = desde) => cp(join(raiz, desde), join(destino, hacia), { recursive: true });
 
 // Solo reconstruir el directorio generado; nunca borrar una instalación configurada.
@@ -36,6 +42,7 @@ for (const archivo of ["ejecutar-puente.cmd", "instalar-tarea.cmd", "desinstalar
 for (const archivo of ["scripts/ver-certificado.js", "scripts/comprobar-candado-puente.js", ".env.puente.example"]) await copiar(archivo);
 await copiar("docs/INSTALAR_PUENTE_WINDOWS.md", "LEEME.md");
 await copiar("docs/PRUEBAS_PEDIDOS_SCANNER.md", "PRUEBAS_PEDIDOS_SCANNER.md");
+await copiar("docs/ACTUALIZAR_ALMACENES_EXISTENCIAS.md", "ACTUALIZAR_ALMACENES_EXISTENCIAS.md");
 
 const { version } = JSON.parse(await readFile(join(raiz, "package.json"), "utf8"));
 await writeFile(join(destino, "package.json"), JSON.stringify({

@@ -46,13 +46,15 @@ export const inventarioRepository = {
     return filas[0] ?? null;
   },
   async comparacionDisponible(db = prisma) {
-    // Conservador: sin recorridos recientes de ambas entidades no se autoriza
-    // convertir una diferencia con SAP en un descuento físico.
+    // La edad se mide desde el inicio: terminar un recorrido lento no rejuvenece sus primeras páginas.
     const [fila] = await db.$queryRaw`
       SELECT EXISTS (SELECT 1 FROM bodegas WHERE "deEstaBodega")
-        AND (SELECT COUNT(*) = 2 FROM sincronizacion_estados
-             WHERE entidad IN ('almacenes', 'existencias')
-               AND "actualizadoEn" >= now() - interval '30 minutes') AS disponible`;
+        AND (SELECT COUNT(*) = 2 FROM sincronizacion_recorridos
+             WHERE "finalizadoEn" IS NOT NULL AND (
+               (entidad = 'almacenes' AND "iniciadoEn" >= now() - interval '48 hours') OR
+               (entidad = 'existencias' AND "iniciadoEn" >= now() - interval '30 minutes')))
+        AND NOT EXISTS (SELECT 1 FROM productos_existencias e, sincronizacion_recorridos r
+          WHERE r.entidad = 'existencias' AND e."actualizadoEn" < r."iniciadoEn") AS disponible`;
     return fila?.disponible === true;
   },
   // Una operación por producto a la vez: recepciones, reposiciones, descuentos y picking no se pisan.

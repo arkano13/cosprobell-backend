@@ -37,7 +37,7 @@ test("SAP: BarCodes y UnitOfMeasurements se recorren por AbsEntry numérico", as
   });
   await sap.pagina(10, CODIGOS_BARRAS); await sap.pagina(null, UNIDADES);
   assert.equal(urls[1], "https://sap.test/b1s/v1/BarCodes?$select=AbsEntry,ItemNo,Barcode,UoMEntry&$orderby=AbsEntry%20asc&$top=50&$filter=AbsEntry%20gt%2010");
-  assert.equal(urls[2], "https://sap.test/b1s/v1/UnitOfMeasurements?$select=AbsEntry,Code,Name&$orderby=AbsEntry%20asc&$top=50");
+  assert.equal(urls[2], "https://sap.test/b1s/v1/UnitOfMeasurements?$select=AbsEntry,Code,Name&$orderby=AbsEntry%20asc&$top=50&$filter=AbsEntry%20ge%200");
 });
 
 async function almacenTemporal(t) {

@@ -3,8 +3,15 @@ import { requireBridgeAuth } from "../../middleware/bridgeAuth.js";
 import { recibir, estado, pedidosAbiertos, hora, codigosRetirados } from "./sincronizacion.controller.js";
 import { ENTIDADES_SINCRONIZABLES } from "./sincronizacion.service.js";
 import { observarRegistros } from "./observados.service.js";
+import { registrarRecorrido } from "./recorridos.service.js";
 const router = Router();
 router.use(requireBridgeAuth);
+for (const entidad of ["almacenes", "existencias"]) {
+  for (const accion of ["iniciar", "finalizar"]) router.post(`/${entidad}/recorrido/${accion}`, async (req, res, next) => {
+    try { res.json({ data: await registrarRecorrido(entidad, accion, req.body, req.empresaSap) }); }
+    catch (error) { next(error); }
+  });
+}
 // Rutas fijas por entidad (/integracion/productos, /integracion/clientes...), sin parámetros libres.
 for (const entidad of ENTIDADES_SINCRONIZABLES) {
   router.post(`/${entidad}/observados`, async (req, res, next) => {

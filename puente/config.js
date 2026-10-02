@@ -22,6 +22,14 @@ export function configurar(v) {
   const segundos = Number(v.BRIDGE_INTERVAL_SECONDS ?? 900);
   if (!Number.isSafeInteger(segundos) || segundos < 60 || segundos > 86400) throw new Error("BRIDGE_INTERVAL_SECONDS debe estar entre 60 y 86400");
   const empresa = v.SAP_COMPANY_DB.trim();
+  const activarInventario = v.BRIDGE_INVENTORY_ENABLED ?? "false";
+  if (!["true", "false"].includes(activarInventario)) throw new Error("BRIDGE_INVENTORY_ENABLED inválido");
+  const excepcionTls = v.SAP_TLS_TEST_EXCEPTION ?? "false";
+  if (!["false", "true"].includes(excepcionTls)) throw new Error("SAP_TLS_TEST_EXCEPTION inválido");
+  const huellaSap = excepcionTls === "true" ? (v.SAP_TLS_CERT_SHA256 ?? "").replaceAll(":", "").toUpperCase() : null;
+  if (huellaSap !== null && (empresa !== "XPRUEBAS2026" || !/^[A-F0-9]{64}$/.test(huellaSap) || !sapUrl.startsWith("https://"))) {
+    throw new Error("Excepción TLS solo para XPRUEBAS2026 con huella SHA-256 explícita");
+  }
   const numero = (campo, defecto, min, max) => {
     const n = Number(v[campo] ?? defecto);
     if (!Number.isSafeInteger(n) || n < min || n > max) throw new Error(`Configuración inválida: ${campo}`);
@@ -35,7 +43,7 @@ export function configurar(v) {
     throw new Error("Configuración inválida: BRIDGE_FREQUENCIES_JSON");
   }
   return { sapUrl, backendUrl, empresa, usuario: v.SAP_USER, password: v.SAP_PASSWORD,
-    frecuencias, soloCambios: true,
+    frecuencias, soloCambios: true, huellaSap, inventarioHabilitado: activarInventario === "true",
     maxConsultas: numero("BRIDGE_MAX_REQUESTS", 25, 1, 10000),
     maxDuracionMs: numero("BRIDGE_MAX_SECONDS", 120, 10, 3600) * 1000,
     pausaMs: numero("BRIDGE_REQUEST_DELAY_MS", 500, 100, 60000),

@@ -22,6 +22,24 @@ const producto = { itemCode: "P1", itemName: "Champú", barCode: "001234", valid
 const lote = (extra = {}) => ({ version: 1, empresa: "XPRUEBAS2026", secuencia: 1, productos: [{ ...producto }], ...extra });
 const empresa = "XPRUEBAS2026";
 
+test("HTTP recorridos de inventario: autenticación, contrato y fin confirmado", async t => {
+  const recorridoId = "11111111-1111-4111-8111-111111111111";
+  let recorrido = null;
+  t.mock.method(repo, "conBloqueo", fn => fn({}));
+  t.mock.method(repo, "existeOtraEmpresa", async () => false);
+  t.mock.method(repo, "consultarRecorrido", async () => recorrido);
+  t.mock.method(repo, "consultarEstado", async () => null);
+  t.mock.method(repo, "iniciarRecorrido", async () => { recorrido = { recorridoId, finalizadoEn: null }; });
+  t.mock.method(repo, "finalizarRecorrido", async () => { recorrido.finalizadoEn = new Date(); recorrido.secuencia = 0; });
+  const ruta = `${url}/integracion/almacenes/recorrido/`;
+  assert.equal((await fetch(ruta + "iniciar", { method: "POST" })).status, 401);
+  const headers = { Authorization: `Bearer ${process.env.BRIDGE_API_KEY}`, "Content-Type": "application/json" };
+  assert.equal((await fetch(ruta + "iniciar", { method: "POST", headers, body: "{}" })).status, 400);
+  assert.equal((await fetch(ruta + "iniciar", { method: "POST", headers, body: JSON.stringify({ recorridoId }) })).status, 200);
+  const r = await fetch(ruta + "finalizar", { method: "POST", headers, body: JSON.stringify({ recorridoId, secuencia: 0 }) });
+  assert.deepEqual((await r.json()).data, { recorridoId, completo: true });
+});
+
 test("HTTP recibe pedidos, confirma reintento y rechaza otra empresa o contrato incompleto", async (t) => {
   preparar(t);
   let guardados = 0;
@@ -325,7 +343,7 @@ function baseExistencias({ producto = true, conocidos = null, antes = 10, despue
   const db = {
     producto: { findUnique: async () => (producto ? { itemCode: "P1" } : null) },
     bodega: { count: async ({ where }) => conocidos ?? where.warehouseCode.in.length },
-    $queryRaw: async () => [{ total: consulta++ === 0 ? antes : despues }],
+    $queryRaw: async (sql) => sql.join("").includes("pg_advisory_xact_lock") ? [] : [{ total: consulta++ === 0 ? antes : despues }],
     $executeRaw: async (partes, ...valores) => { ops.push(["inventario", valores]); },
     productoExistencia: {
       deleteMany: async ({ where }) => ops.push(["borrar", where]),

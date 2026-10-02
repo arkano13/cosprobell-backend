@@ -1,6 +1,8 @@
 import { solicitar, leerJson, ErrorPuente } from "./http.js";
 import { PRODUCTOS } from "./entidades.js";
+import { crearTransporteSap } from "./sap-tls.js";
 export function crearClienteSap(config, fetchImpl = fetch) {
+  if (config.huellaSap) fetchImpl = crearTransporteSap(config.sapUrl, config.huellaSap);
   let cookie = null;
   async function login() {
     await config.control?.antesDeConsultar();
@@ -42,6 +44,7 @@ export function crearClienteSap(config, fetchImpl = fetch) {
       // Sin Prefer, Service Layer devuelve 20 por página aunque $top pida 50.
       const datos = await obtener(`${entidad.recurso}?${consulta}`, { Prefer: `odata.maxpagesize=${tamano}` });
       if (!Array.isArray(datos.value) || datos.value.length > tamano) throw new ErrorPuente("PAGINA_SAP_INVALIDA");
+      if (!datos.value.length && (datos["odata.nextLink"] || datos["@odata.nextLink"])) throw new ErrorPuente("PAGINA_SAP_INVALIDA");
       return datos.value;
     },
     // Un registro por su clave, con los mismos campos que el recorrido. Lo usa la revisión de pedidos cerrados.

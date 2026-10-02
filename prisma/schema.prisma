@@ -817,6 +817,16 @@ model InventarioMovimiento {
   @@map("inventario_movimientos")
 }
 
+model SincronizacionRecorrido {
+  entidad String @id
+  empresa String
+  recorridoId String @db.Uuid
+  iniciadoEn DateTime @default(now())
+  finalizadoEn DateTime?
+  secuencia Int?
+  @@map("sincronizacion_recorridos")
+}
+
 model InventarioPequenaLote {
   id Int @id @default(autoincrement())
   clave String @unique

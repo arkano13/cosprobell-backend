@@ -4,7 +4,7 @@ import { crearClienteSap } from "./sap.client.js";
 import { crearClienteBackend } from "./backend.client.js";
 import { sincronizar } from "./sincronizar.js";
 import { ErrorPuente } from "./http.js";
-import { ENTIDADES } from "./entidades.js";
+import { entidadesHabilitadas } from "./entidades.js";
 import { crearControl, entidadPendiente, ordenarEntidades } from "./control.js";
 
 let parar = false, despertar;
@@ -18,6 +18,8 @@ try {
   if (process.argv.slice(2).some((a) => !["--once", "--watch", "--sondeo", "--forzar", "--reconciliar"].includes(a)) ||
       (process.argv.includes("--once") && process.argv.includes("--watch"))) throw new Error("Argumentos inválidos");
   const config = configurar(process.env);
+  const ENTIDADES = entidadesHabilitadas(config);
+  if (config.huellaSap) console.error(JSON.stringify({ evento: "advertencia", codigo: "TLS_SAP_EXCEPCION_PRUEBAS", mensaje: "Vigencia y nombre omitidos; certificado fijado por huella. Renovar antes de producción." }));
   config.forzar = process.argv.includes("--forzar") || process.argv.includes("--reconciliar");
   config.reconciliar = process.argv.includes("--reconciliar");
   const sondeo = process.argv.includes("--sondeo");
@@ -84,7 +86,8 @@ try {
   } while (!parar);
   }
 } catch (error) {
-  console.error(JSON.stringify({ evento: "inicio_fallido", codigo: error.code ?? "REVISAR_CONFIGURACION" })); process.exitCode = 1;
+  console.error(JSON.stringify({ evento: "inicio_fallido", codigo: error.code ?? "REVISAR_CONFIGURACION",
+    detalle: error instanceof ErrorPuente ? error.detalle : undefined })); process.exitCode = 1;
 } finally {
   if (sap) await sap.cerrar().catch(() => console.error('{"evento":"logout_no_confirmado"}'));
   if (almacen) await almacen.cerrar().catch(() => { console.error('{"evento":"revisar_candado_local"}'); process.exitCode = 1; });
