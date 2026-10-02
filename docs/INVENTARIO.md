@@ -32,6 +32,7 @@ SAP (almacenes marcados) = grande + pequeña + preparado sin entregar + diferenc
 | Operación | Ruta | Quién |
 |---|---|---|
 | Resumen, buscar, producto, caja, pendientes, conteo inicial, por vencer, movimientos, descuentos | `GET /inventario/...` | Operador o aplicación |
+| Lista de productos de las bodegas (`?buscar=&filtro=todos\|grande\|pequena\|solo_sap\|diferencia&pagina=&limit=`) | `GET /inventario/existencias` | Operador o aplicación |
 | Recibir en cajas (a la grande) o suelto (a la pequeña o como bulto a la grande) | `POST /inventario/recepciones` | Operador o aplicación |
 | Reponer: de una caja a la pequeña | `POST /inventario/reposiciones` | Operador o aplicación |
 | Elegir de qué lotes (o de la pequeña) salió lo que SAP descontó | `POST /inventario/descuentos` | Operador o aplicación |
@@ -46,6 +47,7 @@ Reglas:
 - **Descontar**: solo con la diferencia estable y exacta (`409 SAP_ACTUALIZANDO` o `409 CANTIDAD_CAMBIO`); hay que asignar exactamente lo que SAP descontó. Dentro de un lote se resta primero de la caja abierta y después de las cerradas en orden de llegada. La respuesta dice qué cajas sacar del estante.
 - **Cambiar lote**: devuelve lo restado a sus cajas (o a la pequeña) y resta según lo nuevo. Guarda quién, cuándo y cuál era la asignación anterior.
 - **Picking**: al finalizar, todos los productos escaneados deben tener suficientes unidades registradas en la pequeña. Si faltan, responde 409 y exige reponer desde la grande; la preparación permanece abierta. No se descuenta automáticamente de la grande ni se omiten productos sin inventario. Si hay varios lotes, se exige indicar cuáles salieron; un lote único se identifica automáticamente. El cierre y los descuentos se confirman juntos.
+- **Lista de productos**: todo lo registrado en la grande o la pequeña y lo que SAP tiene en los almacenes de esta bodega, por nombre, con cuántos hay por filtro (`conteos`). Lo de SAP viene con la fecha de las últimas existencias recibidas (`existenciasSapAl`); el estado y la diferencia, solo con comparación disponible. Sin almacenes marcados, `sap` es `null`.
 - **Conteo y corrección** dejan el número contado. La diferencia con SAP solo se muestra cuando la comparación está disponible.
 - Cada cambio de un producto toma su candado (`pg_advisory_xact_lock`): dos operaciones del mismo producto no se pisan. La base impide cajas con unidades negativas.
 - **Movimientos**: cada operación queda registrada con tipo, bodega, cantidad, caja, lote, quién y cuándo, agrupada por operación.

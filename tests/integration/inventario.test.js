@@ -116,6 +116,48 @@ test("inventario: sin almacenes elegidos no se compara con SAP", async (t) => {
   assert.equal((await r.json()).error.code, "ALMACENES_SIN_ELEGIR");
 });
 
+test("lista de productos: todo lo de las bodegas, con búsqueda, filtros y páginas", async (t) => {
+  const fila = (itemCode, itemName, datos) => ({ itemCode, itemName, sap: 0, activo: true, pequena: 0, adelantado: 0, sapCambioEn: null,
+    grande: 0, cajas: 0, sinEntrega: 0, ...datos });
+  const filas = [
+    fila("A1", "Acondicionador", { sap: 48, activo: false }),
+    fila("C1", "Crema", { grande: 40, cajas: 2, pequena: 5, sap: 45 }),
+    fila("J1", "Jabón", { pequena: -2 }),
+    fila("S1", "Shampoo", { grande: 60, cajas: 3, pequena: 10, sap: 80 }),
+    fila("Z1", "Sin nada", {}),
+  ];
+  let almacenes = ["01", "02"], comparar = true;
+  t.mock.method(repo, "almacenesDeEstaBodega", async () => almacenes);
+  t.mock.method(repo, "comparacionDisponible", async () => comparar);
+  t.mock.method(repo, "existenciasSapAl", async () => new Date("2026-10-02T15:00:00Z"));
+  t.mock.method(repo, "estados", async () => filas);
+  const headers = conSesion(t);
+  const r = await pedir("/inventario/existencias", headers);
+  assert.equal(r.status, 200);
+  const todo = await r.json();
+  // Lo que no tiene nada en ninguna bodega ni en SAP no aparece.
+  assert.deepEqual(todo.data.map((v) => v.itemCode), ["A1", "C1", "J1", "S1"]);
+  assert.deepEqual(todo.conteos, { todos: 4, grande: 2, pequena: 3, solo_sap: 1, diferencia: 2 });
+  assert.deepEqual(todo.data[3], { itemCode: "S1", itemName: "Shampoo", grande: 60, cajas: 3, pequena: 10, sinEntrega: 0, sap: 80,
+    estado: "por_ubicar", diferencia: 10 });
+  assert.equal(todo.data[0].estado, "conteo_inicial");
+  assert.equal(todo.existenciasSapAl, "2026-10-02T15:00:00.000Z");
+  const filtrar = async (query) => (await (await pedir(`/inventario/existencias?${query}`, headers)).json());
+  assert.deepEqual((await filtrar("filtro=solo_sap")).data.map((v) => v.itemCode), ["A1"]);
+  assert.deepEqual((await filtrar("filtro=diferencia")).data.map((v) => v.itemCode), ["J1", "S1"]);
+  assert.deepEqual((await filtrar("buscar=CREM")).data.map((v) => v.itemCode), ["C1"]);
+  const pagina = await filtrar("limit=2&pagina=1");
+  assert.deepEqual([pagina.data.map((v) => v.itemCode), pagina.total], [["J1", "S1"], 4]);
+  // Sin comparación: SAP se muestra (con su fecha) pero sin estado; sin almacenes marcados, sin SAP.
+  comparar = false;
+  const sinComparar = await filtrar("filtro=todos");
+  assert.deepEqual([sinComparar.data[3].sap, sinComparar.data[3].estado, sinComparar.conteos.diferencia], [80, null, 0]);
+  almacenes = [];
+  const sinAlmacenes = await filtrar("filtro=todos");
+  assert.deepEqual([sinAlmacenes.data[0].sap, sinAlmacenes.conteos.solo_sap], [null, 0]);
+  assert.equal((await pedir("/inventario/existencias?filtro=otro", headers)).status, 400);
+});
+
 test("recibir en cajas: hasta lo que SAP tiene por ubicar; más, solo confirmando que llegó antes", async (t) => {
   const hecho = inventario(t, { sap: 100 });
   const headers = conSesion(t);
@@ -224,7 +266,7 @@ test("cambiar lote: devuelve lo restado y lo resta del lote elegido", async (t) 
 
 test("panel: elegir almacenes solo con códigos conocidos y guardar el filtro de pedidos", async (t) => {
   const headers = conSesion(t, "supervisor");
-  t.mock.method(repo, "almacenes", async () => [{ warehouseCode: "01" }, { warehouseCode: "V05" }]);
+  t.mock.method(repo, "almacenes", async () => [{ warehouseCode: "01" }, { warehouseCode: "V05" }, { warehouseCode: "BOD-CENTRAL" }]);
   t.mock.method(repo, "opcion", async () => true);
   const marcados = [], opciones = [];
   t.mock.method(repo, "transaccion", async (op) => op({}));
@@ -238,6 +280,10 @@ test("panel: elegir almacenes solo con códigos conocidos y guardar el filtro de
   assert.deepEqual(marcados, [["V05"]]);
   assert.deepEqual(opciones, [["pedidosSoloDeEstaBodega", true, "operador:Luis Pérez"]]);
   assert.equal((await r.json()).data.pedidosSoloDeEstaBodega, true);
+  // Un código de más de 8 caracteres que existe en la tabla también se puede marcar.
+  const largo = await enviar("/supervisor/almacenes", headers, "PUT", { almacenes: ["BOD-CENTRAL"], pedidosSoloDeEstaBodega: false });
+  assert.equal(largo.status, 200);
+  assert.deepEqual(marcados.at(-1), ["BOD-CENTRAL"]);
   t.mock.restoreAll();
   assert.equal((await enviar("/supervisor/almacenes", conSesion(t, "operador"), "PUT", { almacenes: [], pedidosSoloDeEstaBodega: false })).status, 403);
 });

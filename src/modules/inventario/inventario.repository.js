@@ -45,6 +45,11 @@ export const inventarioRepository = {
       WHERE id = ${id} AND "itemCode" = ${itemCode} AND unidades + ${delta} >= 0 RETURNING *`;
     return filas[0] ?? null;
   },
+  // Cuándo llegaron por última vez las existencias de SAP (null si nunca llegaron por el puente).
+  async existenciasSapAl(db = prisma) {
+    const [fila] = await db.$queryRaw`SELECT "actualizadoEn" FROM sincronizacion_estados WHERE entidad = 'existencias'`;
+    return fila?.actualizadoEn ?? null;
+  },
   async comparacionDisponible(db = prisma) {
     // La edad se mide desde el inicio: terminar un recorrido lento no rejuvenece sus primeras páginas.
     const [fila] = await db.$queryRaw`
@@ -81,11 +86,12 @@ export const inventarioRepository = {
     const filtro = itemCodes ? Prisma.sql`pr."itemCode" = ANY(${itemCodes})`
       : Prisma.sql`(ip."itemCode" IS NOT NULL OR COALESCE(s.sap, 0) <> 0 OR g.grande IS NOT NULL)`;
     return db.$queryRaw`
-      WITH g AS (SELECT "itemCode", SUM(unidades)::int AS grande FROM inventario_cajas GROUP BY "itemCode"),
+      WITH g AS (SELECT "itemCode", SUM(unidades)::int AS grande, (COUNT(*) FILTER (WHERE unidades > 0))::int AS cajas
+                 FROM inventario_cajas GROUP BY "itemCode"),
            s AS (${EN_SAP}), se AS (${SIN_ENTREGA})
       SELECT pr."itemCode", pr."itemName", COALESCE(s.sap, 0) AS sap, (ip."itemCode" IS NOT NULL) AS activo,
              COALESCE(ip.pequena, 0) AS pequena, COALESCE(ip.adelantado, 0) AS adelantado, ip."sapCambioEn",
-             COALESCE(g.grande, 0) AS grande, COALESCE(se."sinEntrega", 0) AS "sinEntrega"
+             COALESCE(g.grande, 0) AS grande, COALESCE(g.cajas, 0) AS cajas, COALESCE(se."sinEntrega", 0) AS "sinEntrega"
       FROM productos pr
       LEFT JOIN inventario_productos ip ON ip."itemCode" = pr."itemCode"
       LEFT JOIN g ON g."itemCode" = pr."itemCode"
