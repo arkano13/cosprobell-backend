@@ -45,10 +45,13 @@ export const inventarioRepository = {
       WHERE id = ${id} AND "itemCode" = ${itemCode} AND unidades + ${delta} >= 0 RETURNING *`;
     return filas[0] ?? null;
   },
-  // Cuándo llegaron por última vez las existencias de SAP (null si nunca llegaron por el puente).
+  // Cuándo se confirmó por última vez lo que SAP tiene: el fin del último recorrido completo de existencias (el puente
+  // solo manda lo que cambió, así que el último lote puede ser viejo) o el último lote recibido, lo más reciente.
   async existenciasSapAl(db = prisma) {
-    const [fila] = await db.$queryRaw`SELECT "actualizadoEn" FROM sincronizacion_estados WHERE entidad = 'existencias'`;
-    return fila?.actualizadoEn ?? null;
+    const [fila] = await db.$queryRaw`SELECT GREATEST(
+      (SELECT "finalizadoEn" FROM sincronizacion_recorridos WHERE entidad = 'existencias'),
+      (SELECT "actualizadoEn" FROM sincronizacion_estados WHERE entidad = 'existencias')) AS al`;
+    return fila?.al ?? null;
   },
   async comparacionDisponible(db = prisma) {
     // La edad se mide desde el inicio: terminar un recorrido lento no rejuvenece sus primeras páginas.
