@@ -142,7 +142,8 @@ const FILTRAR = {
   todos: () => true,
   grande: (v) => v.grande > 0,
   pequena: (v) => v.pequena !== 0,
-  solo_sap: (v) => v.grande === 0 && v.pequena === 0 && v.sap > 0,
+  // Falta contar: SAP lo tiene y todavía no se contó en ninguna bodega (un "no hay" ya cuenta como contado).
+  solo_sap: (v) => !v.activo && v.grande === 0 && v.pequena === 0 && v.sap > 0,
   diferencia: (v) => v.estado === "por_ubicar" || v.estado === "por_descontar",
   por_vencer: (v) => v.porVencer === true,
 };
@@ -156,12 +157,12 @@ export async function listarExistencias({ buscar, filtro, pagina, limit }) {
     const e = conSap && comparacionDisponible ? vistaEstado(f) : null;
     return { itemCode: f.itemCode, itemName: f.itemName, grande: f.grande, cajas: f.cajas ?? 0, pequena: f.pequena,
       sinEntrega: f.sinEntrega, sap: conSap ? Math.round(f.sap ?? 0) : null, estado: e?.estado ?? null, diferencia: e?.diferencia ?? null,
-      porVencer: vencen.has(f.itemCode) };
+      porVencer: vencen.has(f.itemCode), activo: f.activo === true };
   }).filter((v) => v.grande !== 0 || v.pequena !== 0 || v.sinEntrega !== 0 || (v.sap ?? 0) !== 0)
     .filter(coincide(texto));
   const conteos = Object.fromEntries(Object.entries(FILTRAR).map(([nombre, cumple]) => [nombre, vistas.filter(cumple).length]));
   const elegidas = vistas.filter(FILTRAR[filtro]);
-  return { data: elegidas.slice(pagina * limit, (pagina + 1) * limit), total: elegidas.length, conteos,
+  return { data: elegidas.slice(pagina * limit, (pagina + 1) * limit).map(({ activo, ...v }) => v), total: elegidas.length, conteos,
     almacenes, comparacionDisponible, existenciasSapAl };
 }
 

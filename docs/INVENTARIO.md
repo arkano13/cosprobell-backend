@@ -32,7 +32,7 @@ SAP (almacenes marcados) = grande + pequeña + preparado sin entregar + diferenc
 | Operación | Ruta | Quién |
 |---|---|---|
 | Resumen, buscar, producto, caja, pendientes, conteo inicial, por vencer, movimientos, descuentos | `GET /inventario/...` | Operador o aplicación |
-| Lista de productos de las bodegas (`?buscar=&filtro=todos\|grande\|pequena\|solo_sap\|diferencia\|por_vencer&pagina=&limit=`) | `GET /inventario/existencias` | Operador o aplicación |
+| Lista de productos de las bodegas; `solo_sap` = falta contar en las dos (`?buscar=&filtro=todos\|grande\|pequena\|solo_sap\|diferencia\|por_vencer&pagina=&limit=`) | `GET /inventario/existencias` | Operador o aplicación |
 | Lo que hay en una bodega, por producto y lote (`?buscar=&filtro=todos\|registrados\|sin_registrar\|por_vencer&pagina=&limit=`) | `GET /inventario/bodegas/grande` o `/pequena` | Operador o aplicación |
 | Almacenes de SAP para elegir (marcados y con existencia, con qué bodega es cada uno) | `GET /inventario/almacenes` | Operador o aplicación |
 | Productos que SAP tiene en un almacén: en stock, comprometido, pedido y disponible (`?buscar=&pagina=&limit=`) | `GET /inventario/almacenes/:codigo/productos` | Operador o aplicación |
