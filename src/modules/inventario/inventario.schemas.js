@@ -19,7 +19,7 @@ export const buscarQuerySchema = z.object({ buscar: z.string().trim().min(1).max
 export const conteoInicialQuerySchema = z.object({
   buscar: z.string().trim().min(1).max(60).optional(), pagina: z.coerce.number().int().min(0).max(10_000).default(0), limit: limit(50),
 }).strict();
-export const FILTROS_EXISTENCIAS = ["todos", "grande", "pequena", "solo_sap", "diferencia"];
+export const FILTROS_EXISTENCIAS = ["todos", "grande", "pequena", "solo_sap", "diferencia", "por_vencer"];
 export const existenciasQuerySchema = z.object({
   buscar: z.string().trim().min(1).max(60).optional(), filtro: z.enum(FILTROS_EXISTENCIAS).default("todos"),
   pagina: z.coerce.number().int().min(0).max(10_000).default(0), limit: limit(50),
@@ -33,7 +33,8 @@ export const descuentosQuerySchema = z.object({ antesDe: id.optional(), limit: l
 const grupoCajas = z.object({ cajas: z.number().int().min(1).max(200), unidadesPorCaja: unidades, lote,
   vencimiento: fecha.nullable().optional() }).strict();
 const totalRecepcion = (r) => (r.modo === "cajas" ? r.cajas * r.unidadesPorCaja : r.modo === "suelto" ? r.unidades
-  : r.grupos.reduce((t, g) => t + g.cajas * g.unidadesPorCaja, 0) + (r.bulto?.unidades ?? 0));
+  : r.modo === "lotes" ? r.lotes.reduce((t, l) => t + l.unidades, 0)
+    : r.grupos.reduce((t, g) => t + g.cajas * g.unidadesPorCaja, 0) + (r.bulto?.unidades ?? 0));
 export const recepcionSchema = z.discriminatedUnion("modo", [
   z.object({ operacionId, modo: z.literal("cajas"), itemCode, cajas: z.number().int().min(1).max(200), unidadesPorCaja: unidades,
     lote, vencimiento: fecha.nullable().optional(), adelantar: z.boolean().default(false) }).strict(),
@@ -41,6 +42,11 @@ export const recepcionSchema = z.discriminatedUnion("modo", [
     lote, vencimiento: fecha.nullable().optional(), adelantar: z.boolean().default(false) }).strict(),
   z.object({ operacionId, modo: z.literal("grupos"), itemCode, grupos: z.array(grupoCajas).min(1).max(50),
     bulto: z.object({ unidades, lote, vencimiento: fecha.nullable().optional() }).strict().nullable().optional(),
+    adelantar: z.boolean().default(false) }).strict(),
+  // Lotes: unidades sueltas de varios lotes a la pequeña, todo junto (el conteo de la 02).
+  z.object({ operacionId, modo: z.literal("lotes"), itemCode,
+    lotes: z.array(z.object({ unidades, lote, vencimiento: fecha.nullable().optional() }).strict()).min(1).max(50)
+      .refine((filas) => new Set(filas.map((f) => JSON.stringify([f.lote ?? null, f.vencimiento ?? null]))).size === filas.length, "No repetir lotes"),
     adelantar: z.boolean().default(false) }).strict(),
 ]).refine((r) => totalRecepcion(r) <= 1_000_000, { message: "Demasiadas unidades en una sola recepción", path: ["unidadesPorCaja"] })
   .refine((r) => r.modo !== "grupos" || r.grupos.reduce((t, g) => t + g.cajas, 0) <= 500,
@@ -79,12 +85,17 @@ export const almacenesSchema = z.object({
 }).strict();
 export const bodegaParamsSchema = z.object({ bodega: z.enum(["grande", "pequena"]) });
 export const almacenParamsSchema = z.object({ codigo: codigoAlmacen });
+export const conteoQuerySchema = z.object({
+  buscar: z.string().trim().min(1).max(60).optional(), estado: z.enum(["falta", "contados", "todos"]).default("falta"),
+  pagina: z.coerce.number().int().min(0).max(10_000).default(0), limit: limit(50),
+}).strict();
+export const sinExistenciaSchema = z.object({ operacionId, bodega: z.enum(["grande", "pequena"]) }).strict();
 export const almacenQuerySchema = z.object({
   buscar: z.string().trim().min(1).max(60).optional(),
   pagina: z.coerce.number().int().min(0).max(10_000).default(0), limit: limit(50),
 }).strict();
 export const bodegaQuerySchema = z.object({
-  buscar: z.string().trim().min(1).max(60).optional(), filtro: z.enum(["todos", "registrados", "sin_registrar"]).default("todos"),
+  buscar: z.string().trim().min(1).max(60).optional(), filtro: z.enum(["todos", "registrados", "sin_registrar", "por_vencer"]).default("todos"),
   pagina: z.coerce.number().int().min(0).max(10_000).default(0), limit: limit(50),
 }).strict();
 export const registroCodigoSchema = z.object({

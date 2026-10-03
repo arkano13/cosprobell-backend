@@ -5,6 +5,10 @@ import { ejecutarUnaVez } from "./inventario.operacion.js";
 
 const literal = (texto) => texto.replace(/[\\%_]/g, (c) => `\\${c}`);
 
+// Un producto ya se contó en una bodega si tuvo una recepción o un conteo ahí (aunque haya sido "no hay").
+const CONTADOS = (bodega) => Prisma.sql`
+  SELECT DISTINCT "itemCode" FROM inventario_movimientos WHERE bodega = ${bodega} AND tipo IN ('recepcion', 'conteo')`;
+
 // Existencia en SAP sumando solo los almacenes que el supervisor marcó como de esta bodega.
 const EN_SAP = Prisma.sql`
   SELECT e."itemCode", SUM(e."inStock")::float AS sap
@@ -119,6 +123,7 @@ export const inventarioRepository = {
       WITH l AS (${lotes}), t AS (${totales}),
            s AS (SELECT "itemCode", SUM("inStock")::float AS sap FROM productos_existencias WHERE "warehouseCode" = ${almacen} GROUP BY "itemCode")
       SELECT pr."itemCode", pr."itemName", COALESCE(t.unidades, 0)::int AS unidades, COALESCE(t.cajas, 0)::int AS cajas, s.sap,
+             (COALESCE(t.unidades, 0) <> 0 OR pr."itemCode" IN (${CONTADOS(bodega)})) AS contado,
              COALESCE((SELECT JSONB_AGG(JSONB_BUILD_OBJECT('lote', l.lote, 'vencimiento', l.vencimiento, 'unidades', l.unidades, 'cajas', l.cajas)
                        ORDER BY l.vencimiento NULLS LAST, l.lote NULLS LAST) FROM l WHERE l."itemCode" = pr."itemCode"), '[]'::jsonb) AS lotes
       FROM productos pr
@@ -126,6 +131,42 @@ export const inventarioRepository = {
       LEFT JOIN s ON s."itemCode" = pr."itemCode"
       WHERE t."itemCode" IS NOT NULL OR COALESCE(s.sap, 0) <> 0
       ORDER BY pr."itemName", pr."itemCode"`;
+  },
+
+  // Conteo de una bodega: los productos que SAP tiene en su almacén, con lo registrado y si ya se contaron.
+  conteoBodega(bodega, almacen, db = prisma) {
+    const registrado = bodega === "grande"
+      ? Prisma.sql`SELECT "itemCode", SUM(unidades)::int AS unidades, (COUNT(*) FILTER (WHERE unidades > 0))::int AS cajas
+          FROM inventario_cajas GROUP BY "itemCode"`
+      : Prisma.sql`SELECT "itemCode", pequena AS unidades, 0 AS cajas FROM inventario_productos`;
+    return db.$queryRaw`
+      WITH s AS (SELECT "itemCode", SUM("inStock")::float AS sap FROM productos_existencias WHERE "warehouseCode" = ${almacen}
+                 GROUP BY "itemCode" HAVING SUM("inStock") > 0),
+           u AS (${registrado}), c AS (${CONTADOS(bodega)})
+      SELECT p."itemCode", p."itemName", s.sap, COALESCE(u.unidades, 0)::int AS unidades, COALESCE(u.cajas, 0)::int AS cajas,
+             (c."itemCode" IS NOT NULL OR COALESCE(u.unidades, 0) <> 0) AS contado
+      FROM s JOIN productos p ON p."itemCode" = s."itemCode"
+      LEFT JOIN u ON u."itemCode" = s."itemCode"
+      LEFT JOIN c ON c."itemCode" = s."itemCode"
+      ORDER BY p."itemName", p."itemCode"`;
+  },
+  // Lo que SAP tiene de un producto en cada almacén pedido.
+  async sapDeProducto(itemCode, almacenes, db = prisma) {
+    if (!almacenes.length) return new Map();
+    const filas = await db.$queryRaw`SELECT "warehouseCode", SUM("inStock")::float AS sap FROM productos_existencias
+      WHERE "itemCode" = ${itemCode} AND "warehouseCode" = ANY(${almacenes}) GROUP BY "warehouseCode"`;
+    return new Map(filas.map((f) => [f.warehouseCode, f.sap]));
+  },
+  // En qué bodegas ya se contó un producto.
+  async contadoEn(itemCode, db = prisma) {
+    const filas = await db.$queryRaw`SELECT DISTINCT bodega FROM inventario_movimientos
+      WHERE "itemCode" = ${itemCode} AND tipo IN ('recepcion', 'conteo')`;
+    return new Set(filas.map((f) => f.bodega));
+  },
+  async nombresDeAlmacenes(codigos, db = prisma) {
+    if (!codigos.length) return new Map();
+    const filas = await db.bodega.findMany({ where: { warehouseCode: { in: codigos } }, select: { warehouseCode: true, warehouseName: true } });
+    return new Map(filas.map((f) => [f.warehouseCode, f.warehouseName]));
   },
 
   // Lo que SAP tiene en un almacén, producto por producto (en stock, comprometido y pedido).
