@@ -13,6 +13,8 @@ export const conteoInicial = manejar((req) => s.listarConteoInicial(req.validate
 export const existencias = manejar((req) => s.listarExistencias(req.validatedQuery));
 export const bodega = manejar((req) => s.listarBodega(req.params.bodega, req.validatedQuery));
 export const almacenes = manejar(() => s.listarAlmacenesSap());
+export const conteo = manejar((req) => s.listarConteo(req.params.bodega, req.validatedQuery));
+export const sinExistencia = manejar((req) => s.marcarSinExistencia(req.params.itemCode, req.body, quien(req)));
 export const productosDeAlmacen = manejar((req) => s.listarProductosDeAlmacen(req.params.codigo, req.validatedQuery));
 export const caja = manejar((req) => s.consultarCaja(req.params.codigo));
 export const porVencer = manejar((req) => s.listarPorVencer(req.validatedQuery));
