@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clasificar, codigoCaja, repartirEnCajas, cajaParaUsarAntes, textoAsignacion, MINUTOS_PARA_ESTABILIZAR } from "../../src/modules/inventario/inventario.calculo.js";
+import { clasificar, codigoCaja, porPasar, repartirEnCajas, cajaParaUsarAntes, textoAsignacion, MINUTOS_PARA_ESTABILIZAR } from "../../src/modules/inventario/inventario.calculo.js";
 
 const ahora = Date.parse("2026-10-01T15:00:00Z");
 const hace = (minutos) => new Date(ahora - minutos * 60_000);
@@ -69,6 +69,21 @@ test("usar antes: la caja abierta o la que vence primero", () => {
   assert.equal(cajaParaUsarAntes(vencePrimero, [escaneada, abierta, vencePrimero]), null);
   // Una caja abierta no "le gana" a otra abierta: solo se sugiere si la escaneada está cerrada.
   assert.equal(cajaParaUsarAntes({ ...escaneada, unidades: 3 }, [abierta]), null);
+});
+
+test("traspaso de la 01 a la 02 que SAP ya registró y falta marcar", () => {
+  // SAP pasó 24 de la 01 a la 02: en la 01 tiene 24 menos que las cajas y en la 02, 24 más.
+  assert.equal(porPasar({ sapGrande: 96, sapPequena: 30, grande: 120, pequena: 6 }), 24);
+  // Lo preparado sin entregar sigue en la 02 para SAP: no es un traspaso.
+  assert.equal(porPasar({ sapGrande: 96, sapPequena: 30, grande: 120, pequena: 0, sinEntrega: 6 }), 24);
+  // Solo una de las dos diferencias (una entrada a la 02 o una salida de la 01) no es un traspaso.
+  assert.equal(porPasar({ sapGrande: 120, sapPequena: 30, grande: 120, pequena: 6 }), 0);
+  assert.equal(porPasar({ sapGrande: 96, sapPequena: 6, grande: 120, pequena: 6 }), 0);
+  // Traspaso y salida a la vez: cuenta lo menor.
+  assert.equal(porPasar({ sapGrande: 84, sapPequena: 30, grande: 120, pequena: 6 }), 24);
+  // Sin almacén asignado a alguna bodega no se calcula.
+  assert.equal(porPasar({ sapGrande: null, sapPequena: 30, grande: 120, pequena: 6 }), 0);
+  assert.equal(porPasar({ sapGrande: 95.6, sapPequena: 30.2, grande: 120, pequena: 6 }), 24);
 });
 
 test("texto de una asignación para el historial", () => {

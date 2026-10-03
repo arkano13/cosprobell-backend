@@ -76,6 +76,7 @@ function inventario(t, { sap = 0, grande = 0, pequena = 0, activo = true, sapCam
   t.mock.method(repo, "conteoBodega", async () => []);
   t.mock.method(repo, "sapDeProducto", async () => new Map());
   t.mock.method(repo, "contadoEn", async () => new Set());
+  t.mock.method(repo, "pases", async () => []);
   t.mock.method(repo, "activar", async () => {});
   t.mock.method(repo, "sumarAdelantado", async (itemCode, unidades) => hecho.adelantado.push(unidades));
   let siguiente = 120;
@@ -439,6 +440,35 @@ test("resumen y ficha: nombre de cada bodega, SAP por bodega y avance del conteo
   });
   const { data: ficha } = await (await pedir("/inventario/productos/P1", headers)).json();
   assert.deepEqual([ficha.sapPorBodega, ficha.contadoEn, ficha.bodegas.grande.nombre], [{ grande: 80, pequena: 20 }, { grande: true, pequena: false }, "Almacén Principal"]);
+});
+
+test("traspasos de la 01 a la 02: SAP ya los registró y falta marcar qué cajas se pasaron", async (t) => {
+  inventario(t, { sap: 126, grande: 120, pequena: 6 });
+  const headers = conSesion(t);
+  t.mock.method(repo, "almacenesDeEstaBodega", async () => ["01", "02"]);
+  t.mock.method(repo, "opcion", async () => ({ grande: "01", pequena: "02" }));
+  t.mock.method(repo, "resumenBodegas", async () => ({ grande: { cajas: 5 }, pequena: { unidades: 6 } }));
+  t.mock.method(repo, "porVencer", async () => []);
+  t.mock.method(repo, "movimientos", async () => []);
+  t.mock.method(repo, "pases", async (almacenGrande, almacenPequena, { itemCodes }) => {
+    assert.deepEqual([almacenGrande, almacenPequena], ["01", "02"]);
+    const filas = [{ itemCode: "P1", itemName: "Shampoo", sapGrande: 96, sapPequena: 30, grande: 120, cajas: 5, pequena: 6, sinEntrega: 0 },
+      { itemCode: "A1", itemName: "Acondicionador", sapGrande: 40, sapPequena: 0, grande: 48, cajas: 2, pequena: 0, sinEntrega: 0 }];
+    return itemCodes ? filas.filter((f) => itemCodes.includes(f.itemCode)) : filas;
+  });
+  const { data: resumen } = await (await pedir("/inventario/resumen", headers)).json();
+  assert.equal(resumen.pendientes.porPasar, 1, "el acondicionador salió de la 01 sin entrar a la 02: no es un traspaso");
+  const { data: pendientes } = await (await pedir("/inventario/pendientes", headers)).json();
+  assert.deepEqual(pendientes.porPasar, [{ itemCode: "P1", itemName: "Shampoo", unidades: 24, cajas: 5, sapGrande: 96, sapPequena: 30, grande: 120, pequena: 6 }]);
+  t.mock.method(repo, "producto", async () => ({ itemCode: "P1", itemName: "Shampoo", inventario: { pequena: 6 }, codigosBarras: [] }));
+  t.mock.method(repo, "cajasDe", async () => []);
+  t.mock.method(repo, "documentosRecientes", async () => []);
+  t.mock.method(repo, "ultimaRecepcion", async () => null);
+  const { data: ficha } = await (await pedir("/inventario/productos/P1", headers)).json();
+  assert.equal(ficha.porPasar, 24);
+  // Sin datos recientes de SAP no se calcula.
+  t.mock.method(repo, "comparacionDisponible", async () => false);
+  assert.equal((await (await pedir("/inventario/resumen", headers)).json()).data.pendientes.porPasar, 0);
 });
 
 test("conteo de una bodega: lo que falta contar, el avance y \"no hay\"", async (t) => {

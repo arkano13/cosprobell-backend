@@ -24,6 +24,16 @@ export function clasificar({ sap, grande, pequena, sinEntrega, adelantado = 0, a
   return { enSap, diferencia, faltaEnSap, estable, estado };
 }
 
+// Traspaso de la 01 a la 02 que SAP ya registró y la bodega todavía no marcó: SAP tiene en el almacén de la 02 más
+// que lo que hay en la 02 (más lo preparado sin entregar, que SAP todavía cuenta ahí) y, a la vez, en la 01 menos de
+// lo que hay en sus cajas. Es lo menor de las dos diferencias, para no confundirlo con una entrada o una salida.
+export function porPasar({ sapGrande, sapPequena, grande, pequena, sinEntrega = 0 }) {
+  if (sapGrande === null || sapGrande === undefined || sapPequena === null || sapPequena === undefined) return 0;
+  const sobraEnPequena = Math.round(sapPequena) - pequena - sinEntrega;
+  const faltaEnGrande = grande - Math.round(sapGrande);
+  return Math.max(0, Math.min(sobraEnPequena, faltaEnGrande));
+}
+
 // Unidades a restar de las cajas de un lote: primero las abiertas (para no abrir otra), después las
 // cerradas en el orden en que se recibieron.
 export function repartirEnCajas(cajas, unidades) {

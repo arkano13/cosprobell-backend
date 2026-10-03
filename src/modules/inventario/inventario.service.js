@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { AppError } from "../../shared/errors/AppError.js";
 import { inventarioRepository as repo } from "./inventario.repository.js";
 import { retirarLotes, contarLotes } from "./inventario.lotes.js";
-import { clasificar, codigoCaja, repartirEnCajas, cajaParaUsarAntes, textoAsignacion } from "./inventario.calculo.js";
+import { clasificar, codigoCaja, porPasar, repartirEnCajas, cajaParaUsarAntes, textoAsignacion } from "./inventario.calculo.js";
 
 const OPCION_FILTRAR_PEDIDOS = "pedidosSoloDeEstaBodega";
 const OPCION_ALMACENES_POR_BODEGA = "almacenesPorBodega";
@@ -65,10 +65,11 @@ export async function resumenInventario() {
     const filas = await repo.conteoBodega(bodega, nombres[bodega].almacen);
     return { total: filas.length, contados: filas.filter((f) => f.contado).length };
   };
-  const [conteoGrande, conteoPequena] = await Promise.all([avance("grande"), avance("pequena")]);
+  const [conteoGrande, conteoPequena, pases] = await Promise.all([avance("grande"), avance("pequena"),
+    comparacionDisponible ? pasesPendientes() : []]);
   return { data: { almacenes, comparacionDisponible, existenciasSapAl, bodegas: nombres,
     conteo: { grande: conteoGrande, pequena: conteoPequena }, ...bodegas,
-    pendientes: { porUbicar: contar("por_ubicar"), porDescontar: contar("por_descontar"), actualizando: contar("actualizando"),
+    pendientes: { porUbicar: contar("por_ubicar"), porDescontar: contar("por_descontar"), porPasar: pases.length, actualizando: contar("actualizando"),
       conteoInicial: contar("conteo_inicial"), faltaEnSap: vistas.filter((v) => v.faltaEnSap > 0).length },
     porVencer: { vencidos: porVencer.filter((l) => l.vencido).length, proximos: porVencer.filter((l) => !l.vencido).length },
     movimientos } };
@@ -85,10 +86,10 @@ export async function consultarProducto(itemCode) {
   const comparacionDisponible = await repo.comparacionDisponible();
   const nombres = await bodegasConNombre(almacenes);
   const asignados = [nombres.grande?.almacen, nombres.pequena?.almacen].filter(Boolean);
-  const [estado, cajas, movimientos, documentos, ultima, lotesPequena, sap, contado] = await Promise.all([
+  const [estado, cajas, movimientos, documentos, ultima, lotesPequena, sap, contado, pases] = await Promise.all([
     comparacionDisponible ? estadoDe(itemCode) : null, repo.cajasDe(itemCode), repo.movimientos({ itemCode, limite: 15 }),
     repo.documentosRecientes([itemCode], { dias: 60, porProducto: 8 }), repo.ultimaRecepcion(itemCode), repo.lotesPequena(itemCode),
-    repo.sapDeProducto(itemCode, asignados), repo.contadoEn(itemCode)]);
+    repo.sapDeProducto(itemCode, asignados), repo.contadoEn(itemCode), comparacionDisponible ? pasesPendientes([itemCode]) : []]);
   const sapDe = (bodega) => (nombres[bodega] ? Math.round(sap.get(nombres[bodega].almacen) ?? 0) : null);
   // Bodega grande agrupada por lote (y vencimiento), con sus cajas.
   const lotes = new Map();
@@ -107,6 +108,7 @@ export async function consultarProducto(itemCode) {
     sugerencia: ultima ? { unidadesPorCaja: ultima.unidadesIniciales } : null,
     bodegas: nombres, sapPorBodega: { grande: sapDe("grande"), pequena: sapDe("pequena") },
     contadoEn: { grande: contado.has("grande") || cajas.length > 0, pequena: contado.has("pequena") || (producto.inventario?.pequena ?? 0) !== 0 },
+    porPasar: pases[0]?.unidades ?? 0,
   } };
 }
 
@@ -120,6 +122,7 @@ export async function listarPendientes() {
   const inicial = de("conteo_inicial");
   return { data: {
     porUbicar: porUbicar.map((v) => ({ ...v, documentos: docs(v.itemCode) })),
+    porPasar: await pasesPendientes(),
     porDescontar: porDescontar.map((v) => ({ ...v, documentos: docs(v.itemCode) })),
     actualizando: de("actualizando"),
     faltaEnSap: vistas.filter((v) => v.faltaEnSap > 0),
@@ -468,6 +471,17 @@ async function bodegasConNombre(marcados = null) {
   const nombres = await repo.nombresDeAlmacenes([porBodega.grande, porBodega.pequena].filter(Boolean));
   const de = (codigo) => (codigo ? { almacen: codigo, nombre: nombres.get(codigo) ?? codigo } : null);
   return { grande: de(porBodega.grande), pequena: de(porBodega.pequena) };
+}
+
+// Traspasos de la 01 a la 02 que SAP ya registró y falta marcar en la bodega (qué cajas se pasaron). Hace falta que
+// cada bodega tenga su almacén; quien llama se fija antes en que la comparación con SAP esté disponible.
+async function pasesPendientes(itemCodes = null) {
+  const porBodega = await almacenesPorBodega();
+  if (!porBodega.grande || !porBodega.pequena) return [];
+  const filas = await repo.pases(porBodega.grande, porBodega.pequena, { itemCodes });
+  return filas.map((f) => ({ itemCode: f.itemCode, itemName: f.itemName, unidades: porPasar(f), cajas: f.cajas,
+    sapGrande: Math.round(f.sapGrande), sapPequena: Math.round(f.sapPequena), grande: f.grande, pequena: f.pequena }))
+    .filter((v) => v.unidades > 0);
 }
 
 export async function listarAlmacenes() {
