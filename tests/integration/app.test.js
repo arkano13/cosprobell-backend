@@ -114,6 +114,13 @@ test("las rutas de negocio siguen requiriendo autenticacion", async () => {
   }
 });
 
+test("la consulta previa del navegador (CORS) queda guardada 2 horas", async () => {
+  const respuesta = await fetch(`${baseUrl}/inventario/resumen`, { method: "OPTIONS",
+    headers: { Origin: "app://bodega", "Access-Control-Request-Method": "GET", "Access-Control-Request-Headers": "authorization" } });
+  assert.equal(respuesta.status, 204);
+  assert.equal(respuesta.headers.get("access-control-max-age"), "7200");
+});
+
 // --------------------------------------------------
 // Productos
 // --------------------------------------------------
