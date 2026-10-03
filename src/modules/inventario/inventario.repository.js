@@ -108,6 +108,28 @@ export const inventarioRepository = {
       ORDER BY pr."itemName", pr."itemCode"`;
   },
 
+  // Lo que SAP tiene en el almacén de cada bodega frente a lo que hay en ella, para los productos que ya están en el
+  // inventario (para los traspasos de la 01 a la 02 que falta marcar).
+  pases(almacenGrande, almacenPequena, { itemCodes = null } = {}, db = prisma) {
+    const sap = (almacen) => Prisma.sql`SELECT "itemCode", SUM("inStock")::float AS sap FROM productos_existencias
+      WHERE "warehouseCode" = ${almacen} GROUP BY "itemCode"`;
+    const filtro = itemCodes ? Prisma.sql`AND pr."itemCode" = ANY(${itemCodes})` : Prisma.empty;
+    return db.$queryRaw`
+      WITH g AS (SELECT "itemCode", SUM(unidades)::int AS grande, (COUNT(*) FILTER (WHERE unidades > 0))::int AS cajas
+                 FROM inventario_cajas GROUP BY "itemCode"),
+           s1 AS (${sap(almacenGrande)}), s2 AS (${sap(almacenPequena)}), se AS (${SIN_ENTREGA})
+      SELECT pr."itemCode", pr."itemName", COALESCE(s1.sap, 0) AS "sapGrande", COALESCE(s2.sap, 0) AS "sapPequena",
+             COALESCE(g.grande, 0) AS grande, COALESCE(g.cajas, 0) AS cajas, ip.pequena, COALESCE(se."sinEntrega", 0) AS "sinEntrega"
+      FROM productos pr
+      JOIN inventario_productos ip ON ip."itemCode" = pr."itemCode"
+      LEFT JOIN g ON g."itemCode" = pr."itemCode"
+      LEFT JOIN s1 ON s1."itemCode" = pr."itemCode"
+      LEFT JOIN s2 ON s2."itemCode" = pr."itemCode"
+      LEFT JOIN se ON se."itemCode" = pr."itemCode"
+      WHERE COALESCE(g.grande, 0) > COALESCE(s1.sap, 0) ${filtro}
+      ORDER BY pr."itemName", pr."itemCode"`;
+  },
+
   // Lo que hay en una bodega, por producto y lote, con lo que SAP tiene en el almacén asignado a esa bodega (si hay).
   // Incluye los productos que SAP tiene en ese almacén y en la bodega no están registrados.
   contenidoBodega(bodega, almacen, db = prisma) {
