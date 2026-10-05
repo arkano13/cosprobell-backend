@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clasificar, codigoCaja, porPasar, repartirEnCajas, cajaParaUsarAntes, textoAsignacion, MINUTOS_PARA_ESTABILIZAR } from "../../src/modules/inventario/inventario.calculo.js";
+import { clasificar, codigoCaja, porPasar, repartirTraspaso, lotesDeTraspaso, repartirEnCajas, cajaParaUsarAntes, textoAsignacion, MINUTOS_PARA_ESTABILIZAR } from "../../src/modules/inventario/inventario.calculo.js";
 
 const ahora = Date.parse("2026-10-01T15:00:00Z");
 const hace = (minutos) => new Date(ahora - minutos * 60_000);
@@ -89,4 +89,27 @@ test("traspaso de la 01 a la 02 que SAP ya registró y falta marcar", () => {
 test("texto de una asignación para el historial", () => {
   assert.equal(textoAsignacion([{ tipo: "lote", lote: "L2408-090", unidades: 100 }, { tipo: "lote", lote: null, unidades: 2 }, { tipo: "pequena", unidades: 4 }]),
     "L2408-090: 100 · sin lote: 2 · pequeña: 4");
+});
+
+const caja = (id, lote, vencimiento, unidades, unidadesIniciales = unidades) => ({ id, codigo: codigoCaja(id), lote, vencimiento, unidades, unidadesIniciales });
+
+test("traspaso: cajas enteras que suman justo lo que pasó SAP, las que vencen antes", () => {
+  const cajas = [caja(1, "L2", "2027-06-30", 24), caja(2, "L1", "2027-01-31", 10, 24), caja(3, "L1", "2027-01-31", 24), caja(4, "L2", "2027-06-30", 24)];
+  // 24: la primera caja entera que vence antes (la abierta de 10 no alcanza sola y no hay otra de 14).
+  assert.deepEqual(repartirTraspaso(cajas, 24).map((p) => [p.codigo, p.unidades, p.entera]), [["CJ-000003", 24, true]]);
+  // 34: la abierta (10) y una cerrada del mismo lote.
+  assert.deepEqual(repartirTraspaso(cajas, 34).map((p) => [p.codigo, p.unidades]), [["CJ-000002", 10], ["CJ-000003", 24]]);
+  // 48: dos cajas enteras; entre las combinaciones, la que vence antes.
+  assert.deepEqual(repartirTraspaso(cajas, 48).map((p) => p.codigo), ["CJ-000003", "CJ-000001"]);
+  assert.deepEqual(lotesDeTraspaso(repartirTraspaso(cajas, 58)).map((l) => [l.lote, l.unidades, l.cajas]), [["L1", 34, 2], ["L2", 24, 1]]);
+});
+
+test("traspaso: si ninguna combinación de cajas enteras da justo, se abre una", () => {
+  const cajas = [caja(1, "L1", "2027-01-31", 24), caja(2, "L1", "2027-01-31", 24), caja(3, "L2", null, 24)];
+  assert.deepEqual(repartirTraspaso(cajas, 30).map((p) => [p.codigo, p.unidades, p.entera]), [["CJ-000001", 24, true], ["CJ-000002", 6, false]]);
+  // La abierta que vence igual se usa antes que abrir otra.
+  const conAbierta = [caja(1, "L1", "2027-01-31", 24), caja(2, "L1", "2027-01-31", 24), caja(3, "L1", "2027-01-31", 20, 24)];
+  assert.deepEqual(repartirTraspaso(conAbierta, 30).map((p) => [p.codigo, p.unidades]), [["CJ-000001", 24], ["CJ-000003", 6]]);
+  assert.throws(() => repartirTraspaso(cajas, 100), { code: "LOTE_INSUFICIENTE" });
+  assert.throws(() => repartirTraspaso([], 5, { lote: "L9" }), /El lote L9 tiene 0 unidades/);
 });

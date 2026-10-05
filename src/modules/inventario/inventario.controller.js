@@ -1,4 +1,5 @@
 import * as s from "./inventario.service.js";
+import { registrarCodigo as registrar } from "../etiquetas/codigos.service.js";
 
 const manejar = (accion, estado = 200) => async (req, res, next) => {
   try { res.status(estado).json(await accion(req)); } catch (error) { next(error); }
@@ -23,6 +24,8 @@ export const descuentos = manejar((req) => s.listarDescuentos(req.validatedQuery
 export const recibir = manejar((req) => s.recibir(req.body, quien(req)), 201);
 export const reponer = manejar((req) => s.reponer(req.body, quien(req)));
 export const descontar = manejar((req) => s.descontar(req.body, quien(req)), 201);
+export const traspasar = manejar((req) => s.traspasar(req.body, quien(req)), 201);
+export const registrarCodigo = manejar((req) => registrar(req.body, quien(req)));
 export const reasignar = manejar((req) => s.reasignarDescuento(req.params.id, req.body, quien(req)));
 export const contar = manejar((req) => s.contarPequena(req.params.itemCode, req.body, quien(req)));
 export const corregir = manejar((req) => s.corregirCaja(req.params.id, req.body, quien(req)));

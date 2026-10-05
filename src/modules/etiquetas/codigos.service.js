@@ -1,5 +1,6 @@
-// Códigos de barras que SAP no tiene: el supervisor escanea el envase, elige el producto y el código queda
-// guardado con la unidad Manual del artículo, ya confirmado como unidad. La sincronización no lo retira.
+// Códigos de barras que SAP no tiene: quien cuenta (operador o supervisor) escanea el envase, elige el producto y el
+// código queda guardado con la unidad Manual del artículo, ya confirmado como unidad, con quién lo registró. La
+// sincronización no lo retira; el supervisor lo puede quitar.
 import { prisma } from "../../infrastructure/database/prisma.js";
 import { AppError } from "../../shared/errors/AppError.js";
 import { UNIDAD_MANUAL, unidadConocida } from "../picking/picking.cantidades.js";
@@ -8,12 +9,15 @@ const enUso = (otro) => new AppError({ code: "CODIGO_EN_USO", statusCode: 409,
   message: `Ese código ya está registrado para ${otro.itemName} (${otro.itemCode})` });
 
 export const codigosRepository = {
-  // Un registro a la vez por código: dos supervisores no pueden asignarlo a productos distintos.
+  // Un registro a la vez por código: dos personas no pueden asignarlo a productos distintos.
   conCodigoBloqueado(codigo, operacion) {
     return prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`codigo:${codigo}`}))::text`;
       return operacion(tx);
     }, { isolationLevel: "ReadCommitted", maxWait: 5_000, timeout: 10_000 });
+  },
+  codigoPorId(id, db = prisma) {
+    return db.productoCodigoBarras.findUnique({ where: { id }, select: { id: true, codigo: true, itemCode: true, origen: true } });
   },
 };
 
@@ -43,5 +47,21 @@ export async function registrarCodigo({ codigo, itemCode }, { aplicacion }, { re
       observacion: nuevo ? "Registrado desde la app" : "Confirmado al registrarlo desde la app" };
     await tx.confirmacionEtiquetaPicking.upsert({ where: { codigoBarrasId: fila.id }, create: { codigoBarrasId: fila.id, ...datos }, update: datos });
     return { data: { id: fila.id, codigo: fila.codigo, itemCode: producto.itemCode, itemName: producto.itemName, origen: fila.origen, nuevo } };
+  });
+}
+
+// Quitar un código registrado desde la app (por ejemplo, asignado al producto equivocado). Los de SAP o de la ficha
+// del artículo se cambian en SAP.
+export async function quitarCodigo(id, { repo = codigosRepository } = {}) {
+  const noEncontrado = () => new AppError({ code: "CODIGO_NO_ENCONTRADO", message: "Código no encontrado", statusCode: 404 });
+  const fila = await repo.codigoPorId(id);
+  if (!fila) throw noEncontrado();
+  return repo.conCodigoBloqueado(fila.codigo, async (tx) => {
+    const actual = await repo.codigoPorId(id, tx);
+    if (!actual) throw noEncontrado();
+    if (actual.origen !== "app") throw new AppError({ code: "CODIGO_DE_SAP", statusCode: 409,
+      message: "Ese código viene de SAP: se cambia en SAP" });
+    await tx.productoCodigoBarras.delete({ where: { id } });
+    return { data: { id: actual.id, codigo: actual.codigo, itemCode: actual.itemCode } };
   });
 }

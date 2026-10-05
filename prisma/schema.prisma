@@ -793,7 +793,7 @@ model InventarioCaja {
 model InventarioMovimiento {
   id          Int                  @id @default(autoincrement())
   grupo       String // los movimientos de una misma operación (una recepción de 10 cajas, una reposición) lo comparten
-  tipo        String // recepcion | reposicion | picking | descuento | conteo | correccion | reasignacion
+  tipo        String // recepcion | reposicion | traspaso | picking | descuento | conteo | correccion | reasignacion
   itemCode    String
   bodega      String // grande | pequena
   cantidad    Int

@@ -64,6 +64,11 @@ const asignaciones = z.array(asignacion).min(1).max(50).refine((lista) => {
 }, "Cada lote (y la pequeña) va una sola vez");
 
 export const descuentoSchema = z.object({ operacionId, itemCode, unidades, asignaciones }).strict();
+// Traspaso de la 01 a la 02 que SAP ya registró: cuántas unidades y, si no se acepta la sugerencia, de qué lotes.
+export const traspasoSchema = z.object({ operacionId, itemCode, unidades,
+  lotes: z.array(z.object({ lote: z.string().trim().min(1).max(60).nullable(), unidades }).strict()).min(1).max(50)
+    .refine((lista) => new Set(lista.map((l) => l.lote ?? "")).size === lista.length, "Cada lote va una sola vez").optional(),
+}).strict();
 export const reasignacionSchema = z.object({ operacionId, asignaciones }).strict();
 export const conteoSchema = z.object({ operacionId, unidades: z.number().int().min(0).max(1_000_000),
   lotes: z.array(z.object({ lote, vencimiento: fecha.nullable().optional(), unidades: z.number().int().min(0).max(1_000_000) }).strict())
@@ -86,7 +91,7 @@ export const almacenesSchema = z.object({
 export const bodegaParamsSchema = z.object({ bodega: z.enum(["grande", "pequena"]) });
 export const almacenParamsSchema = z.object({ codigo: codigoAlmacen });
 export const conteoQuerySchema = z.object({
-  buscar: z.string().trim().min(1).max(60).optional(), estado: z.enum(["falta", "contados", "todos"]).default("falta"),
+  buscar: z.string().trim().min(1).max(60).optional(), estado: z.enum(["falta", "contados", "sin_codigo", "todos"]).default("falta"),
   pagina: z.coerce.number().int().min(0).max(10_000).default(0), limit: limit(50),
 }).strict();
 export const sinExistenciaSchema = z.object({ operacionId, bodega: z.enum(["grande", "pequena"]) }).strict();
