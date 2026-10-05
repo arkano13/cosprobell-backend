@@ -14,6 +14,14 @@ test("excepción TLS requiere activación, huella y sociedad de pruebas", () => 
   assert.equal(configurar({ ...env, SAP_TLS_TEST_EXCEPTION: "true", SAP_TLS_CERT_SHA256: "AA".repeat(32) }).huellaSap, "AA".repeat(32));
   assert.throws(() => configurar({ ...env, NODE_TLS_REJECT_UNAUTHORIZED: "0" }));
 });
+test("producción permite certificado fijado solo con activación explícita y huella HTTPS", () => {
+  const produccion = { ...env, SAP_COMPANY_DB: "REAL", SAP_TLS_PINNED_CERTIFICATE: "true", SAP_TLS_CERT_SHA256: "aa:".repeat(31) + "aa" };
+  assert.equal(configurar(produccion).huellaSap, "AA".repeat(32));
+  assert.throws(() => configurar({ ...produccion, SAP_TLS_CERT_SHA256: "" }));
+  assert.throws(() => configurar({ ...produccion, SAP_TLS_PINNED_CERTIFICATE: "yes" }));
+  assert.throws(() => configurar({ ...produccion, SAP_SERVICE_LAYER_URL: "http://localhost/b1s/v1" }));
+  assert.equal(configurar({ ...produccion, SAP_TLS_PINNED_CERTIFICATE: "false" }).huellaSap, null);
+});
 for (const coincide of [true, false]) test(`huella ${coincide ? "correcta permite" : "diferente impide"} enviar credenciales`, async t => {
   let enviado = false;
   t.mock.method(https, "request", (_url, opciones, callback) => {

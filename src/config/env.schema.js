@@ -36,6 +36,10 @@ const envSchema = z.object({
   APP_JWT_SECRET: z.string().optional(),
   // Nombres de API keys (separados por coma) que pueden confirmar etiquetas como unidad individual.
   ETIQUETAS_APPS_AUTORIZADAS: z.string().optional(),
+  INVENTARIO_SAP_MAX_AGE_MINUTES: z.string().regex(/^\d+$/).default("30")
+    .pipe(z.coerce.number().int().min(5).max(240)),
+  INVENTARIO_SAP_WAREHOUSES: z.string().optional().transform(v => v === undefined ? [] : v.split(",").map(s => s.trim()))
+    .refine(v => v.every(s => /^[A-Za-z0-9_-]{1,8}$/.test(s)) && new Set(v).size === v.length),
 });
 
 export function parseEnv(variables) {
@@ -64,6 +68,8 @@ export function parseEnv(variables) {
     bridgeApiKey: datos.BRIDGE_API_KEY,
     sapCompanyDb: datos.SAP_COMPANY_DB,
     appJwtSecret: datos.APP_JWT_SECRET,
+    inventarioSapMaxAgeMinutes: datos.INVENTARIO_SAP_MAX_AGE_MINUTES,
+    inventarioSapWarehouses: Object.freeze(datos.INVENTARIO_SAP_WAREHOUSES),
     etiquetasAppsAutorizadas: Object.freeze((datos.ETIQUETAS_APPS_AUTORIZADAS ?? "")
       .split(",").map((nombre) => nombre.trim()).filter(Boolean)),
   });

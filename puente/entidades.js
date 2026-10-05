@@ -12,6 +12,7 @@ import { loteAlmacenesSchema } from "../src/modules/sincronizacion/almacenes.sch
 import { loteExistenciasSchema } from "../src/modules/sincronizacion/existencias.schemas.js";
 import { construirLoteAlmacenes } from "./almacenes.js";
 import { construirLoteExistencias } from "./existencias.js";
+import { fuenteExistencias } from "./existencias.sql.js";
 // recurso, campos, claveSap y filtro describen la consulta a Service Layer (recorrido por clave ascendente).
 // nombre es a la vez la ruta del backend, el campo del lote y el archivo de estado local.
 export const PRODUCTOS = { nombre: "productos", recurso: "Items", claveSap: "ItemCode", claveLocal: "itemCode",
@@ -52,4 +53,6 @@ export const EXISTENCIAS = { nombre: "existencias", recurso: "Items", claveSap: 
   dependencias: ["productos", "almacenes"], inventario: true, confirmarRecorrido: true,
   schema: loteExistenciasSchema, construirLote: construirLoteExistencias };
 export const ENTIDADES = [CLIENTES, PRODUCTOS, UNIDADES, CODIGOS_BARRAS, PEDIDOS, ALMACENES, EXISTENCIAS];
-export const entidadesHabilitadas = config => ENTIDADES.filter(e => !e.inventario || config.inventarioHabilitado);
+export const entidadesHabilitadas = config => ENTIDADES.filter(e => !e.inventario || config.inventarioHabilitado)
+  .map(e => e.nombre === "existencias" ? { ...e, fuente: fuenteExistencias(config),
+    ...(["sql-01-02", "sql-almacenes"].includes(config.modoExistencias) ? { consultaExistenciasSql: true, tamanoPagina: 20 } : {}) } : e);
