@@ -201,6 +201,18 @@ export const inventarioRepository = {
       ORDER BY p."itemName", e."itemCode"`;
   },
 
+  // Lo registrado en la app en una bodega, por producto: la grande suma sus cajas; la pequeña, sus unidades sueltas.
+  unidadesEnBodega(bodega, db = prisma) {
+    return bodega === "grande"
+      ? db.$queryRaw`
+          SELECT c."itemCode", p."itemName", SUM(c.unidades)::int AS unidades, (COUNT(*) FILTER (WHERE c.unidades > 0))::int AS cajas
+          FROM inventario_cajas c JOIN productos p ON p."itemCode" = c."itemCode"
+          GROUP BY c."itemCode", p."itemName" HAVING SUM(c.unidades) <> 0`
+      : db.$queryRaw`
+          SELECT i."itemCode", p."itemName", i.pequena AS unidades, 0 AS cajas
+          FROM inventario_productos i JOIN productos p ON p."itemCode" = i."itemCode" WHERE i.pequena <> 0`;
+  },
+
   // Almacenes de SAP con lo que sirve para reconocerlos: productos con existencia, unidades y líneas de pedidos abiertos.
   almacenes(db = prisma) {
     return db.$queryRaw`

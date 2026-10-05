@@ -583,17 +583,29 @@ export async function listarAlmacenesSap() {
 }
 
 // Los productos que SAP tiene en un almacén: en stock, comprometido (en pedidos), pedido (a proveedores) y disponible.
+// Si el almacén es la bodega grande o la pequeña, también lo registrado en la app ahí (enBodega, y cajas en la grande),
+// incluidos los productos que SAP no tiene en ese almacén; si no, enBodega es null.
 export async function listarProductosDeAlmacen(codigo, { buscar, pagina, limit }) {
   const { data: almacenes } = await listarAlmacenesSap();
   const almacen = almacenes.find((a) => a.warehouseCode === codigo)
     ?? (await repo.almacenes()).find((a) => a.warehouseCode === codigo);
   if (!almacen) throw falla("ALMACEN_DESCONOCIDO", 404, `Almacén desconocido: ${codigo}`);
-  const [filas, existenciasSapAl] = await Promise.all([repo.productosDeAlmacen(codigo), repo.existenciasSapAl()]);
+  const bodega = almacen.bodega ?? null;
+  const [filas, existenciasSapAl, registrado] = await Promise.all([repo.productosDeAlmacen(codigo), repo.existenciasSapAl(),
+    bodega ? repo.unidadesEnBodega(bodega) : []]);
   const texto = buscar ? normalizar(buscar) : null;
   const redondo = (n) => Math.round((n ?? 0) * 1000) / 1000;
+  const enApp = new Map(registrado.map((r) => [r.itemCode, r]));
+  const deApp = (itemCode) => (bodega ? { enBodega: enApp.get(itemCode)?.unidades ?? 0, cajas: enApp.get(itemCode)?.cajas ?? 0 } : { enBodega: null, cajas: null });
   const vistas = filas.map((f) => ({ itemCode: f.itemCode, itemName: f.itemName, enStock: redondo(f.enStock), comprometido: redondo(f.comprometido),
-    pedido: redondo(f.pedido), disponible: redondo(f.enStock - f.comprometido + f.pedido) }));
-  const resumen = { productos: vistas.filter((v) => v.enStock !== 0).length, unidades: redondo(vistas.reduce((t, v) => t + v.enStock, 0)) };
+    pedido: redondo(f.pedido), disponible: redondo(f.enStock - f.comprometido + f.pedido), ...deApp(f.itemCode) }));
+  const enSap = new Set(filas.map((f) => f.itemCode));
+  for (const r of registrado) {
+    if (!enSap.has(r.itemCode)) vistas.push({ itemCode: r.itemCode, itemName: r.itemName, enStock: 0, comprometido: 0, pedido: 0, disponible: 0, ...deApp(r.itemCode) });
+  }
+  vistas.sort((a, b) => a.itemName.localeCompare(b.itemName, "es") || a.itemCode.localeCompare(b.itemCode));
+  const resumen = { productos: vistas.filter((v) => v.enStock !== 0).length, unidades: redondo(vistas.reduce((t, v) => t + v.enStock, 0)),
+    enBodega: bodega ? registrado.reduce((t, r) => t + r.unidades, 0) : null };
   const elegidas = vistas.filter(coincide(texto));
   return { data: elegidas.slice(pagina * limit, (pagina + 1) * limit), total: elegidas.length, resumen, existenciasSapAl,
     almacen: { warehouseCode: almacen.warehouseCode, warehouseName: almacen.warehouseName, deEstaBodega: almacen.deEstaBodega, bodega: almacen.bodega ?? null } };

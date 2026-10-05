@@ -402,16 +402,25 @@ test("almacenes de SAP: la lista y los productos que tiene cada uno", async (t) 
       { itemCode: "S1", itemName: "Shampoo", enStock: 30, comprometido: 0, pedido: 0 },
       { itemCode: "Z1", itemName: "Solo pedido", enStock: 0, comprometido: 0, pedido: 24 }];
   });
+  const bodegas = [];
+  t.mock.method(repo, "unidadesEnBodega", async (bodega) => {
+    bodegas.push(bodega);
+    return [{ itemCode: "S1", itemName: "Shampoo", unidades: 40, cajas: 2 }, { itemCode: "C1", itemName: "Crema", unidades: 6, cajas: 1 }];
+  });
   // Sin almacenes vacíos que no son de esta bodega; dice qué bodega es cada uno.
   const lista = await (await pedir("/inventario/almacenes", headers)).json();
   assert.deepEqual(lista.data.map((a) => [a.warehouseCode, a.bodega]), [["01", "grande"], ["02", "pequena"], ["V05", null]]);
   const r = await pedir("/inventario/almacenes/01/productos", headers);
   assert.equal(r.status, 200);
   const cuerpo = await r.json();
-  assert.deepEqual(cuerpo.data[0], { itemCode: "A1", itemName: "Acondicionador", enStock: 100, comprometido: 30, pedido: 10, disponible: 80 });
-  assert.deepEqual([cuerpo.total, cuerpo.resumen, cuerpo.almacen.bodega], [3, { productos: 2, unidades: 130 }, "grande"]);
+  assert.deepEqual(cuerpo.data[0], { itemCode: "A1", itemName: "Acondicionador", enStock: 100, comprometido: 30, pedido: 10, disponible: 80, enBodega: 0, cajas: 0 });
+  // La 01 es la bodega grande: lo registrado en la app, incluida la crema que SAP no tiene en ese almacén.
+  assert.deepEqual(cuerpo.data.map((v) => [v.itemCode, v.enStock, v.enBodega]), [["A1", 100, 0], ["C1", 0, 6], ["S1", 30, 40], ["Z1", 0, 0]]);
+  assert.deepEqual([cuerpo.total, cuerpo.resumen, cuerpo.almacen.bodega, bodegas], [4, { productos: 2, unidades: 130, enBodega: 46 }, "grande", ["grande"]]);
   const buscado = await (await pedir("/inventario/almacenes/V05/productos?buscar=sham", headers)).json();
   assert.deepEqual([buscado.data.map((v) => v.itemCode), buscado.almacen.bodega, pedidos.at(-1)], [["S1"], null, "V05"]);
+  // V05 no es ninguna de las dos bodegas: sin lo registrado en la app.
+  assert.deepEqual([buscado.data[0].enBodega, buscado.resumen.enBodega, bodegas.length], [null, null, 1]);
   assert.equal((await pedir("/inventario/almacenes/ZZ/productos", headers)).status, 404);
   assert.equal((await pedir("/inventario/almacenes/01/productos")).status, 401);
 });
