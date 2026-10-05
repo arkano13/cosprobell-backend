@@ -44,6 +44,10 @@ export async function abrirAlmacen(config, entidad) {
         ? Number.isInteger(estado.cursor) && estado.cursor >= 0 && estado.cursor <= 2147483647
         : typeof estado.cursor === "string"))) throw new ErrorPuente("ESTADO_LOCAL_INCOMPATIBLE");
   // Revisión de cierres (solo pedidos): hora de inicio del recorrido y claves pendientes de revisar.
+  if (estado.fuenteExistencias !== undefined && !["items", "sql-01-02-v1"].includes(estado.fuenteExistencias) &&
+      !/^sql-almacenes-v1-[a-f0-9]{20}$/.test(estado.fuenteExistencias)) {
+    throw new ErrorPuente("ESTADO_LOCAL_INCOMPATIBLE");
+  }
   const { inicioRecorrido = null, porRevisar = null } = estado;
   const claveValida = (c) => entidad.claveNumerica ? Number.isSafeInteger(c) && c >= 0 : typeof c === "string";
   const huellasValidas = h => h && typeof h === "object" && !Array.isArray(h) && Object.entries(h).every(([k, v]) =>

@@ -2,6 +2,7 @@
 import { Prisma } from "../../../generated/prisma/client.js";
 import { prisma } from "../../infrastructure/database/prisma.js";
 import { ejecutarUnaVez } from "./inventario.operacion.js";
+import env from "../../config/env.js";
 
 const literal = (texto) => texto.replace(/[\\%_]/g, (c) => `\\${c}`);
 
@@ -55,14 +56,17 @@ export const inventarioRepository = {
   },
   async comparacionDisponible(db = prisma) {
     // La edad se mide desde el inicio: terminar un recorrido lento no rejuvenece sus primeras páginas.
+    const alcance = env.inventarioSapWarehouses.length ? Prisma.sql`
+      AND NOT EXISTS (SELECT 1 FROM bodegas WHERE "deEstaBodega"
+        AND "warehouseCode" NOT IN (${Prisma.join(env.inventarioSapWarehouses)}))` : Prisma.empty;
     const [fila] = await db.$queryRaw`
       SELECT EXISTS (SELECT 1 FROM bodegas WHERE "deEstaBodega")
         AND (SELECT COUNT(*) = 2 FROM sincronizacion_recorridos
              WHERE "finalizadoEn" IS NOT NULL AND (
                (entidad = 'almacenes' AND "iniciadoEn" >= now() - interval '48 hours') OR
-               (entidad = 'existencias' AND "iniciadoEn" >= now() - interval '30 minutes')))
+               (entidad = 'existencias' AND "iniciadoEn" >= now() - (${env.inventarioSapMaxAgeMinutes} * interval '1 minute'))))
         AND NOT EXISTS (SELECT 1 FROM productos_existencias e, sincronizacion_recorridos r
-          WHERE r.entidad = 'existencias' AND e."actualizadoEn" < r."iniciadoEn") AS disponible`;
+          WHERE r.entidad = 'existencias' AND e."actualizadoEn" < r."iniciadoEn") ${alcance} AS disponible`;
     return fila?.disponible === true;
   },
   // Una operación por producto a la vez: recepciones, reposiciones, descuentos y picking no se pisan.
