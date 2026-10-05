@@ -1,5 +1,6 @@
 import { setTimeout as esperar } from "node:timers/promises";
 import { ErrorPuente } from "./http.js";
+import { fuenteExistencias } from "./existencias.sql.js";
 
 // Presupuesto compartido por todas las entidades de una ejecución.
 export function crearControl(config, { ahora = Date.now, dormir = esperar } = {}) {
@@ -18,6 +19,8 @@ export function crearControl(config, { ahora = Date.now, dormir = esperar } = {}
 }
 
 export function entidadPendiente(estado, nombre, config, ahora = Date.now()) {
+  if (nombre === "existencias" && config.modoExistencias &&
+    (estado.fuenteExistencias ?? "items") !== fuenteExistencias(config)) return true;
   if (estado.pendiente || estado.cursor !== null || estado.inicioRecorrido || estado.porRevisar || estado.recorridoId) return true;
   if (!estado.ultimoCompleto) return true;
   if (config.forzar) return true;

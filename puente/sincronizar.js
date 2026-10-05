@@ -12,6 +12,11 @@ export async function sincronizar({ config, almacen, sap, backend, entidad = PRO
   if (!coincide) throw new ErrorPuente("REQUIERE_RECONCILIACION");
   let lotes = 0, terminado = false;
   if (entidad.confirmarRecorrido) {
+    if (entidad.fuente && (estado.fuenteExistencias ?? "items") !== entidad.fuente) {
+      // No mezclar un lote antiguo sin confirmar con el alcance nuevo.
+      if (estado.pendiente) throw new ErrorPuente("CAMBIO_FUENTE_CON_PENDIENTE");
+      await guardar({ ...estado, cursor: null, finalizando: false, fuenteExistencias: entidad.fuente });
+    }
     if (!estado.recorridoId) {
       // Al actualizar desde una versión anterior, confirmar primero cualquier lote pendiente
       // y recorrer desde el inicio. Conservar secuencias y caché, sin editar archivos a mano.

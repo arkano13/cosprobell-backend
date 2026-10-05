@@ -664,3 +664,17 @@ Se registran inicio y fin de recorridos para impedir comparaciones sobre cargas 
 Verificado: 443/443 pruebas y esquema Prisma válido. Muestras locales de SAP: 20 almacenes y 5 artículos. PostgreSQL temporal local: pausa/reanudación, actualización sin cambios, transición de 12 a cero, conservación de la pequeña y caducidad de comparación. No se desplegó en Railway ni se consultó SAP real en esta sesión.
 
 Paquete independiente: dist/puente-inventario. Procedimiento completo en docs/ACTUALIZAR_ALMACENES_EXISTENCIAS.md. Antes de activar, actualizar backend y paquete del servidor preservando configuración y estado; verificar sondeo y primera carga de ambas entidades.
+
+## Certificado fijado también en producción 2026-10-03
+
+A petición del usuario, se añadió SAP_TLS_PINNED_CERTIFICATE como activación explícita independiente de la sociedad. Mantiene HTTPS, exige huella SHA-256 y conserva el rechazo antes de enviar credenciales cuando la huella difiere. Omite vencimiento, nombre y CA; no modifica TLS de Railway ni habilita desactivación global. La excepción antigua de pruebas conserva su restricción si no se activa el modo nuevo. No se cambió la sociedad ni se desplegó en el servidor. Guía: docs/CERTIFICADO_FIJADO_PUENTE.md. Parche distribuible con config.js y ejecutar.js; conserva el lanzador oculto existente.
+
+## Reducción de consultas para almacenes 01 y 02 2026-10-03
+
+El usuario reportó lentitud percibida en SAP, sin una causalidad medida, y confirmó los códigos 01 Almacén y 02 Despacho. Se preparó BRIDGE_STOCK_MODE=sql-01-02: consulta parametrizada de Service Layer SQLQueries con JOIN restringidos a esos dos almacenes, hasta 20 artículos por página. Recorre códigos para conservar ceros y retirar saldos antiguos; no descarga los saldos de todos los almacenes ni vuelve al modo masivo ante errores. El modo anterior sigue siendo predeterminado hasta instalar y probar la definición de consulta.
+
+El registro manual crea solo la definición fija SQLQueries si no existe; no cambia stock, documentos, tablas ni permisos. La tarea normal no crea definiciones. Cambio de modo reinicia cursor conservando secuencias, rechaza lotes pendientes y conserva el inventario físico local. El catálogo de productos y almacenes se mantiene completo por las referencias de pedidos; se espacian sus recorridos mediante configuración.
+
+Perfil propuesto: pedidos 10 min, existencias 60 min, productos/códigos 2 h, clientes 4 h, unidades/almacenes 24 h; tarea cada 5 min, pausa entre inicios de consultas 1,5 s y presupuesto original. Backend admite alcance explícito 01/02 y antigüedad configurable (predeterminado 30 min, perfil propuesto 120 min, con aceptación explícita de menor frescura). No se aplicaron variables, permisos, consultas ni despliegues en SAP/Railway.
+
+Verificado: 461/461 pruebas. SQL relacional de JOIN y cursor comprobado con SQLite local adaptando TOP a LIMIT; no es una validación del analizador SAP. PostgreSQL temporal local verificó alcance, datos de 60 minutos permitidos con límite 120, rechazo de 121 minutos, recorridos parciales y filas antiguas. Falta sondeo en FP 2111 y medición de impacto real antes de reactivar. Procedimiento: docs/REDUCIR_CARGA_PUENTE.md.

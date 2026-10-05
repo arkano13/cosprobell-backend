@@ -10,3 +10,4 @@ node_modules
 
 # Paquete del puente para Windows (npm run empaquetar:puente)
 /dist/
+output/

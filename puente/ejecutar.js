@@ -19,7 +19,7 @@ try {
       (process.argv.includes("--once") && process.argv.includes("--watch"))) throw new Error("Argumentos inválidos");
   const config = configurar(process.env);
   const ENTIDADES = entidadesHabilitadas(config);
-  if (config.huellaSap) console.error(JSON.stringify({ evento: "advertencia", codigo: "TLS_SAP_EXCEPCION_PRUEBAS", mensaje: "Vigencia y nombre omitidos; certificado fijado por huella. Renovar antes de producción." }));
+  if (config.huellaSap) console.error(JSON.stringify({ evento: "advertencia", codigo: "TLS_SAP_CERTIFICADO_FIJADO", mensaje: "Vigencia, nombre y cadena de confianza omitidos; certificado verificado por huella SHA-256. Si cambia el certificado, la conexión se rechazará." }));
   config.forzar = process.argv.includes("--forzar") || process.argv.includes("--reconciliar");
   config.reconciliar = process.argv.includes("--reconciliar");
   const sondeo = process.argv.includes("--sondeo");

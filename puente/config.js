@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { ENTIDADES } from "./entidades.js";
+import { validarAlmacenesSql } from "./existencias.sql.js";
 function urlSegura(valor, campo) {
   let u;
   try { u = new URL(valor); } catch { throw new Error(`Configuración inválida: ${campo}`); }
@@ -24,11 +25,21 @@ export function configurar(v) {
   const empresa = v.SAP_COMPANY_DB.trim();
   const activarInventario = v.BRIDGE_INVENTORY_ENABLED ?? "false";
   if (!["true", "false"].includes(activarInventario)) throw new Error("BRIDGE_INVENTORY_ENABLED inválido");
+  const modoExistencias = v.BRIDGE_STOCK_MODE ?? "items";
+  if (!["items", "sql-01-02", "sql-almacenes"].includes(modoExistencias)) throw new Error("BRIDGE_STOCK_MODE inválido");
+  const almacenesSap = modoExistencias === "sql-almacenes"
+    ? validarAlmacenesSql((v.BRIDGE_WAREHOUSES ?? "").split(",").map(c => c.trim())) : ["01", "02"];
+  if (modoExistencias !== "sql-almacenes" && v.BRIDGE_WAREHOUSES?.trim()) throw new Error("BRIDGE_WAREHOUSES requiere BRIDGE_STOCK_MODE=sql-almacenes");
   const excepcionTls = v.SAP_TLS_TEST_EXCEPTION ?? "false";
   if (!["false", "true"].includes(excepcionTls)) throw new Error("SAP_TLS_TEST_EXCEPTION inválido");
-  const huellaSap = excepcionTls === "true" ? (v.SAP_TLS_CERT_SHA256 ?? "").replaceAll(":", "").toUpperCase() : null;
-  if (huellaSap !== null && (empresa !== "XPRUEBAS2026" || !/^[A-F0-9]{64}$/.test(huellaSap) || !sapUrl.startsWith("https://"))) {
-    throw new Error("Excepción TLS solo para XPRUEBAS2026 con huella SHA-256 explícita");
+  const fijarCertificado = v.SAP_TLS_PINNED_CERTIFICATE ?? "false";
+  if (!["false", "true"].includes(fijarCertificado)) throw new Error("SAP_TLS_PINNED_CERTIFICATE inválido");
+  if (excepcionTls === "true" && empresa !== "XPRUEBAS2026" && fijarCertificado !== "true") {
+    throw new Error("En producción active SAP_TLS_PINNED_CERTIFICATE explícitamente");
+  }
+  const huellaSap = excepcionTls === "true" || fijarCertificado === "true" ? (v.SAP_TLS_CERT_SHA256 ?? "").replaceAll(":", "").toUpperCase() : null;
+  if (huellaSap !== null && (!/^[A-F0-9]{64}$/.test(huellaSap) || !sapUrl.startsWith("https://"))) {
+    throw new Error("Certificado fijado requiere HTTPS y huella SHA-256 explícita");
   }
   const numero = (campo, defecto, min, max) => {
     const n = Number(v[campo] ?? defecto);
@@ -43,7 +54,7 @@ export function configurar(v) {
     throw new Error("Configuración inválida: BRIDGE_FREQUENCIES_JSON");
   }
   return { sapUrl, backendUrl, empresa, usuario: v.SAP_USER, password: v.SAP_PASSWORD,
-    frecuencias, soloCambios: true, huellaSap, inventarioHabilitado: activarInventario === "true",
+    frecuencias, soloCambios: true, huellaSap, inventarioHabilitado: activarInventario === "true", modoExistencias, almacenesSap,
     maxConsultas: numero("BRIDGE_MAX_REQUESTS", 25, 1, 10000),
     maxDuracionMs: numero("BRIDGE_MAX_SECONDS", 120, 10, 3600) * 1000,
     pausaMs: numero("BRIDGE_REQUEST_DELAY_MS", 500, 100, 60000),
