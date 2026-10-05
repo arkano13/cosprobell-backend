@@ -442,33 +442,63 @@ test("resumen y ficha: nombre de cada bodega, SAP por bodega y avance del conteo
   assert.deepEqual([ficha.sapPorBodega, ficha.contadoEn, ficha.bodegas.grande.nombre], [{ grande: 80, pequena: 20 }, { grande: true, pequena: false }, "Almacén Principal"]);
 });
 
-test("traspasos de la 01 a la 02: SAP ya los registró y falta marcar qué cajas se pasaron", async (t) => {
-  inventario(t, { sap: 126, grande: 120, pequena: 6 });
+test("traspasos de la 01 a la 02: SAP ya los registró y la bodega acepta de qué lotes salió", async (t) => {
+  const cajas = [{ id: 1, codigo: "CJ-000001", lote: "L2", vencimiento: new Date("2027-06-30"), unidades: 24, unidadesIniciales: 24 },
+    { id: 2, codigo: "CJ-000002", lote: "L1", vencimiento: new Date("2027-01-31"), unidades: 24, unidadesIniciales: 24 },
+    { id: 3, codigo: "CJ-000003", lote: "L1", vencimiento: new Date("2027-01-31"), unidades: 24, unidadesIniciales: 24 },
+    { id: 4, codigo: "CJ-000004", lote: "L2", vencimiento: new Date("2027-06-30"), unidades: 24, unidadesIniciales: 24 },
+    { id: 5, codigo: "CJ-000005", lote: "L2", vencimiento: new Date("2027-06-30"), unidades: 24, unidadesIniciales: 24 }];
+  const hecho = inventario(t, { sap: 126, grande: 120, pequena: 6 });
   const headers = conSesion(t);
   t.mock.method(repo, "almacenesDeEstaBodega", async () => ["01", "02"]);
   t.mock.method(repo, "opcion", async () => ({ grande: "01", pequena: "02" }));
   t.mock.method(repo, "resumenBodegas", async () => ({ grande: { cajas: 5 }, pequena: { unidades: 6 } }));
   t.mock.method(repo, "porVencer", async () => []);
   t.mock.method(repo, "movimientos", async () => []);
+  let grande = 120;
   t.mock.method(repo, "pases", async (almacenGrande, almacenPequena, { itemCodes }) => {
     assert.deepEqual([almacenGrande, almacenPequena], ["01", "02"]);
-    const filas = [{ itemCode: "P1", itemName: "Shampoo", sapGrande: 96, sapPequena: 30, grande: 120, cajas: 5, pequena: 6, sinEntrega: 0 },
+    const filas = [{ itemCode: "P1", itemName: "Shampoo", sapGrande: 72, sapPequena: 54, grande, cajas: 5, pequena: 6, sinEntrega: 0 },
       { itemCode: "A1", itemName: "Acondicionador", sapGrande: 40, sapPequena: 0, grande: 48, cajas: 2, pequena: 0, sinEntrega: 0 }];
     return itemCodes ? filas.filter((f) => itemCodes.includes(f.itemCode)) : filas;
   });
   const { data: resumen } = await (await pedir("/inventario/resumen", headers)).json();
   assert.equal(resumen.pendientes.porPasar, 1, "el acondicionador salió de la 01 sin entrar a la 02: no es un traspaso");
   const { data: pendientes } = await (await pedir("/inventario/pendientes", headers)).json();
-  assert.deepEqual(pendientes.porPasar, [{ itemCode: "P1", itemName: "Shampoo", unidades: 24, cajas: 5, sapGrande: 96, sapPequena: 30, grande: 120, pequena: 6 }]);
+  assert.deepEqual(pendientes.porPasar, [{ itemCode: "P1", itemName: "Shampoo", unidades: 48, cajas: 5, sapGrande: 72, sapPequena: 54, grande: 120, pequena: 6 }]);
   t.mock.method(repo, "producto", async () => ({ itemCode: "P1", itemName: "Shampoo", inventario: { pequena: 6 }, codigosBarras: [] }));
-  t.mock.method(repo, "cajasDe", async () => []);
+  t.mock.method(repo, "cajasDe", async () => cajas);
   t.mock.method(repo, "documentosRecientes", async () => []);
   t.mock.method(repo, "ultimaRecepcion", async () => null);
   const { data: ficha } = await (await pedir("/inventario/productos/P1", headers)).json();
-  assert.equal(ficha.porPasar, 24);
-  // Sin datos recientes de SAP no se calcula.
+  assert.equal(ficha.porPasar, 48);
+  assert.deepEqual(ficha.traspaso, { unidades: 48, sugerencia: [{ lote: "L1", vencimiento: "2027-01-31", unidades: 48, cajas: 2 }] });
+
+  // Aceptar: tiene que ser justo lo que pasó SAP.
+  t.mock.method(repo, "cajasDeProductoBloqueadas", async () => cajas);
+  const otra = await enviar("/inventario/traspasos", headers, "POST", { itemCode: "P1", unidades: 24 });
+  assert.equal((await otra.json()).error.code, "CANTIDAD_CAMBIO");
+  const incompleta = await enviar("/inventario/traspasos", headers, "POST", { itemCode: "P1", unidades: 48, lotes: [{ lote: "L1", unidades: 24 }] });
+  assert.equal(incompleta.status, 400);
+  // Eligiendo otros lotes: 24 de cada uno.
+  const r = await enviar("/inventario/traspasos", headers, "POST", { itemCode: "P1", unidades: 48,
+    lotes: [{ lote: "L1", unidades: 24 }, { lote: "L2", unidades: 24 }] });
+  assert.equal(r.status, 201);
+  const { data } = await r.json();
+  assert.deepEqual(data.lotes, [{ lote: "L1", vencimiento: "2027-01-31", unidades: 24, cajas: 1 }, { lote: "L2", vencimiento: "2027-06-30", unidades: 24, cajas: 1 }]);
+  assert.deepEqual(data.cajas.map((c) => [c.codigo, c.entera]), [["CJ-000002", true], ["CJ-000001", true]]);
+  assert.deepEqual(hecho.cajaCambios, [[2, -24], [1, -24]]);
+  assert.deepEqual(hecho.pequena, [48]);
+  assert.deepEqual(hecho.movimientos.map((m) => [m.tipo, m.bodega, m.cantidad, m.lote]),
+    [["traspaso", "grande", -24, "L1"], ["traspaso", "pequena", 24, "L1"], ["traspaso", "grande", -24, "L2"], ["traspaso", "pequena", 24, "L2"]]);
+  // Un lote que no tiene tanto en la grande se rechaza.
+  const sinLote = await enviar("/inventario/traspasos", headers, "POST", { itemCode: "P1", unidades: 48, lotes: [{ lote: "L9", unidades: 48 }] });
+  assert.equal((await sinLote.json()).error.code, "LOTE_INSUFICIENTE");
+  // Sin datos recientes de SAP no se calcula ni se acepta.
   t.mock.method(repo, "comparacionDisponible", async () => false);
   assert.equal((await (await pedir("/inventario/resumen", headers)).json()).data.pendientes.porPasar, 0);
+  const sinSap = await enviar("/inventario/traspasos", headers, "POST", { itemCode: "P1", unidades: 48 });
+  assert.equal((await sinSap.json()).error.code, "COMPARACION_SAP_NO_DISPONIBLE");
 });
 
 test("conteo de una bodega: lo que falta contar, el avance y \"no hay\"", async (t) => {
@@ -481,11 +511,15 @@ test("conteo de una bodega: lo que falta contar, el avance y \"no hay\"", async 
   t.mock.method(repo, "opcion", async () => ({ grande: "01", pequena: "02" }));
   t.mock.method(repo, "nombresDeAlmacenes", async () => new Map([["01", "Almacén Principal"]]));
   t.mock.method(repo, "conteoBodega", async () => [
-    { itemCode: "A1", itemName: "Acondicionador", sap: 48, unidades: 0, cajas: 0, contado: false },
-    { itemCode: "P1", itemName: "Shampoo", sap: 30.4, unidades: 30, cajas: 2, contado: true },
-    { itemCode: "S1", itemName: "Sérum", sap: 12, unidades: 0, cajas: 0, contado: false }]);
+    { itemCode: "A1", itemName: "Acondicionador", sap: 48, unidades: 0, cajas: 0, contado: false, codigos: 1 },
+    { itemCode: "P1", itemName: "Shampoo", sap: 30.4, unidades: 30, cajas: 2, contado: true, codigos: 0 },
+    { itemCode: "S1", itemName: "Sérum", sap: 12, unidades: 0, cajas: 0, contado: false, codigos: 0 }]);
   const r = await (await pedir("/inventario/conteo/grande", headers)).json();
   assert.deepEqual([r.data.map((v) => v.itemCode), r.avance, r.almacen], [["A1", "S1"], { total: 3, contados: 1 }, { almacen: "01", nombre: "Almacén Principal" }]);
+  // Los que no tienen código de barras, contados o no: para registrarlos al contar.
+  assert.equal(r.sinCodigo, 2);
+  assert.deepEqual(r.data.map((v) => v.codigos), [1, 0]);
+  assert.deepEqual((await (await pedir("/inventario/conteo/grande?estado=sin_codigo", headers)).json()).data.map((v) => v.itemCode), ["P1", "S1"]);
   assert.deepEqual((await (await pedir("/inventario/conteo/grande?estado=contados", headers)).json()).data.map((v) => [v.itemCode, v.sap]), [["P1", 30]]);
   assert.deepEqual((await (await pedir("/inventario/conteo/grande?buscar=ser", headers)).json()).data.map((v) => v.itemCode), ["S1"]);
   // "No hay" en la grande: se anota un conteo de 0, sin cajas.
@@ -511,6 +545,36 @@ test("recibir por lotes a la pequeña: varios lotes en una sola operación", asy
   const repetido = await enviar("/inventario/recepciones", conSesion(t), "POST", { itemCode: "P1", modo: "lotes",
     lotes: [{ unidades: 1, lote: "L1" }, { unidades: 2, lote: "L1" }] });
   assert.equal(repetido.status, 400);
+});
+
+test("registrar un código de barras al contar: también un operador, y queda quién lo registró", async (t) => {
+  const headers = conSesion(t, "operador");
+  const registrados = [];
+  t.mock.method(codigosRepository, "conCodigoBloqueado", async (codigo, operacion) => operacion({
+    producto: { findUnique: async () => ({ itemCode: "P1", itemName: "Shampoo" }), findFirst: async () => null },
+    productoCodigoBarras: { findMany: async () => [], create: async ({ data }) => { registrados.push(data); return { id: 77, ...data }; } },
+    confirmacionEtiquetaPicking: { upsert: async () => {} },
+  }));
+  const r = await pedir("/inventario/codigos", headers, { method: "POST", body: JSON.stringify({ codigo: "7401", itemCode: "P1" }) });
+  assert.equal(r.status, 200);
+  assert.deepEqual((await r.json()).data, { id: 77, codigo: "7401", itemCode: "P1", itemName: "Shampoo", origen: "app", nuevo: true });
+  assert.equal(registrados[0].registradoPor, "operador:Luis Pérez");
+});
+
+test("panel: quitar un código registrado desde la app (solo el supervisor; los de SAP no)", async (t) => {
+  assert.equal((await pedir("/supervisor/codigos/77", conSesion(t, "operador"), { method: "DELETE" })).status, 403);
+  t.mock.restoreAll();
+  const headers = conSesion(t, "supervisor");
+  const codigos = { 77: { id: 77, codigo: "7401", itemCode: "P1", origen: "app" }, 78: { id: 78, codigo: "7402", itemCode: "P1", origen: "sap" } };
+  const borrados = [];
+  t.mock.method(codigosRepository, "codigoPorId", async (id) => codigos[id] ?? null);
+  t.mock.method(codigosRepository, "conCodigoBloqueado", async (_codigo, operacion) => operacion({
+    productoCodigoBarras: { delete: async ({ where }) => borrados.push(where.id) } }));
+  const deSap = await pedir("/supervisor/codigos/78", headers, { method: "DELETE" });
+  assert.equal((await deSap.json()).error.code, "CODIGO_DE_SAP");
+  assert.equal((await pedir("/supervisor/codigos/99", headers, { method: "DELETE" })).status, 404);
+  const r = await pedir("/supervisor/codigos/77", headers, { method: "DELETE" });
+  assert.deepEqual([r.status, (await r.json()).data, borrados], [200, { id: 77, codigo: "7401", itemCode: "P1" }, [77]]);
 });
 
 test("panel: registrar un código de barras", async (t) => {

@@ -21,7 +21,9 @@ import inventarioRoutes from "./modules/inventario/inventario.routes.js";
 
 const app = express();
 app.use(helmet());
-app.use(cors());
+// La app de escritorio llama desde otro origen: el navegador consulta antes cada pedido (OPTIONS). maxAge deja esa
+// respuesta guardada 2 horas (el máximo de Chromium) y ahorra un viaje de ida y vuelta por pedido.
+app.use(cors({ maxAge: 7200 }));
 app.use(express.json({ limit: "1mb" }));
 app.use(pinoHttp({ logger }));
 app.use(healthRoutes);

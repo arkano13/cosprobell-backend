@@ -34,6 +34,60 @@ export function porPasar({ sapGrande, sapPequena, grande, pequena, sinEntrega = 
   return Math.max(0, Math.min(sobraEnPequena, faltaEnGrande));
 }
 
+// Cajas de la grande que pasan a la pequeña por un traspaso de SAP. En la bodega se pasan cajas enteras: se busca la
+// combinación de cajas enteras que sume justo lo que pasó SAP, tomando primero las que vencen antes. Si ninguna
+// combinación da justo, se toman enteras las que entren (por vencimiento) y lo que falta se saca de una caja más
+// (la abierta, si vence igual). cajas: { id, codigo, lote, vencimiento, unidades, unidadesIniciales }.
+const MAXIMO_COMBINACION = 5_000_000;
+export function repartirTraspaso(cajas, unidades, { lote } = {}) {
+  const vence = (c) => (c.vencimiento ? new Date(c.vencimiento).getTime() : Infinity);
+  const orden = cajas.filter((c) => c.unidades > 0).sort((a, b) => vence(a) - vence(b) || a.id - b.id);
+  const disponibles = orden.reduce((t, c) => t + c.unidades, 0);
+  if (disponibles < unidades) throw new AppError({ code: "LOTE_INSUFICIENTE", statusCode: 409,
+    message: lote !== undefined ? `El lote ${lote ?? "sin lote"} tiene ${disponibles} unidades en la bodega grande`
+      : `La bodega grande tiene ${disponibles} unidades de este producto` });
+  const toma = new Map();
+  if (orden.length * (unidades + 1) <= MAXIMO_COMBINACION) {
+    // alcanza[i][s]: con las cajas desde la i se pueden juntar s unidades en cajas enteras.
+    const alcanza = Array.from({ length: orden.length + 1 }, () => new Uint8Array(unidades + 1));
+    alcanza[orden.length][0] = 1;
+    for (let i = orden.length - 1; i >= 0; i -= 1) {
+      const u = orden[i].unidades;
+      for (let s = 0; s <= unidades; s += 1) alcanza[i][s] = alcanza[i + 1][s] || (s >= u && alcanza[i + 1][s - u]) ? 1 : 0;
+    }
+    if (alcanza[0][unidades]) {
+      let faltan = unidades;
+      orden.forEach((c, i) => {
+        if (faltan >= c.unidades && alcanza[i + 1][faltan - c.unidades]) { toma.set(c.id, c.unidades); faltan -= c.unidades; }
+      });
+    }
+  }
+  if (!toma.size) {
+    let faltan = unidades;
+    for (const c of orden) if (c.unidades <= faltan) { toma.set(c.id, c.unidades); faltan -= c.unidades; }
+    if (faltan > 0) {
+      const resto = orden.filter((c) => !toma.has(c.id));
+      const caja = resto.find((c) => c.unidades < c.unidadesIniciales && vence(c) === vence(resto[0])) ?? resto[0];
+      toma.set(caja.id, faltan);
+    }
+  }
+  return orden.filter((c) => toma.has(c.id)).map((c) => ({ cajaId: c.id, codigo: c.codigo, lote: c.lote ?? null,
+    vencimiento: c.vencimiento ?? null, unidades: toma.get(c.id), entera: toma.get(c.id) === c.unidades }));
+}
+
+// Lo que sale de cada lote en un traspaso (para mostrar y aceptar), en el orden de las cajas.
+export function lotesDeTraspaso(partes) {
+  const lotes = new Map();
+  for (const p of partes) {
+    const clave = p.lote ?? "";
+    if (!lotes.has(clave)) lotes.set(clave, { lote: p.lote, vencimiento: p.vencimiento, unidades: 0, cajas: 0 });
+    const l = lotes.get(clave);
+    l.unidades += p.unidades; l.cajas += 1;
+    if (p.vencimiento && (!l.vencimiento || new Date(p.vencimiento) < new Date(l.vencimiento))) l.vencimiento = p.vencimiento;
+  }
+  return [...lotes.values()];
+}
+
 // Unidades a restar de las cajas de un lote: primero las abiertas (para no abrir otra), después las
 // cerradas en el orden en que se recibieron.
 export function repartirEnCajas(cajas, unidades) {

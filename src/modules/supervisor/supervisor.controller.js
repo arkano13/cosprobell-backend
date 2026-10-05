@@ -4,7 +4,7 @@ import { listarRevisiones, anularRevision } from "./revisiones.service.js";
 import { estadoSincronizacion } from "./sincronizacion.service.js";
 import { listarAlmacenes, elegirAlmacenes as elegir } from "../inventario/inventario.service.js";
 import { inventarioRepository } from "../inventario/inventario.repository.js";
-import { registrarCodigo as registrar } from "../etiquetas/codigos.service.js";
+import { registrarCodigo as registrar, quitarCodigo as quitar } from "../etiquetas/codigos.service.js";
 
 const manejar = (accion) => async (req, res, next) => {
   try { res.json(await accion(req)); } catch (error) { next(error); }
@@ -38,3 +38,4 @@ export const sincronizacion = manejar(async () => ({ data: await estadoSincroniz
 export const almacenes = manejar(() => listarAlmacenes());
 export const elegirAlmacenes = manejar((req) => elegir(req.body, quien(req)));
 export const registrarCodigo = manejar((req) => registrar(req.body, quien(req)));
+export const quitarCodigo = manejar((req) => quitar(req.params.id));

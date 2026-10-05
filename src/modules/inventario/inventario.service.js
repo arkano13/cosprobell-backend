@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { AppError } from "../../shared/errors/AppError.js";
 import { inventarioRepository as repo } from "./inventario.repository.js";
 import { retirarLotes, contarLotes } from "./inventario.lotes.js";
-import { clasificar, codigoCaja, porPasar, repartirEnCajas, cajaParaUsarAntes, textoAsignacion } from "./inventario.calculo.js";
+import { clasificar, codigoCaja, porPasar, repartirEnCajas, repartirTraspaso, lotesDeTraspaso, cajaParaUsarAntes, textoAsignacion } from "./inventario.calculo.js";
 
 const OPCION_FILTRAR_PEDIDOS = "pedidosSoloDeEstaBodega";
 const OPCION_ALMACENES_POR_BODEGA = "almacenesPorBodega";
@@ -103,13 +103,25 @@ export async function consultarProducto(itemCode) {
   return { data: {
     itemCode: producto.itemCode, itemName: producto.itemName, almacenes, comparacionDisponible, estado,
     pequena: producto.inventario?.pequena ?? 0, enInventario: Boolean(producto.inventario),
-    codigos: producto.codigosBarras.map((c) => ({ id: c.id, codigo: c.codigo, origen: c.origen, confirmado: c.confirmacionPicking?.esUnidadIndividual === true })),
+    codigos: producto.codigosBarras.map((c) => ({ id: c.id, codigo: c.codigo, origen: c.origen, confirmado: c.confirmacionPicking?.esUnidadIndividual === true,
+      registradoPor: c.registradoPor?.replace(/^operador:/, "") ?? null })),
     lotes: [...lotes.values()], lotesPequena, movimientos, documentos,
     sugerencia: ultima ? { unidadesPorCaja: ultima.unidadesIniciales } : null,
     bodegas: nombres, sapPorBodega: { grande: sapDe("grande"), pequena: sapDe("pequena") },
     contadoEn: { grande: contado.has("grande") || cajas.length > 0, pequena: contado.has("pequena") || (producto.inventario?.pequena ?? 0) !== 0 },
     porPasar: pases[0]?.unidades ?? 0,
+    traspaso: pases[0] ? { unidades: pases[0].unidades, sugerencia: sugerenciaTraspaso(cajas, pases[0].unidades) } : null,
   } };
+}
+
+// Los lotes que conviene pasar (cajas enteras, las que vencen antes), o null si la grande no alcanza.
+function sugerenciaTraspaso(cajas, unidades) {
+  try {
+    return lotesDeTraspaso(repartirTraspaso(cajas, unidades)).map((l) => ({ ...l, vencimiento: fechaIso(l.vencimiento) }));
+  } catch (error) {
+    if (error.code === "LOTE_INSUFICIENTE") return null;
+    throw error;
+  }
 }
 
 export async function listarPendientes() {
@@ -354,6 +366,41 @@ export async function descontar(entrada, { aplicacion }) {
   }, { operacionId: entrada.operacionId, tipo: "descontar", entrada, aplicacion });
 }
 
+// SAP ya registró el traspaso de la 01 a la 02 (sin lotes ni cajas): la bodega acepta de qué lotes salió (la
+// sugerencia o los que elija) y se pasa de las cajas de la grande a la pequeña, con su lote y vencimiento. Hay que
+// pasar justo lo que SAP traspasó.
+export async function traspasar(entrada, { aplicacion }) {
+  const { itemCode, unidades, lotes } = entrada;
+  if (lotes && sumar(lotes) !== unidades) throw falla("ASIGNACION_INCOMPLETA", 400, `Hay que elegir lotes por ${numero(unidades)} unidades en total`);
+  return repo.conProducto(itemCode, async (tx) => {
+    await exigirAlmacenes();
+    await exigirSaldoConciliado(itemCode, tx);
+    const [pase] = await pasesPendientes([itemCode], tx);
+    const pendiente = pase?.unidades ?? 0;
+    if (pendiente !== unidades) throw falla("CANTIDAD_CAMBIO", 409, pendiente === 0 ? "Ya no hay nada por pasar de este producto"
+      : `Ahora SAP tiene ${numero(pendiente)} por pasar (antes ${numero(unidades)}). Revisá y volvé a intentar.`);
+    const cajas = await repo.cajasDeProductoBloqueadas(itemCode, tx);
+    const partes = lotes
+      ? lotes.flatMap((l) => repartirTraspaso(cajas.filter((c) => (c.lote ?? null) === l.lote), l.unidades, { lote: l.lote }))
+      : repartirTraspaso(cajas, unidades);
+    await repo.activar(itemCode, tx);
+    const grupo = randomUUID(), movimientos = [];
+    for (const p of partes) {
+      await repo.cambiarUnidadesCaja(p.cajaId, -p.unidades, tx);
+      const saldo = await repo.sumarLotePequena(itemCode, p.lote, p.vencimiento, p.unidades, tx);
+      movimientos.push(
+        { grupo, tipo: "traspaso", itemCode, bodega: "grande", cantidad: -p.unidades, cajaId: p.cajaId, lote: p.lote, hechoPor: aplicacion },
+        { grupo, tipo: "traspaso", itemCode, bodega: "pequena", cantidad: p.unidades, cajaId: p.cajaId, lote: p.lote, pequenaLoteId: saldo.id, hechoPor: aplicacion });
+    }
+    await repo.cambiarPequena(itemCode, unidades, tx);
+    await repo.registrarMovimientos(movimientos, tx);
+    const estado = await repo.estadoProducto(itemCode, tx);
+    return { data: { itemCode, unidades, pequena: estado.pequena,
+      lotes: lotesDeTraspaso(partes).map((l) => ({ ...l, vencimiento: fechaIso(l.vencimiento) })),
+      cajas: partes.map((p) => ({ codigo: p.codigo, lote: p.lote, unidades: p.unidades, entera: p.entera })) } };
+  }, { operacionId: entrada.operacionId, tipo: "traspasar", entrada, aplicacion, itemCode });
+}
+
 // "Cambiar lote": devuelve lo restado a sus cajas (o a la pequeña) y lo resta según la nueva elección.
 export async function reasignarDescuento(id, entrada, { aplicacion }) {
   const { asignaciones } = entrada;
@@ -442,8 +489,11 @@ export async function descontarPorPicking({ pickingId, lineas, lotes = [], hecho
   for (const itemCode of itemCodes) {
     const estado = await repo.estadoProducto(itemCode, tx);
     const unidades = porProducto.get(itemCode);
-    if ((estado?.pequena ?? 0) < unidades) throw falla("PEQUENA_INSUFICIENTE", 409,
-      `${itemCode}: hay ${numero(estado?.pequena ?? 0)} unidades en la pequeña y se necesitan ${numero(unidades)}. Primero registrá la reposición desde la grande.`);
+    if ((estado?.pequena ?? 0) < unidades) {
+      const pase = await traspasoPendiente(itemCode, tx);
+      throw falla("PEQUENA_INSUFICIENTE", 409, `${itemCode}: hay ${numero(estado?.pequena ?? 0)} unidades en la pequeña y se necesitan ${numero(unidades)}. `
+        + (pase ? `SAP ya pasó ${numero(pase.unidades)} desde la grande: aceptá ese traspaso en Inventario y volvé a terminar.` : "Primero registrá la reposición desde la grande."));
+    }
   }
   for (const itemCode of itemCodes) {
     const unidades = porProducto.get(itemCode);
@@ -473,12 +523,22 @@ async function bodegasConNombre(marcados = null) {
   return { grande: de(porBodega.grande), pequena: de(porBodega.pequena) };
 }
 
-// Traspasos de la 01 a la 02 que SAP ya registró y falta marcar en la bodega (qué cajas se pasaron). Hace falta que
+// Para el aviso de "falta en la pequeña": el traspaso de SAP que falta aceptar, si hay. Es solo una pista: si no se
+// puede averiguar, el aviso sale sin ella.
+async function traspasoPendiente(itemCode, tx) {
+  try {
+    return (await repo.comparacionDisponible()) ? (await pasesPendientes([itemCode], tx))[0] ?? null : null;
+  } catch {
+    return null;
+  }
+}
+
+// Traspasos de la 01 a la 02 que SAP ya registró y falta aceptar en la bodega (de qué lotes salieron). Hace falta que
 // cada bodega tenga su almacén; quien llama se fija antes en que la comparación con SAP esté disponible.
-async function pasesPendientes(itemCodes = null) {
+async function pasesPendientes(itemCodes = null, db = undefined) {
   const porBodega = await almacenesPorBodega();
   if (!porBodega.grande || !porBodega.pequena) return [];
-  const filas = await repo.pases(porBodega.grande, porBodega.pequena, { itemCodes });
+  const filas = await repo.pases(porBodega.grande, porBodega.pequena, { itemCodes }, db);
   return filas.map((f) => ({ itemCode: f.itemCode, itemName: f.itemName, unidades: porPasar(f), cajas: f.cajas,
     sapGrande: Math.round(f.sapGrande), sapPequena: Math.round(f.sapPequena), grande: f.grande, pequena: f.pequena }))
     .filter((v) => v.unidades > 0);
@@ -571,12 +631,12 @@ export async function listarConteo(bodega, { buscar, estado, pagina, limit }) {
     `Falta elegir el almacén de SAP de la bodega ${bodega === "grande" ? "grande" : "pequeña"} (Panel del supervisor → Almacenes)`);
   const filas = await repo.conteoBodega(bodega, asignada.almacen);
   const vistas = filas.map((f) => ({ itemCode: f.itemCode, itemName: f.itemName, sap: Math.round(f.sap), unidades: f.unidades,
-    cajas: f.cajas, contado: f.contado === true }));
+    cajas: f.cajas, contado: f.contado === true, codigos: f.codigos }));
   const texto = buscar ? normalizar(buscar) : null;
-  const cumple = { falta: (v) => !v.contado, contados: (v) => v.contado, todos: () => true };
+  const cumple = { falta: (v) => !v.contado, contados: (v) => v.contado, sin_codigo: (v) => v.codigos === 0, todos: () => true };
   const elegidas = vistas.filter(cumple[estado]).filter(coincide(texto));
   return { data: elegidas.slice(pagina * limit, (pagina + 1) * limit), total: elegidas.length, bodega, almacen: asignada,
-    avance: { total: vistas.length, contados: vistas.filter((v) => v.contado).length } };
+    avance: { total: vistas.length, contados: vistas.filter((v) => v.contado).length }, sinCodigo: vistas.filter(cumple.sin_codigo).length };
 }
 
 // "No hay" al contar: deja anotado que el producto se contó en esa bodega y no había ninguno.

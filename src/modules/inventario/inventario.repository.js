@@ -166,7 +166,8 @@ export const inventarioRepository = {
                  GROUP BY "itemCode" HAVING SUM("inStock") > 0),
            u AS (${registrado}), c AS (${CONTADOS(bodega)})
       SELECT p."itemCode", p."itemName", s.sap, COALESCE(u.unidades, 0)::int AS unidades, COALESCE(u.cajas, 0)::int AS cajas,
-             (c."itemCode" IS NOT NULL OR COALESCE(u.unidades, 0) <> 0) AS contado
+             (c."itemCode" IS NOT NULL OR COALESCE(u.unidades, 0) <> 0) AS contado,
+             (SELECT COUNT(*) FROM productos_codigos_barras b WHERE b."itemCode" = p."itemCode" AND b."retiradoEnSap" = false)::int AS codigos
       FROM s JOIN productos p ON p."itemCode" = s."itemCode"
       LEFT JOIN u ON u."itemCode" = s."itemCode"
       LEFT JOIN c ON c."itemCode" = s."itemCode"
@@ -265,7 +266,7 @@ export const inventarioRepository = {
   producto(itemCode, db = prisma) {
     return db.producto.findUnique({ where: { itemCode }, select: { itemCode: true, itemName: true, quantityOnStock: true,
       sincronizadoEn: true, inventario: true,
-      codigosBarras: { where: { retiradoEnSap: false }, select: { id: true, codigo: true, origen: true, confirmacionPicking: { select: { esUnidadIndividual: true } } }, orderBy: { id: "asc" } } } });
+      codigosBarras: { where: { retiradoEnSap: false }, select: { id: true, codigo: true, origen: true, registradoPor: true, confirmacionPicking: { select: { esUnidadIndividual: true } } }, orderBy: { id: "asc" } } } });
   },
 
   cajasDe(itemCode, { conUnidades = true } = {}, db = prisma) {
@@ -281,6 +282,9 @@ export const inventarioRepository = {
   async cajaBloqueada(id, tx) {
     const [caja] = await tx.$queryRaw`SELECT * FROM inventario_cajas WHERE id = ${id} FOR UPDATE`;
     return caja ?? null;
+  },
+  cajasDeProductoBloqueadas(itemCode, tx) {
+    return tx.$queryRaw`SELECT * FROM inventario_cajas WHERE "itemCode" = ${itemCode} AND unidades > 0 ORDER BY id FOR UPDATE`;
   },
   cajasDeLoteBloqueadas(itemCode, lote, tx) {
     return tx.$queryRaw`
