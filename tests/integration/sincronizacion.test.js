@@ -155,9 +155,13 @@ function baseProductos({ anterior = null, activo = null, retirado = null } = {})
     productoCodigoBarras: {
       updateMany: async (args) => operaciones.push(["retirarFicha", args.where]),
       findFirst: async (args) => (args.where.retiradoEnSap === false ? activo : retirado),
-      update: async (args) => operaciones.push(["actualizarCodigo", args.where.id, args.data]),
-      create: async (args) => operaciones.push(["crearCodigo", args.data]),
+      update: async (args) => {
+        operaciones.push(["actualizarCodigo", args.where.id, args.data]);
+        return { id: args.where.id, itemCode: "P1", codigo: "7501234567890", uomEntry: -1 };
+      },
+      create: async (args) => { operaciones.push(["crearCodigo", args.data]); return { id: 10, ...args.data }; },
     },
+    confirmacionEtiquetaPicking: { upsert: async (args) => operaciones.push(["confirmar", args]) },
   };
   return { db, operaciones };
 }
@@ -177,12 +181,22 @@ test("repositorio: el código de la ficha del artículo queda como código Manua
   const creado = operaciones.find((o) => o[0] === "crearCodigo")[1];
   assert.deepEqual({ ...creado, sincronizadoEn: creado.sincronizadoEn instanceof Date },
     { itemCode: "P1", codigo: "7501234567890", uomEntry: -1, origen: "ficha", sincronizadoEn: true });
+  const confirmado = operaciones.find((o) => o[0] === "confirmar")[1];
+  assert.deepEqual(confirmado.where, { codigoBarrasId: 10 });
+  assert.deepEqual(confirmado.update, {}, "una confirmación que ya existe no se cambia");
+  assert.deepEqual(confirmado.create, { codigoBarrasId: 10, esUnidadIndividual: true, itemCodeConfirmado: "P1",
+    codigoConfirmado: "7501234567890", uomEntryConfirmado: -1, confirmadaPor: "la sincronización con SAP",
+    observacion: "Unidad Manual de SAP: confirmado al llegar" });
   ({ db, operaciones } = baseProductos({ activo: { id: 3, origen: "app" } }));
   await repo.guardarProducto(conCodigo, db);
-  assert.ok(!operaciones.some((o) => o[0] === "crearCodigo" || o[0] === "actualizarCodigo"), "ya existe desde la app: no se duplica");
+  assert.ok(!operaciones.some((o) => ["crearCodigo", "actualizarCodigo", "confirmar"].includes(o[0])), "ya existe desde la app: no se duplica");
+  ({ db, operaciones } = baseProductos({ activo: { id: 5, origen: "ficha" } }));
+  await repo.guardarProducto(conCodigo, db);
+  assert.deepEqual(operaciones.find((o) => o[0] === "confirmar")[1].where, { codigoBarrasId: 5 }, "el de la ficha sin confirmar se confirma");
   ({ db, operaciones } = baseProductos({ retirado: { id: 8 } }));
   await repo.guardarProducto(conCodigo, db);
   assert.equal(operaciones.find((o) => o[0] === "actualizarCodigo")[2].retiradoEnSap, false);
+  assert.deepEqual(operaciones.find((o) => o[0] === "confirmar")[1].where, { codigoBarrasId: 8 });
   ({ db, operaciones } = baseProductos());
   await repo.guardarProducto({ ...producto, barCode: null }, db);
   assert.deepEqual(operaciones.find((o) => o[0] === "retirarFicha")[1], { itemCode: "P1", origen: "ficha", retiradoEnSap: false });
@@ -295,9 +309,10 @@ test("repositorio: guarda un código de SAP, adopta la asociación local y exige
     producto: { findUnique: async () => (productoExiste ? { itemCode: "P1" } : null) },
     productoCodigoBarras: {
       findUnique: async () => porAbsEntry, findFirst: async (args) => { operaciones.push(["buscarLocal", args.where]); return local; },
-      update: async (args) => operaciones.push(["actualizar", args.where.id, args.data]),
-      create: async (args) => operaciones.push(["crear", args.data]),
+      update: async (args) => { operaciones.push(["actualizar", args.where.id, args.data]); return { id: args.where.id, ...args.data }; },
+      create: async (args) => { operaciones.push(["crear", args.data]); return { id: 11, ...args.data }; },
     },
+    confirmacionEtiquetaPicking: { upsert: async (args) => operaciones.push(["confirmar", args]) },
   };
   const registro = { absEntry: 9, itemCode: "P1", codigo: "0012345", uomEntry: 1 };
   const sinFecha = (op) => op.map((v) => (v && typeof v === "object" ? { ...v, sincronizadoEn: v.sincronizadoEn instanceof Date } : v));
@@ -308,6 +323,17 @@ test("repositorio: guarda un código de SAP, adopta la asociación local y exige
   assert.deepEqual(sinFecha(operaciones.at(-1)), ["actualizar", 4, { itemCode: "P1", codigo: "0012345", uomEntry: 1, sincronizadoEn: true, retiradoEnSap: false, origen: "sap", sapAbsEntry: 9 }]);
   porAbsEntry = { id: 7 }; await repo.guardarCodigoBarras({ ...registro, codigo: "999" }, db);
   assert.deepEqual(sinFecha(operaciones.at(-1)), ["actualizar", 7, { itemCode: "P1", codigo: "999", uomEntry: 1, sincronizadoEn: true, retiradoEnSap: false, origen: "sap" }]);
+  assert.ok(!operaciones.some((o) => o[0] === "confirmar"), "con otra unidad que Manual espera al supervisor");
+  // Con unidad Manual se vende de a una unidad: queda confirmado al llegar, sin pisar una confirmación existente.
+  porAbsEntry = null; local = null;
+  await repo.guardarCodigoBarras({ ...registro, uomEntry: -1 }, db);
+  const confirmado = operaciones.at(-1)[1];
+  assert.equal(operaciones.at(-1)[0], "confirmar");
+  assert.deepEqual(confirmado.where, { codigoBarrasId: 11 });
+  assert.deepEqual(confirmado.update, {});
+  assert.deepEqual({ ...confirmado.create, confirmadaPor: typeof confirmado.create.confirmadaPor },
+    { codigoBarrasId: 11, esUnidadIndividual: true, itemCodeConfirmado: "P1", codigoConfirmado: "0012345", uomEntryConfirmado: -1,
+      confirmadaPor: "string", observacion: "Unidad Manual de SAP: confirmado al llegar" });
   productoExiste = false;
   await assert.rejects(repo.guardarCodigoBarras(registro, db), { code: "PRODUCTO_NO_SINCRONIZADO" });
 });

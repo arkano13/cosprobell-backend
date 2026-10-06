@@ -120,4 +120,5 @@ Almacenes (`Warehouses`) y existencias por almacén (`Items.ItemWarehouseInfoCol
 ## Códigos de barras
 
 - **Ficha del artículo**: el código de `Items.BarCode` se guarda como código con unidad Manual (`origen: "ficha"`). Si cambia en SAP, el anterior se retira.
+- **Confirmación al llegar**: un código con unidad Manual (de la ficha o de `BarCodes`) se vende de a una unidad, así que queda confirmado como unidad cuando llega de SAP (`confirmadaPor: "la sincronización con SAP"`). Solo se confirma si no tenía confirmación: un "no es una unidad" del supervisor no se pisa, y un código ya confirmado que cambió en SAP sigue apareciendo como desactualizado para revisarlo. Los de otras unidades (por ejemplo, una caja) siguen esperando al supervisor. Los que ya estaban sin confirmar antes de este cambio se confirman con "Confirmar todos como unidad" o cuando SAP los vuelva a enviar.
 - **Desde la app**: el supervisor escanea el envase y elige el producto. Queda con unidad Manual y ya confirmado como unidad (`origen: "app"`); la sincronización no lo retira. Un código que ya es de otro producto (o está en la ficha de otro) se rechaza con `409 CODIGO_EN_USO`.

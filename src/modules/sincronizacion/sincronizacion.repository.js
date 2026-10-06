@@ -4,8 +4,19 @@ import { guardarPedido } from "./pedidos.repository.js";
 import { UNIDAD_MANUAL } from "../picking/picking.cantidades.js";
 import { registrarCambioExistencias } from "../inventario/inventario.sap.js";
 
+// Un código con unidad Manual se vende de a una unidad del artículo: queda confirmado como unidad al llegar de
+// SAP, sin esperar al supervisor. Solo si todavía no tiene confirmación: la que ya existe (también un "no es una
+// unidad" o una que quedó desactualizada por un cambio en SAP) no se toca.
+async function confirmarManualAlLlegar(codigo, db) {
+  if (codigo.uomEntry !== UNIDAD_MANUAL) return;
+  const datos = { esUnidadIndividual: true, itemCodeConfirmado: codigo.itemCode, codigoConfirmado: codigo.codigo,
+    uomEntryConfirmado: codigo.uomEntry, confirmadaPor: "la sincronización con SAP", observacion: "Unidad Manual de SAP: confirmado al llegar" };
+  await db.confirmacionEtiquetaPicking.upsert({ where: { codigoBarrasId: codigo.id },
+    create: { codigoBarrasId: codigo.id, ...datos }, update: {} });
+}
+
 // El código de la ficha del artículo (campo BarCode de Items) también sirve para escanear: se guarda como
-// código de origen "ficha" con la unidad Manual del artículo, y se confirma como los demás. Si la ficha
+// código de origen "ficha" con la unidad Manual del artículo, confirmado como unidad. Si la ficha
 // cambia o lo quita, el anterior se retira. Un código igual ya existente (de SAP o de la app) no se duplica.
 async function sincronizarCodigoFicha(itemCode, barCode, db) {
   await db.productoCodigoBarras.updateMany({
@@ -15,16 +26,17 @@ async function sincronizarCodigoFicha(itemCode, barCode, db) {
   const activo = await db.productoCodigoBarras.findFirst({ where: { itemCode, codigo: barCode, retiradoEnSap: false },
     select: { id: true, origen: true }, orderBy: { id: "asc" } });
   if (activo) {
-    if (activo.origen === "ficha") await db.productoCodigoBarras.update({ where: { id: activo.id }, data: { sincronizadoEn: new Date() } });
+    if (activo.origen === "ficha") {
+      await confirmarManualAlLlegar(await db.productoCodigoBarras.update({ where: { id: activo.id }, data: { sincronizadoEn: new Date() } }), db);
+    }
     return;
   }
   const retirado = await db.productoCodigoBarras.findFirst({ where: { itemCode, codigo: barCode, origen: "ficha" },
     select: { id: true }, orderBy: { id: "asc" } });
-  if (retirado) {
-    await db.productoCodigoBarras.update({ where: { id: retirado.id }, data: { retiradoEnSap: false, sincronizadoEn: new Date() } });
-    return;
-  }
-  await db.productoCodigoBarras.create({ data: { itemCode, codigo: barCode, uomEntry: UNIDAD_MANUAL, origen: "ficha", sincronizadoEn: new Date() } });
+  const fila = retirado
+    ? await db.productoCodigoBarras.update({ where: { id: retirado.id }, data: { retiradoEnSap: false, sincronizadoEn: new Date() } })
+    : await db.productoCodigoBarras.create({ data: { itemCode, codigo: barCode, uomEntry: UNIDAD_MANUAL, origen: "ficha", sincronizadoEn: new Date() } });
+  await confirmarManualAlLlegar(fila, db);
 }
 export const sincronizacionRepository = {
   async consultarRecorrido(entidad, db) {
@@ -89,12 +101,14 @@ export const sincronizacionRepository = {
     const datos = { itemCode: registro.itemCode, codigo: registro.codigo, uomEntry: registro.uomEntry, sincronizadoEn: new Date(),
       retiradoEnSap: false, origen: "sap" };
     const existente = await db.productoCodigoBarras.findUnique({ where: { sapAbsEntry: registro.absEntry }, select: { id: true } });
-    if (existente) return db.productoCodigoBarras.update({ where: { id: existente.id }, data: datos });
     // Una asociación creada a mano o tomada de la ficha con los mismos datos se vincula a SAP y conserva su confirmación.
-    const local = await db.productoCodigoBarras.findFirst({ where: { sapAbsEntry: null, itemCode: registro.itemCode,
+    const local = existente ? null : await db.productoCodigoBarras.findFirst({ where: { sapAbsEntry: null, itemCode: registro.itemCode,
       codigo: registro.codigo, uomEntry: registro.uomEntry }, select: { id: true }, orderBy: { id: "asc" } });
-    if (local) return db.productoCodigoBarras.update({ where: { id: local.id }, data: { ...datos, sapAbsEntry: registro.absEntry } });
-    return db.productoCodigoBarras.create({ data: { ...datos, sapAbsEntry: registro.absEntry } });
+    const fila = existente ? await db.productoCodigoBarras.update({ where: { id: existente.id }, data: datos })
+      : local ? await db.productoCodigoBarras.update({ where: { id: local.id }, data: { ...datos, sapAbsEntry: registro.absEntry } })
+        : await db.productoCodigoBarras.create({ data: { ...datos, sapAbsEntry: registro.absEntry } });
+    await confirmarManualAlLlegar(fila, db);
+    return fila;
   },
   // Códigos de SAP que no se recibieron desde "antesDe": SAP ya no los lista. Se marcan, no se borran,
   // para conservar su confirmación si vuelven a aparecer.
