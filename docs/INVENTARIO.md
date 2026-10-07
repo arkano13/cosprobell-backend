@@ -113,11 +113,37 @@ Con **En Pedidos, mostrar solo los pedidos que salen de los almacenes marcados**
 
 Almacenes (`Warehouses`) y existencias por almacén (`Items.ItemWarehouseInfoCollection`) se habilitan con `BRIDGE_INVENTORY_ENABLED=true`. Los artículos que dejan de ser inventariables limpian su copia anterior de existencias. Los documentos que mueven stock pueden explicar diferencias; su envío desde el puente sigue pendiente. Contratos en `INTEGRACION_PUENTE.md`.
 
+## Cuadre al contar (para reportes)
+
+Las existencias de SAP se pisan en cada recorrido del puente, así que después no se puede saber cuánto decía SAP el día que se contó. Por eso cada recepción, conteo de la pequeña y "no hay" deja una foto en `inventario_cuadres`, dentro de la misma operación:
+
+| Columna | Qué es |
+|---|---|
+| `itemCode`, `bodega`, `almacen` | Producto, bodega (`grande` o `pequena`) y el almacén de SAP asignado a esa bodega |
+| `accion`, `cantidad` | `recepcion`, `conteo` o `no_hay`, y las unidades de esa acción |
+| `registrado` | Lo que quedó en la bodega después de la acción |
+| `sap`, `sapAl` | Lo que SAP tenía en ese almacén en ese momento y de cuándo son esos datos. Vacío si la bodega no tenía almacén asignado o no había existencias de SAP |
+| `sinEntrega` | Solo en la pequeña: lo preparado y sin entregar, que ya salió pero SAP todavía cuenta |
+| `diferencia` | `registrado + sinEntrega − sap`: positiva, hay más en físico; negativa, menos; 0, cuadró |
+| `primero` | Primer registro del producto en esa bodega, es decir, su conteo inicial. Se calcula con los movimientos anteriores, así que vale también para lo contado antes de esta tabla |
+| `hechoPor`, `creadoEn` | Quién y cuándo |
+
+La app no muestra esta tabla: se consulta directo en la base (por ejemplo, con el usuario de solo lectura). ¿Cuadró el conteo inicial?
+
+```sql
+SELECT "itemCode", bodega, sap, registrado, diferencia, "sapAl", "hechoPor", "creadoEn",
+       CASE WHEN diferencia = 0 THEN 'cuadró' WHEN diferencia > 0 THEN 'sobra' ELSE 'falta' END AS resultado
+FROM inventario_cuadres WHERE primero ORDER BY "creadoEn";
+```
+
+Lo contado antes de que existiera la tabla no tiene foto. Las existencias de SAP pueden tener hasta la antigüedad de su frecuencia en el puente (`sapAl` lo dice): una venta o un traspaso hecho mientras se contaba aparece como diferencia.
+
 ## Tablas
 
-`inventario_productos` (pequeña, adelantado, último cambio en SAP), `inventario_cajas`, `inventario_movimientos`, `inventario_descuentos`, `documentos_stock`, `documentos_stock_lineas`, `configuracion`; en `bodegas`, `deEstaBodega` y `sincronizadoEn`; en `productos_codigos_barras`, `origen` (`sap`, `ficha` o `app`), `registradoPor` y `creadoEn`. Migración `20261002090000_inventario_bodegas` (solo agrega).
+`inventario_productos` (pequeña, adelantado, último cambio en SAP), `inventario_cajas`, `inventario_movimientos`, `inventario_descuentos`, `documentos_stock`, `documentos_stock_lineas`, `configuracion`; en `bodegas`, `deEstaBodega` y `sincronizadoEn`; en `productos_codigos_barras`, `origen` (`sap`, `ficha` o `app`), `registradoPor` y `creadoEn`. Migración `20261002090000_inventario_bodegas` (solo agrega). `inventario_cuadres` (foto al contar; migración `20261007090000_inventario_cuadres`, solo agrega una tabla).
 
 ## Códigos de barras
 
 - **Ficha del artículo**: el código de `Items.BarCode` se guarda como código con unidad Manual (`origen: "ficha"`). Si cambia en SAP, el anterior se retira.
+- **Confirmación al llegar**: un código con unidad Manual (de la ficha o de `BarCodes`) se vende de a una unidad, así que queda confirmado como unidad cuando llega de SAP (`confirmadaPor: "la sincronización con SAP"`). Solo se confirma si no tenía confirmación: un "no es una unidad" del supervisor no se pisa, y un código ya confirmado que cambió en SAP sigue apareciendo como desactualizado para revisarlo. Los de otras unidades (por ejemplo, una caja) siguen esperando al supervisor. Los que ya estaban sin confirmar antes de este cambio se confirman con "Confirmar todos como unidad" o cuando SAP los vuelva a enviar.
 - **Desde la app**: el supervisor escanea el envase y elige el producto. Queda con unidad Manual y ya confirmado como unidad (`origen: "app"`); la sincronización no lo retira. Un código que ya es de otro producto (o está en la ficha de otro) se rechaza con `409 CODIGO_EN_USO`.

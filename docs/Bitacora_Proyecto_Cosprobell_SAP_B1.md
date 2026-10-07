@@ -678,3 +678,15 @@ El registro manual crea solo la definición fija SQLQueries si no existe; no cam
 Perfil propuesto: pedidos 10 min, existencias 60 min, productos/códigos 2 h, clientes 4 h, unidades/almacenes 24 h; tarea cada 5 min, pausa entre inicios de consultas 1,5 s y presupuesto original. Backend admite alcance explícito 01/02 y antigüedad configurable (predeterminado 30 min, perfil propuesto 120 min, con aceptación explícita de menor frescura). No se aplicaron variables, permisos, consultas ni despliegues en SAP/Railway.
 
 Verificado: 461/461 pruebas. SQL relacional de JOIN y cursor comprobado con SQLite local adaptando TOP a LIMIT; no es una validación del analizador SAP. PostgreSQL temporal local verificó alcance, datos de 60 minutos permitidos con límite 120, rechazo de 121 minutos, recorridos parciales y filas antiguas. Falta sondeo en FP 2111 y medición de impacto real antes de reactivar. Procedimiento: docs/REDUCIR_CARGA_PUENTE.md.
+
+## Códigos con unidad Manual confirmados al llegar de SAP (2026-10-06)
+
+El usuario confirmó que en SAP todo se vende por unidad. Los códigos con unidad Manual (ficha del artículo o `BarCodes`) quedan confirmados como unidad al llegar, sin pasar por el panel del supervisor. No se pisa una confirmación existente: un "no es una unidad" se conserva y un código confirmado que cambió en SAP sigue como desactualizado. Los de otras unidades siguen esperando al supervisor. Solo cambia el backend; la app no necesita versión nueva. Los pendientes anteriores se confirman con "Confirmar todos como unidad".
+
+Verificado: 476/476 pruebas y PostgreSQL local con producto con ficha, código de SAP Manual, código de SAP en caja y nueva llegada tras marcar "no es una unidad".
+
+## Foto de cuadre al contar (2026-10-07)
+
+El usuario quiere armar por su cuenta un reporte de descuadres (más o menos en físico que en SAP) y saber si cada producto cuadró la primera vez. Como las existencias de SAP se pisan en cada recorrido, cada recepción, conteo de la pequeña y "no hay" deja una foto en `inventario_cuadres`: lo registrado en la bodega, lo que SAP tenía en su almacén y de cuándo, lo preparado sin entregar, la diferencia y si fue el primer registro del producto en esa bodega. Solo backend; la app no cambia. Migración `20261007090000_inventario_cuadres`, que solo agrega la tabla: Prisma propuso además rehacer dos claves foráneas existentes por una diferencia previa con migraciones escritas a mano; se dejó fuera.
+
+Verificado: 476/476 pruebas y PostgreSQL local con recepciones en cajas y por lotes, conteo de la pequeña, "no hay", una recepción posterior (no primera) y la consulta de primer conteo: sobra, cuadró, falta y cuadró en 0.
