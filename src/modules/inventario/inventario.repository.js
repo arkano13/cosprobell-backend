@@ -184,6 +184,12 @@ export const inventarioRepository = {
       WHERE "itemCode" = ${itemCode} AND "warehouseCode" = ANY(${almacenes}) GROUP BY "warehouseCode"`;
     return new Map(filas.map((f) => [f.warehouseCode, f.sap]));
   },
+  // Lo que SAP tiene de un producto en un almacén, redondeado (0 si no figura).
+  async sapEnAlmacen(itemCode, almacen, db = prisma) {
+    const [fila] = await db.$queryRaw`SELECT COALESCE(ROUND(SUM("inStock")), 0)::int AS sap FROM productos_existencias
+      WHERE "itemCode" = ${itemCode} AND "warehouseCode" = ${almacen}`;
+    return fila?.sap ?? 0;
+  },
   // En qué bodegas ya se contó un producto.
   // Foto de cuadre (ver InventarioCuadre en el esquema), después del cambio y con el candado del producto tomado.
   // Las existencias y su hora se leen en el mismo momento, porque el puente las pisa en cada recorrido.

@@ -274,6 +274,27 @@ async function crearCajas(itemCode, piezas, aplicacion, tx) {
   return creadas;
 }
 
+// Cuánto se puede guardar en la grande sin confirmar. Con el almacén de la grande asignado alcanza con que entre en lo
+// que SAP tiene en ese almacén (menos lo que ya está en cajas): una diferencia de la 02 o de un pedido preparado sin
+// entregar no frena el conteo de la 01 ni se anota como "recibido antes que SAP", y sigue a la vista en el producto.
+// También vale lo que falta ubicar en el total: un traspaso de SAP de la 01 a la 02 sin aceptar baja la 01, no el total.
+async function porUbicarEnGrande(itemCode, estado, tx) {
+  const total = Math.max(0, estado.diferencia ?? 0);
+  const almacen = (await almacenesPorBodega()).grande;
+  if (!almacen) return { porUbicar: total };
+  const sap = await repo.sapEnAlmacen(itemCode, almacen, tx);
+  return { porUbicar: Math.max(total, sap - estado.grande), almacen, sap, enCajas: estado.grande };
+}
+
+function textoExcede(total, { porUbicar, almacen, sap, enCajas }) {
+  const sobran = total - porUbicar;
+  if (!almacen) return porUbicar === 0
+    ? "SAP todavía no registró mercadería por ubicar de este producto. Si llegó antes que SAP, confirmá que se reciba igual."
+    : `SAP tiene ${numero(porUbicar)} por ubicar y estás recibiendo ${numero(total)}. Si llegó más de lo que SAP registró, confirmá que se reciba igual.`;
+  return `Estás guardando ${numero(total)} y SAP tiene ${numero(sap)} en el almacén ${almacen}`
+    + `${enCajas ? ` (ya hay ${numero(enCajas)} en cajas)` : ""}: sobran ${numero(sobran)}.`;
+}
+
 export async function recibir(entrada, { aplicacion }) {
   const { itemCode, modo, lote = null, vencimiento = null, adelantar = false } = entrada;
   const destino = modo === "suelto" ? entrada.destino : modo === "lotes" ? "pequena" : "grande";
@@ -286,11 +307,10 @@ export async function recibir(entrada, { aplicacion }) {
     const estado = await estadoDe(itemCode, tx);
     const primero = await esPrimero(itemCode, destino, tx);
     const comparacionDisponible = await repo.comparacionDisponible(tx);
-    const porUbicar = comparacionDisponible ? Math.max(0, estado.diferencia) : total;
-    const excede = total - porUbicar;
-    if (excede > 0 && !adelantar) throw falla("EXCEDE_POR_UBICAR", 409, porUbicar === 0
-      ? `SAP todavía no registró mercadería por ubicar de este producto. Si llegó antes que SAP, confirmá que se reciba igual.`
-      : `SAP tiene ${numero(porUbicar)} por ubicar y estás recibiendo ${numero(total)}. Si llegó más de lo que SAP registró, confirmá que se reciba igual.`);
+    const cupo = !comparacionDisponible ? { porUbicar: total }
+      : destino === "grande" ? await porUbicarEnGrande(itemCode, estado, tx) : { porUbicar: Math.max(0, estado.diferencia) };
+    const excede = total - cupo.porUbicar;
+    if (excede > 0 && !adelantar) throw falla("EXCEDE_POR_UBICAR", 409, textoExcede(total, cupo));
     await repo.activar(itemCode, tx);
     if (excede > 0) await repo.sumarAdelantado(itemCode, excede, tx);
     const g = randomUUID();
@@ -517,7 +537,7 @@ export async function editarConteoGrande(itemCode, entrada, { aplicacion }) {
     const delta = despues - antes;
     const adelantado = (await repo.estadoProducto(itemCode, tx))?.adelantado ?? 0;
     if (delta > 0) {
-      const porUbicar = (await repo.comparacionDisponible(tx)) ? Math.max(0, estado.diferencia ?? 0) : delta;
+      const { porUbicar } = (await repo.comparacionDisponible(tx)) ? await porUbicarEnGrande(itemCode, estado, tx) : { porUbicar: delta };
       if (delta > porUbicar) await repo.sumarAdelantado(itemCode, delta - porUbicar, tx);
     } else if (delta < 0 && adelantado > 0) {
       await repo.sumarAdelantado(itemCode, -Math.min(adelantado, -delta), tx);

@@ -221,6 +221,37 @@ test("recibir por grupos: cajas de varios lotes y lo que sobra como bulto, todo 
   assert.equal(sinGrupos.status, 400);
 });
 
+test("contar la 01: alcanza con lo que SAP tiene en la 01, aunque la 02 tenga de más", async (t) => {
+  // SAP: 78 en la 01 y 10 en la 02 (88 entre las dos). En la app la 02 tiene 15: 5 de más.
+  const hecho = inventario(t, { sap: 88, pequena: 15, activo: false, almacenes: ["01", "02"] });
+  t.mock.method(repo, "opcion", async () => ({ grande: "01", pequena: "02" }));
+  t.mock.method(repo, "sapEnAlmacen", async (itemCode, almacen) => ({ "01": 78, "02": 10 })[almacen]);
+  const headers = conSesion(t);
+  const contar = (cajas) => enviar("/inventario/recepciones", headers, "POST", { itemCode: "P1", modo: "cajas", cajas, unidadesPorCaja: 6 });
+  // 13 × 6 = 78: igual a la 01. Se guarda sin preguntar y sin anotarlo como recibido antes que SAP.
+  const bien = await contar(13);
+  assert.equal(bien.status, 201);
+  assert.equal((await bien.json()).data.adelantado, 0);
+  assert.deepEqual(hecho.adelantado, []);
+  // 14 × 6 = 84: 6 más que la 01. El aviso dice los números de la 01.
+  const demas = await contar(14);
+  assert.equal(demas.status, 409);
+  const { error } = await demas.json();
+  assert.equal(error.code, "EXCEDE_POR_UBICAR");
+  assert.equal(error.message, "Estás guardando 84 y SAP tiene 78 en el almacén 01: sobran 6.");
+});
+
+test("recibir en la 01 con un traspaso de SAP sin aceptar: vale lo que falta ubicar en el total", async (t) => {
+  // SAP pasó 20 de la 01 a la 02 (01: 50, 02: 20) y la bodega todavía no lo aceptó: hay 70 en cajas y 0 en la 02.
+  // Llegan 30 nuevos que SAP ya registró en la 01 (01: 80, total 100): no debe pedir confirmar.
+  inventario(t, { sap: 100, grande: 70, almacenes: ["01", "02"] });
+  t.mock.method(repo, "opcion", async () => ({ grande: "01", pequena: "02" }));
+  t.mock.method(repo, "sapEnAlmacen", async (itemCode, almacen) => ({ "01": 80, "02": 20 })[almacen]);
+  const r = await enviar("/inventario/recepciones", conSesion(t), "POST", { itemCode: "P1", modo: "cajas", cajas: 3, unidadesPorCaja: 10 });
+  assert.equal(r.status, 201);
+  assert.equal((await r.json()).data.adelantado, 0);
+});
+
 test("recibir: datos inválidos se rechazan antes de tocar el inventario", async (t) => {
   const hecho = inventario(t, { sap: 100 });
   const headers = conSesion(t);
