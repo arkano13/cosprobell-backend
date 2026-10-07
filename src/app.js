@@ -18,6 +18,7 @@ import { requireAppAuth, soloAplicaciones } from "./middleware/authenticate.js";
 import operadoresRoutes from "./modules/operadores/operadores.routes.js";
 import supervisorRoutes from "./modules/supervisor/supervisor.routes.js";
 import inventarioRoutes from "./modules/inventario/inventario.routes.js";
+import actualizacionesRoutes from "./modules/actualizaciones/actualizaciones.routes.js";
 
 const app = express();
 app.use(helmet());
@@ -30,6 +31,8 @@ app.use(healthRoutes);
 app.use("/integracion", sincronizacionRoutes);
 // Ingreso con nombre y PIN: acepta la clave de solo ingreso de la app de escritorio.
 app.use(operadoresRoutes);
+// Actualizaciones de la app de escritorio: también con la clave de solo ingreso.
+app.use(actualizacionesRoutes);
 // Aplicaciones con API key u operadores con sesión.
 app.use(requireAppAuth);
 app.use(pickingRoutes);
