@@ -185,6 +185,32 @@ export const inventarioRepository = {
     return new Map(filas.map((f) => [f.warehouseCode, f.sap]));
   },
   // En qué bodegas ya se contó un producto.
+  // Foto de cuadre (ver InventarioCuadre en el esquema), después del cambio y con el candado del producto tomado.
+  // Las existencias y su hora se leen en el mismo momento, porque el puente las pisa en cada recorrido.
+  async registrarCuadre({ itemCode, bodega, almacen, accion, cantidad, primero, hechoPor }, db = prisma) {
+    const registrado = bodega === "grande"
+      ? Prisma.sql`(SELECT COALESCE(SUM(unidades), 0) FROM inventario_cajas WHERE "itemCode" = ${itemCode})::int`
+      : Prisma.sql`COALESCE((SELECT pequena FROM inventario_productos WHERE "itemCode" = ${itemCode}), 0)`;
+    const sinEntrega = bodega === "pequena"
+      ? Prisma.sql`COALESCE((SELECT se."sinEntrega" FROM (${SIN_ENTREGA}) se WHERE se."itemCode" = ${itemCode}), 0)`
+      : Prisma.sql`0`;
+    const [fila] = await db.$queryRaw`
+      WITH al AS (SELECT GREATEST(
+             (SELECT "finalizadoEn" FROM sincronizacion_recorridos WHERE entidad = 'existencias'),
+             (SELECT "actualizadoEn" FROM sincronizacion_estados WHERE entidad = 'existencias')) AS al),
+           d AS (SELECT ${registrado} AS registrado, ${sinEntrega} AS "sinEntrega", al.al AS "sapAl",
+             CASE WHEN ${almacen}::text IS NULL OR al.al IS NULL THEN NULL
+               ELSE COALESCE((SELECT ROUND(SUM("inStock")) FROM productos_existencias
+                 WHERE "itemCode" = ${itemCode} AND "warehouseCode" = ${almacen}), 0)::int END AS sap
+             FROM al)
+      INSERT INTO inventario_cuadres ("itemCode", bodega, almacen, accion, cantidad, registrado, sap, "sinEntrega",
+        diferencia, "sapAl", primero, "hechoPor")
+      SELECT ${itemCode}, ${bodega}, ${almacen}, ${accion}, ${cantidad}, d.registrado, d.sap, d."sinEntrega",
+        d.registrado + d."sinEntrega" - d.sap, d."sapAl", ${primero}, ${hechoPor}
+      FROM d
+      RETURNING *`;
+    return fila;
+  },
   async contadoEn(itemCode, db = prisma) {
     const filas = await db.$queryRaw`SELECT DISTINCT bodega FROM inventario_movimientos
       WHERE "itemCode" = ${itemCode} AND tipo IN ('recepcion', 'conteo')`;

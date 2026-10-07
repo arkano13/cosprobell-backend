@@ -64,7 +64,7 @@ test("comparación SAP: existencias no disponibles bloquean descuentos basados e
 // Inventario falso: un producto con lo que SAP tiene en los almacenes elegidos y lo que hay en cada bodega.
 function inventario(t, { sap = 0, grande = 0, pequena = 0, activo = true, sapCambioEn = null, cajas = [], almacenes = ["01"] } = {}) {
   const estado = { itemCode: "P1", itemName: "Shampoo", sap, activo, pequena, adelantado: 0, sapCambioEn, grande, sinEntrega: 0 };
-  const hecho = { cajas: [], movimientos: [], pequena: [], adelantado: [], cajaCambios: [], descuentos: [] };
+  const hecho = { cajas: [], movimientos: [], pequena: [], adelantado: [], cajaCambios: [], descuentos: [], cuadres: [] };
   const tx = {};
   t.mock.method(repo, "almacenesDeEstaBodega", async () => almacenes);
   t.mock.method(repo, "comparacionDisponible", async () => almacenes.length > 0);
@@ -76,6 +76,7 @@ function inventario(t, { sap = 0, grande = 0, pequena = 0, activo = true, sapCam
   t.mock.method(repo, "conteoBodega", async () => []);
   t.mock.method(repo, "sapDeProducto", async () => new Map());
   t.mock.method(repo, "contadoEn", async () => new Set());
+  t.mock.method(repo, "registrarCuadre", async (datos) => hecho.cuadres.push(datos));
   t.mock.method(repo, "pases", async () => []);
   t.mock.method(repo, "activar", async () => {});
   t.mock.method(repo, "sumarAdelantado", async (itemCode, unidades) => hecho.adelantado.push(unidades));
@@ -188,6 +189,10 @@ test("recibir en cajas: hasta lo que SAP tiene por ubicar; más, solo confirmand
   assert.deepEqual(hecho.adelantado, [20]);
   assert.equal(hecho.movimientos.length, 6);
   assert.ok(hecho.movimientos.every((m) => m.hechoPor === "operador:Luis Pérez" && m.cantidad === 20 && m.bodega === "grande"));
+  // Una sola foto de cuadre, solo de la recepción que se hizo (la rechazada no deja nada). Sin almacén asignado a la
+  // bodega no hay con qué comparar: almacen null y el repositorio deja sap y diferencia vacíos.
+  assert.deepEqual(hecho.cuadres, [{ itemCode: "P1", bodega: "grande", almacen: null, accion: "recepcion", cantidad: 120,
+    primero: true, hechoPor: "operador:Luis Pérez" }]);
 });
 
 test("recibir por grupos: cajas de varios lotes y lo que sobra como bulto, todo junto", async (t) => {
@@ -284,6 +289,10 @@ test("cambiar lote, contar la pequeña y corregir una caja: solo el supervisor",
   assert.deepEqual(hecho.pequena, [-2]);
   assert.equal(hecho.movimientos[0].tipo, "conteo");
   assert.equal(hecho.movimientos[0].hechoPor, "operador:Luis Pérez");
+  // Ya tenía un conteo en la pequeña: la foto queda, pero no como primer conteo.
+  t.mock.method(repo, "contadoEn", async () => new Set(["pequena"]));
+  await enviar("/inventario/productos/P1/pequena", supervisor, "PUT", { unidades: 9 });
+  assert.deepEqual(hecho.cuadres.map((c) => [c.bodega, c.accion, c.cantidad, c.primero]), [["pequena", "conteo", 8, true], ["pequena", "conteo", 9, false]]);
 });
 
 test("cambiar lote: devuelve lo restado y lo resta del lote elegido", async (t) => {
@@ -536,6 +545,9 @@ test("conteo de una bodega: lo que falta contar, el avance y \"no hay\"", async 
   const marcado = await enviar("/inventario/productos/P1/sin-existencia", headers, "POST", { bodega: "grande" });
   assert.equal(marcado.status, 200);
   assert.deepEqual(hecho.movimientos.map((m) => [m.tipo, m.bodega, m.cantidad, m.observacion]), [["conteo", "grande", 0, "Contado: no hay"]]);
+  // Queda la foto de cuadre: SAP del almacén de esa bodega en ese momento, y si era el primer conteo ahí.
+  assert.deepEqual(hecho.cuadres, [{ itemCode: "P1", bodega: "grande", almacen: "01", accion: "no_hay", cantidad: 0, primero: true,
+    hechoPor: "operador:Luis Pérez" }]);
   // Si hay unidades registradas en esa bodega, no se puede marcar "no hay".
   t.mock.method(repo, "cajasDe", async () => [{ unidades: 5 }]);
   const conCajas = await enviar("/inventario/productos/P1/sin-existencia", headers, "POST", { bodega: "grande" });

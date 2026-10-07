@@ -817,6 +817,31 @@ model InventarioMovimiento {
   @@map("inventario_movimientos")
 }
 
+// Foto al contar o recibir: lo que quedó en la bodega frente a lo que SAP tenía en su almacén en ese momento (las
+// existencias de SAP se pisan en cada recorrido, así que después no se puede reconstruir). primero: el primer registro
+// del producto en esa bodega, es decir, el conteo inicial. diferencia = registrado + sinEntrega − sap: positiva, hay más
+// en físico; negativa, menos. Solo se agrega, para consultarla directo en la base.
+model InventarioCuadre {
+  id         Int       @id @default(autoincrement())
+  itemCode   String
+  bodega     String // grande | pequena
+  almacen    String? // almacén de SAP asignado a la bodega; null si no había
+  accion     String // recepcion | conteo | no_hay
+  cantidad   Int // unidades de esta acción
+  registrado Int // lo que quedó en la bodega después de la acción
+  sap        Int? // lo que SAP tenía en ese almacén; null sin almacén asignado o sin existencias de SAP
+  sinEntrega Int // solo pequeña: preparado y sin entregar, que ya salió pero SAP todavía cuenta
+  diferencia Int?
+  sapAl      DateTime? // de cuándo son las existencias de SAP usadas
+  primero    Boolean
+  hechoPor   String?
+  creadoEn   DateTime  @default(now())
+
+  @@index([itemCode, bodega, creadoEn])
+  @@index([creadoEn])
+  @@map("inventario_cuadres")
+}
+
 model SincronizacionRecorrido {
   entidad String @id
   empresa String

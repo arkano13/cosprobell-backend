@@ -44,6 +44,13 @@ async function exigirAlmacenes() {
     "Faltan datos recientes de almacenes y existencias de SAP. El inventario local sigue disponible.");
   return almacenes;
 }
+// Foto de cuadre de una bodega después de contar o recibir (ver InventarioCuadre en el esquema). primero se averigua
+// antes del cambio: si el producto todavía no tenía recepción ni conteo en esa bodega, es su conteo inicial.
+async function fotoCuadre(tx, { itemCode, bodega, accion, cantidad, primero, hechoPor }) {
+  const almacen = (await almacenesPorBodega())[bodega];
+  await repo.registrarCuadre({ itemCode, bodega, almacen, accion, cantidad, primero, hechoPor }, tx);
+}
+const esPrimero = async (itemCode, bodega, tx) => !(await repo.contadoEn(itemCode, tx)).has(bodega);
 async function estadoDe(itemCode, tx) {
   const [fila] = await repo.estados({ itemCodes: [itemCode] }, tx);
   if (!fila) throw sinProducto();
@@ -264,6 +271,7 @@ export async function recibir(entrada, { aplicacion }) {
   const total = destino === "grande" ? piezas.reduce((t, p) => t + p.unidades, 0) : lotesPequena.reduce((t, l) => t + l.unidades, 0);
   return repo.conProducto(itemCode, async (tx) => {
     const estado = await estadoDe(itemCode, tx);
+    const primero = await esPrimero(itemCode, destino, tx);
     const comparacionDisponible = await repo.comparacionDisponible(tx);
     const porUbicar = comparacionDisponible ? Math.max(0, estado.diferencia) : total;
     const excede = total - porUbicar;
@@ -294,6 +302,7 @@ export async function recibir(entrada, { aplicacion }) {
       await repo.cambiarPequena(itemCode, total, tx);
       await repo.registrarMovimientos(movimientos, tx);
     }
+    await fotoCuadre(tx, { itemCode, bodega: destino, accion: "recepcion", cantidad: total, primero, hechoPor: aplicacion });
     return { data: { cajas: creadas.map(vistaCaja), unidades: total, destino, adelantado: Math.max(0, excede) } };
   }, { operacionId: entrada.operacionId, tipo: "recibir", entrada, aplicacion });
 }
@@ -436,6 +445,7 @@ export async function contarPequena(itemCode, entrada, { aplicacion }) {
   const { unidades } = entrada;
   return repo.conProducto(itemCode, async (tx) => {
     await estadoDe(itemCode, tx);
+    const primero = await esPrimero(itemCode, "pequena", tx);
     await repo.activar(itemCode, tx);
     const estado = await repo.estadoProducto(itemCode, tx);
     const delta = unidades - estado.pequena;
@@ -449,6 +459,7 @@ export async function contarPequena(itemCode, entrada, { aplicacion }) {
     if (estado.pequena < 0) movimientos.push({ grupo, tipo: "conteo", itemCode, bodega: "pequena",
       cantidad: -estado.pequena, hechoPor: aplicacion, observacion: "Conciliación del saldo negativo anterior al control por lotes" });
     await repo.registrarMovimientos(movimientos, tx);
+    await fotoCuadre(tx, { itemCode, bodega: "pequena", accion: "conteo", cantidad: unidades, primero, hechoPor: aplicacion });
     return { data: { itemCode, pequena: unidades, cambio: delta } };
   }, { operacionId: entrada.operacionId, tipo: "contarPequena", entrada, aplicacion, itemCode });
 }
@@ -660,9 +671,11 @@ export async function marcarSinExistencia(itemCode, entrada, { aplicacion }) {
       : (await repo.estadoProducto(itemCode, tx))?.pequena ?? 0;
     if (hay !== 0) throw falla("TIENE_EXISTENCIA", 409,
       `Hay ${numero(hay)} unidades registradas de este producto en la bodega ${bodega === "grande" ? "grande" : "pequeña"}: corregí las cajas o contá de nuevo.`);
+    const primero = await esPrimero(itemCode, bodega, tx);
     await repo.activar(itemCode, tx);
     await repo.registrarMovimientos([{ grupo: randomUUID(), tipo: "conteo", itemCode, bodega, cantidad: 0, hechoPor: aplicacion,
       observacion: "Contado: no hay" }], tx);
+    await fotoCuadre(tx, { itemCode, bodega, accion: "no_hay", cantidad: 0, primero, hechoPor: aplicacion });
     return { data: { itemCode, bodega, unidades: 0 } };
   }, { operacionId: entrada.operacionId, tipo: "sinExistencia", entrada, aplicacion, itemCode });
 }
