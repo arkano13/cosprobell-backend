@@ -326,6 +326,18 @@ test("cambiar lote, contar la pequeña y corregir una caja: solo el supervisor",
   assert.deepEqual(hecho.cuadres.map((c) => [c.bodega, c.accion, c.cantidad, c.primero]), [["pequena", "conteo", 8, true], ["pequena", "conteo", 9, false]]);
 });
 
+test("vencimiento con el año incompleto o absurdo se rechaza (un \"09/8\" quedaba como el año 8)", async (t) => {
+  const hecho = inventario(t, { sap: 10, pequena: 10 });
+  const supervisor = conSesion(t, "supervisor");
+  for (const vencimiento of ["0008-09-30", "1999-12-31", "2100-01-31"]) {
+    const r = await enviar("/inventario/productos/P1/pequena", supervisor, "PUT", { unidades: 5, lotes: [{ lote: "L1", vencimiento, unidades: 5 }] });
+    assert.equal(r.status, 400, vencimiento);
+    const recibir = await enviar("/inventario/recepciones", supervisor, "POST", { itemCode: "P1", modo: "cajas", cajas: 1, unidadesPorCaja: 5, vencimiento });
+    assert.equal(recibir.status, 400, vencimiento);
+  }
+  assert.deepEqual([hecho.pequena, hecho.cajas], [[], []]);
+});
+
 test("cambiar lote: devuelve lo restado y lo resta del lote elegido", async (t) => {
   const cajas = [{ id: 1, codigo: "CJ-000001", lote: "L1", unidades: 0, unidadesIniciales: 20 },
     { id: 3, codigo: "CJ-000003", lote: "L2", unidades: 20, unidadesIniciales: 20 }];

@@ -9,6 +9,9 @@ const itemCode = z.string().trim().min(1).max(50);
 const lote = z.string().trim().min(1).max(60).nullable().optional();
 const fecha = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha con formato AAAA-MM-DD")
   .refine((f) => !Number.isNaN(Date.parse(`${f}T00:00:00Z`)) && new Date(`${f}T00:00:00Z`).toISOString().startsWith(f), "Fecha inválida");
+// Vencimiento: además, año completo y razonable (un "09/8" quedaba guardado como el año 8).
+const vence = fecha.refine((f) => Number(f.slice(0, 4)) >= 2000 && Number(f.slice(0, 4)) <= 2099,
+  "Vencimiento inválido: el año va completo, por ejemplo 2028");
 const limit = (porDefecto, maximo = 100) => z.coerce.number().int().min(1).max(maximo).default(porDefecto);
 
 export const itemCodeParamsSchema = z.object({ itemCode });
@@ -31,21 +34,21 @@ export const descuentosQuerySchema = z.object({ antesDe: id.optional(), limit: l
 // En cajas: N cajas iguales a la grande, cada una con su etiqueta. Suelto: un bulto a la grande o unidades a la pequeña.
 // Grupos: varias filas de cajas iguales, cada una con su lote, y lo que sobra como un bulto; todo junto a la grande.
 const grupoCajas = z.object({ cajas: z.number().int().min(1).max(200), unidadesPorCaja: unidades, lote,
-  vencimiento: fecha.nullable().optional() }).strict();
+  vencimiento: vence.nullable().optional() }).strict();
 const totalRecepcion = (r) => (r.modo === "cajas" ? r.cajas * r.unidadesPorCaja : r.modo === "suelto" ? r.unidades
   : r.modo === "lotes" ? r.lotes.reduce((t, l) => t + l.unidades, 0)
     : r.grupos.reduce((t, g) => t + g.cajas * g.unidadesPorCaja, 0) + (r.bulto?.unidades ?? 0));
 export const recepcionSchema = z.discriminatedUnion("modo", [
   z.object({ operacionId, modo: z.literal("cajas"), itemCode, cajas: z.number().int().min(1).max(200), unidadesPorCaja: unidades,
-    lote, vencimiento: fecha.nullable().optional(), adelantar: z.boolean().default(false) }).strict(),
+    lote, vencimiento: vence.nullable().optional(), adelantar: z.boolean().default(false) }).strict(),
   z.object({ operacionId, modo: z.literal("suelto"), itemCode, unidades, destino: z.enum(["grande", "pequena"]),
-    lote, vencimiento: fecha.nullable().optional(), adelantar: z.boolean().default(false) }).strict(),
+    lote, vencimiento: vence.nullable().optional(), adelantar: z.boolean().default(false) }).strict(),
   z.object({ operacionId, modo: z.literal("grupos"), itemCode, grupos: z.array(grupoCajas).min(1).max(50),
-    bulto: z.object({ unidades, lote, vencimiento: fecha.nullable().optional() }).strict().nullable().optional(),
+    bulto: z.object({ unidades, lote, vencimiento: vence.nullable().optional() }).strict().nullable().optional(),
     adelantar: z.boolean().default(false) }).strict(),
   // Lotes: unidades sueltas de varios lotes a la pequeña, todo junto (el conteo de la 02).
   z.object({ operacionId, modo: z.literal("lotes"), itemCode,
-    lotes: z.array(z.object({ unidades, lote, vencimiento: fecha.nullable().optional() }).strict()).min(1).max(50)
+    lotes: z.array(z.object({ unidades, lote, vencimiento: vence.nullable().optional() }).strict()).min(1).max(50)
       .refine((filas) => new Set(filas.map((f) => JSON.stringify([f.lote ?? null, f.vencimiento ?? null]))).size === filas.length, "No repetir lotes"),
     adelantar: z.boolean().default(false) }).strict(),
 ]).refine((r) => totalRecepcion(r) <= 1_000_000, { message: "Demasiadas unidades en una sola recepción", path: ["unidadesPorCaja"] })
@@ -71,13 +74,13 @@ export const traspasoSchema = z.object({ operacionId, itemCode, unidades,
 }).strict();
 export const reasignacionSchema = z.object({ operacionId, asignaciones }).strict();
 export const conteoSchema = z.object({ operacionId, unidades: z.number().int().min(0).max(1_000_000),
-  lotes: z.array(z.object({ lote, vencimiento: fecha.nullable().optional(), unidades: z.number().int().min(0).max(1_000_000) }).strict())
+  lotes: z.array(z.object({ lote, vencimiento: vence.nullable().optional(), unidades: z.number().int().min(0).max(1_000_000) }).strict())
     .max(200).refine(filas => new Set(filas.map(f => JSON.stringify([f.lote ?? null, f.vencimiento ?? null]))).size === filas.length, "No repetir lotes").optional(),
 }).strict();
 // Edición del conteo de la grande (supervisor): cómo queda todo lo de ese producto en la grande. Sin filas ni bulto,
 // queda en 0.
 export const edicionGrandeSchema = z.object({ operacionId, grupos: z.array(grupoCajas).max(50),
-  bulto: z.object({ unidades, lote, vencimiento: fecha.nullable().optional() }).strict().nullable().optional() }).strict()
+  bulto: z.object({ unidades, lote, vencimiento: vence.nullable().optional() }).strict().nullable().optional() }).strict()
   .refine((r) => r.grupos.reduce((t, g) => t + g.cajas, 0) <= 500, { message: "Hasta 500 cajas", path: ["grupos"] })
   .refine((r) => r.grupos.reduce((t, g) => t + g.cajas * g.unidadesPorCaja, 0) + (r.bulto?.unidades ?? 0) <= 1_000_000,
     { message: "Demasiadas unidades", path: ["grupos"] });
