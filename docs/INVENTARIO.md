@@ -51,6 +51,7 @@ SAP (almacenes marcados) = grande + pequeña + preparado sin entregar + diferenc
 
 Reglas:
 
+- **Vencimientos**: fecha `AAAA-MM-DD` con el año entre 2000 y 2099 (`400` si no). Un "09/8" quedaba guardado como el año 8. Para corregir la fecha de lo que hay en la pequeña, el supervisor la cambia en **Editar conteo de la 02** (el conteo reemplaza todo lo de la pequeña); en la grande, con **Editar conteo de la 01**.
 - **Recibir**: sin comparación disponible, registra la entrada física local. Con comparación disponible, si se recibe más de lo que SAP tiene por ubicar, responde `409 EXCEDE_POR_UBICAR`; con `adelantar: true` se acepta y se anota como recibido antes que SAP. En la grande, con su almacén asignado, alcanza con que entre en lo que SAP tiene en ese almacén menos lo que ya está en cajas (o en lo que falta ubicar en el total, si es más): una diferencia de la pequeña o de un pedido preparado sin entregar no frena el conteo de la 01 ni se esconde como recibido antes que SAP. El mensaje dice los números de ese almacén. Cada caja recibe su código al crearse; la respuesta trae los datos para las etiquetas.
 - **Descontar**: solo con la diferencia estable y exacta (`409 SAP_ACTUALIZANDO` o `409 CANTIDAD_CAMBIO`); hay que asignar exactamente lo que SAP descontó. Dentro de un lote se resta primero de la caja abierta y después de las cerradas en orden de llegada. La respuesta dice qué cajas sacar del estante.
 - **Cambiar lote**: devuelve lo restado a sus cajas (o a la pequeña) y resta según lo nuevo. Guarda quién, cuándo y cuál era la asignación anterior.
