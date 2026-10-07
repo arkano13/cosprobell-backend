@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clasificar, codigoCaja, porPasar, repartirTraspaso, lotesDeTraspaso, repartirEnCajas, cajaParaUsarAntes, textoAsignacion, MINUTOS_PARA_ESTABILIZAR } from "../../src/modules/inventario/inventario.calculo.js";
+import { clasificar, codigoCaja, porPasar, repartirTraspaso, lotesDeTraspaso, repartirEnCajas, cajaParaUsarAntes, textoAsignacion, editarCajas, MINUTOS_PARA_ESTABILIZAR } from "../../src/modules/inventario/inventario.calculo.js";
 
 const ahora = Date.parse("2026-10-01T15:00:00Z");
 const hace = (minutos) => new Date(ahora - minutos * 60_000);
@@ -112,4 +112,23 @@ test("traspaso: si ninguna combinación de cajas enteras da justo, se abre una",
   assert.deepEqual(repartirTraspaso(conAbierta, 30).map((p) => [p.codigo, p.unidades]), [["CJ-000001", 24], ["CJ-000003", 6]]);
   assert.throws(() => repartirTraspaso(cajas, 100), { code: "LOTE_INSUFICIENTE" });
   assert.throws(() => repartirTraspaso([], 5, { lote: "L9" }), /El lote L9 tiene 0 unidades/);
+});
+
+test("editar el conteo de la grande: conserva las cajas que coinciden, anula las que sobran y crea las que faltan", () => {
+  const caja = (id, lote, vencimiento, unidades, suelto = false) => ({ id, lote, vencimiento, unidades, suelto });
+  const existentes = [caja(3, "L1", new Date("2027-03-31T00:00:00Z"), 20), caja(1, "L1", new Date("2027-03-31T00:00:00Z"), 20),
+    caja(2, "L1", new Date("2027-03-31T00:00:00Z"), 20), caja(4, "L2", null, 12), caja(5, null, null, 7, true)];
+  const pieza = (lote, vencimiento, unidades, suelto = false) => ({ lote, vencimiento, unidades, suelto });
+  // Faltaban un lote nuevo (L3) y el L1 tenía 2 cajas, no 3; el L2 tenía mal la fecha; el bulto queda igual.
+  const deseadas = [pieza("L1", "2027-03-31", 20), pieza("L1", "2027-03-31", 20), pieza("L2", "2026-12-31", 12),
+    pieza("L3", "2028-01-31", 20), pieza(null, null, 7, true)];
+  const { anular, crear } = editarCajas(existentes, deseadas);
+  // Del L1 quedan las más antiguas (1 y 2): se anula la 3. La 4 cambia de fecha: se anula y se crea otra.
+  assert.deepEqual(anular.map((c) => c.id), [3, 4]);
+  assert.deepEqual(crear, [pieza("L2", "2026-12-31", 12), pieza("L3", "2028-01-31", 20)]);
+  // Un bulto no es lo mismo que una caja con las mismas unidades.
+  assert.deepEqual(editarCajas([caja(9, null, null, 7, true)], [pieza(null, null, 7)]).anular.map((c) => c.id), [9]);
+  // Sin cambios no se toca nada.
+  assert.deepEqual(editarCajas(existentes, existentes.map((c) => ({ ...c, vencimiento: c.vencimiento?.toISOString().slice(0, 10) ?? null }))),
+    { anular: [], crear: [] });
 });

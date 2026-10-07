@@ -74,6 +74,13 @@ export const conteoSchema = z.object({ operacionId, unidades: z.number().int().m
   lotes: z.array(z.object({ lote, vencimiento: fecha.nullable().optional(), unidades: z.number().int().min(0).max(1_000_000) }).strict())
     .max(200).refine(filas => new Set(filas.map(f => JSON.stringify([f.lote ?? null, f.vencimiento ?? null]))).size === filas.length, "No repetir lotes").optional(),
 }).strict();
+// Edición del conteo de la grande (supervisor): cómo queda todo lo de ese producto en la grande. Sin filas ni bulto,
+// queda en 0.
+export const edicionGrandeSchema = z.object({ operacionId, grupos: z.array(grupoCajas).max(50),
+  bulto: z.object({ unidades, lote, vencimiento: fecha.nullable().optional() }).strict().nullable().optional() }).strict()
+  .refine((r) => r.grupos.reduce((t, g) => t + g.cajas, 0) <= 500, { message: "Hasta 500 cajas", path: ["grupos"] })
+  .refine((r) => r.grupos.reduce((t, g) => t + g.cajas * g.unidadesPorCaja, 0) + (r.bulto?.unidades ?? 0) <= 1_000_000,
+    { message: "Demasiadas unidades", path: ["grupos"] });
 export const correccionCajaSchema = z.object({ operacionId, unidades: z.number().int().min(0).max(1_000_000) }).strict();
 
 // Panel del supervisor.

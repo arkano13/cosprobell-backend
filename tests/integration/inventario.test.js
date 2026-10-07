@@ -611,3 +611,51 @@ test("panel: registrar un código de barras", async (t) => {
   assert.deepEqual(bloqueados, ["7401"]);
   assert.equal((await enviar("/supervisor/codigos", headers, "POST", { codigo: "74\u000101", itemCode: "P1" })).status, 400);
 });
+
+test("editar el conteo de la grande: solo el supervisor, sobre un conteo sin cajas usadas", async (t) => {
+  const caja = (id, lote, vencimiento, unidades, extra = {}) => ({ id, codigo: `CJ-${String(id).padStart(6, "0")}`, itemCode: "P1", lote,
+    vencimiento: vencimiento ? new Date(`${vencimiento}T00:00:00Z`) : null, suelto: false, unidadesIniciales: unidades, unidades,
+    recibidaEn: new Date(), recibidaPor: "operador:Luis Pérez", ...extra });
+  const cuerpo = { grupos: [{ cajas: 2, unidadesPorCaja: 20, lote: "L1", vencimiento: "2027-03-31" },
+    { cajas: 1, unidadesPorCaja: 20, lote: "L3", vencimiento: "2028-01-31" }], bulto: null };
+  assert.equal((await enviar("/inventario/productos/P1/grande", conSesion(t, "operador"), "PUT", cuerpo)).status, 403);
+  t.mock.restoreAll();
+
+  // Contado con 3 cajas del L1 (60 unidades); SAP tiene 70, así que 10 están por ubicar.
+  const hecho = inventario(t, { sap: 70, grande: 60 });
+  const supervisor = conSesion(t, "supervisor");
+  let cajas = [caja(11, "L1", "2027-03-31", 20), caja(12, "L1", "2027-03-31", 20), caja(13, "L1", "2027-03-31", 20)];
+  t.mock.method(repo, "cajasDe", async () => cajas);
+  const fijadas = [];
+  t.mock.method(repo, "fijarUnidadesCaja", async (id, unidades) => fijadas.push([id, unidades]));
+
+  // Sin conteo previo en la grande no hay nada que editar.
+  const sinConteo = await enviar("/inventario/productos/P1/grande", supervisor, "PUT", cuerpo);
+  assert.equal((await sinConteo.json()).error.code, "SIN_CONTEO");
+  t.mock.method(repo, "contadoEn", async () => new Set(["grande"]));
+
+  // Una caja ya usada: se corrige desde el producto.
+  cajas = [caja(11, "L1", "2027-03-31", 20, { unidades: 15 })];
+  const usada = await enviar("/inventario/productos/P1/grande", supervisor, "PUT", cuerpo);
+  assert.equal((await usada.json()).error.code, "CONTEO_CON_MOVIMIENTOS");
+  assert.deepEqual([hecho.movimientos, fijadas], [[], []]);
+
+  // Eran 2 cajas del L1 (no 3) y faltaba una del L3: se anula la más nueva del L1 y se crea la del L3.
+  cajas = [caja(11, "L1", "2027-03-31", 20), caja(12, "L1", "2027-03-31", 20), caja(13, "L1", "2027-03-31", 20)];
+  const r = await enviar("/inventario/productos/P1/grande", supervisor, "PUT", cuerpo);
+  assert.equal(r.status, 200);
+  const { data } = await r.json();
+  assert.deepEqual([data.antes, data.unidades, data.anuladas, data.cajas.map((c) => [c.codigo, c.lote, c.vencimiento, c.unidades])],
+    [60, 60, ["CJ-000013"], [["CJ-000120", "L3", "2028-01-31", 20]]]);
+  assert.deepEqual(fijadas, [[13, 0]]);
+  assert.deepEqual(hecho.movimientos.map((m) => [m.tipo, m.cantidad, m.cajaId, m.observacion]),
+    [["correccion", -20, 13, "Edición del conteo: caja anulada"], ["conteo", 20, 120, "Edición del conteo"]]);
+  assert.deepEqual(hecho.adelantado, [], "el total no cambió");
+  assert.deepEqual(hecho.cuadres.map((c) => [c.bodega, c.accion, c.cantidad, c.primero]), [["grande", "edicion", 0, false]]);
+
+  // Agregar 30 más cuando SAP solo tiene 10 por ubicar: 20 quedan como recibidas antes que SAP.
+  const mas = await enviar("/inventario/productos/P1/grande", supervisor, "PUT",
+    { grupos: [...cuerpo.grupos, { cajas: 1, unidadesPorCaja: 30, lote: "L4", vencimiento: null }], bulto: null });
+  assert.equal(mas.status, 200);
+  assert.deepEqual(hecho.adelantado, [20]);
+});
