@@ -31,6 +31,8 @@ El backend corre en Railway como un servicio web, junto al servicio de PostgreSQ
 |---|---|
 | `BRIDGE_API_KEY` y `SAP_COMPANY_DB` | Puente con SAP. Sin ellas, `/integracion` responde 503 y el registro dice "Integración no disponible"; el resto funciona. |
 | `ETIQUETAS_APPS_AUTORIZADAS` | Nombres de las API keys que pueden confirmar etiquetas (por ejemplo `supervisor-etiquetas`). Sin ella, nadie confirma etiquetas. |
+| `ACTUALIZACIONES_GITHUB_TOKEN` | Actualización automática de la app de escritorio. Token *fine-grained* de GitHub con acceso solo al repositorio `cosprobell-bodega-escritorio` y permiso **Contents: Read-only** (cómo crearlo: README de la app, "Actualización automática"). El backend lo usa para traer las versiones de **Releases** y pasárselas a la app en `/actualizaciones`; nunca lo manda a la app. Sin él, `/actualizaciones` responde 503 y las apps siguen funcionando sin actualizarse. Vence: renovarlo antes de la fecha. |
+| `ACTUALIZACIONES_REPO` | Repositorio de la app (`dueño/nombre`). Por defecto `arkano13/cosprobell-bodega-escritorio`; cambiarlo solo si se mueve el repositorio. |
 
 ## Probar sin SAP
 
@@ -57,6 +59,7 @@ Para ingresar a la app hacen falta operadores con PIN y la clave de solo ingreso
 | El despliegue falla antes de arrancar | Error al aplicar una migración: ver el registro del paso previo al despliegue |
 | La app dice "No se pudo conectar con el servidor" | Dominio mal escrito o servicio detenido: probar `/health` en el navegador |
 | La app dice "La clave no es válida" | La clave se creó en otra base, o está desactivada (`activa = false` en `api_keys`) |
+| Las apps no se actualizan | En los registros, `ACTUALIZACIONES_SIN_CONFIGURAR` (falta el token), `ACTUALIZACIONES_NO_DISPONIBLES` con 401 (token vencido o mal copiado) o 404 (el token no tiene acceso al repositorio), o `ARCHIVO_NO_ENCONTRADO` (la última versión publicada no tiene `latest.yml`) |
 
 ## Seguridad
 

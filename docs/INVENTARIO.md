@@ -44,6 +44,7 @@ SAP (almacenes marcados) = grande + pequeña + preparado sin entregar + diferenc
 | Elegir de qué lotes (o de la pequeña) salió lo que SAP descontó | `POST /inventario/descuentos` | Operador o aplicación |
 | Cambiar el lote de un descuento ya hecho | `POST /inventario/descuentos/:id/reasignacion` | Supervisor |
 | Contar la pequeña | `PUT /inventario/productos/:itemCode/pequena` | Supervisor |
+| Editar el conteo de la grande (cómo queda todo lo de ese producto en la grande) | `PUT /inventario/productos/:itemCode/grande` | Supervisor |
 | Corregir las unidades de una caja | `PUT /inventario/cajas/:id/unidades` | Supervisor |
 | Registrar un código de barras que SAP no tiene (al contar o desde la ficha) | `POST /inventario/codigos` (o `POST /supervisor/codigos`) | Operador o aplicación |
 | Quitar un código registrado desde la app | `DELETE /supervisor/codigos/:id` | Supervisor |
@@ -66,6 +67,7 @@ Reglas:
 - **Contenido por bodega**: lo registrado en la bodega (grande: cajas por lote; pequeña: lotes) y lo que SAP tiene en el almacén asignado a esa bodega, incluidos los productos que SAP tiene ahí y la bodega no registró (`sin_registrar`). Trae `resumen` (productos, unidades y cajas de la bodega) y `existenciasSapAl`. Sin almacén asignado, `sap` es `null`.
 - **Almacén de cada bodega**: en `PUT /supervisor/almacenes`, `almacenGrande` y `almacenPequena` (opcionales) dicen qué almacén marcado es cada bodega; se guardan en la configuración `almacenesPorBodega`. Tienen que estar marcados y ser distintos; si no se envían quedan como estaban, y si se desmarca el almacén se quita la asignación. La comparación general con SAP sigue siendo sobre el total de los almacenes marcados.
 - **Lista de productos**: todo lo registrado en la grande o la pequeña y lo que SAP tiene en los almacenes de esta bodega, por nombre, con cuántos hay por filtro (`conteos`). Lo de SAP viene con la fecha en que se confirmaron por última vez las existencias, el fin del último recorrido completo o el último lote, lo más reciente (`existenciasSapAl`); el estado y la diferencia, solo con comparación disponible. Sin almacenes marcados, `sap` es `null`.
+- **Editar el conteo de la grande** (`{ grupos: [{ cajas, unidadesPorCaja, lote, vencimiento }], bulto }`, igual que recibir por grupos): el formulario dice cómo queda todo lo de ese producto en la grande, para cuando se cerró el conteo y faltaban lotes o una fecha estaba mal. Se agrupa por lote, vencimiento, unidades y si es bulto. En cada grupo se conservan las cajas más antiguas (sus etiquetas siguen valiendo), las que sobran quedan en 0 con un movimiento `correccion` ("Edición del conteo: caja anulada") y las que faltan se crean con etiqueta nueva (movimiento `conteo`). Cambiar el lote o la fecha de un grupo anula esas cajas y crea otras. La respuesta trae `cajas` (nuevas, para imprimir) y `anuladas` (códigos cuyas etiquetas hay que retirar). Exige que el producto ya esté contado en la grande (`409 SIN_CONTEO`) y que ninguna caja se haya usado (`409 CONTEO_CON_MOVIMIENTOS`: una caja abierta o movida se corrige desde el producto). Lo que pasa de lo que SAP tiene por ubicar queda como recibido antes que SAP; si baja el total, baja primero eso. Deja una foto de cuadre con `accion: "edicion"`.
 - **Conteo y corrección** dejan el número contado. La diferencia con SAP solo se muestra cuando la comparación está disponible.
 - Cada cambio de un producto toma su candado (`pg_advisory_xact_lock`): dos operaciones del mismo producto no se pisan. La base impide cajas con unidades negativas.
 - **Movimientos**: cada operación queda registrada con tipo, bodega, cantidad, caja, lote, quién y cuándo, agrupada por operación.
@@ -120,7 +122,7 @@ Las existencias de SAP se pisan en cada recorrido del puente, así que después 
 | Columna | Qué es |
 |---|---|
 | `itemCode`, `bodega`, `almacen` | Producto, bodega (`grande` o `pequena`) y el almacén de SAP asignado a esa bodega |
-| `accion`, `cantidad` | `recepcion`, `conteo` o `no_hay`, y las unidades de esa acción |
+| `accion`, `cantidad` | `recepcion`, `conteo`, `no_hay` o `edicion` (el supervisor editó el conteo de la grande), y las unidades de esa acción (en una edición, cuánto cambió el total) |
 | `registrado` | Lo que quedó en la bodega después de la acción |
 | `sap`, `sapAl` | Lo que SAP tenía en ese almacén en ese momento y de cuándo son esos datos. Vacío si la bodega no tenía almacén asignado o no había existencias de SAP |
 | `sinEntrega` | Solo en la pequeña: lo preparado y sin entregar, que ya salió pero SAP todavía cuenta |
@@ -134,6 +136,16 @@ La app no muestra esta tabla: se consulta directo en la base (por ejemplo, con e
 SELECT "itemCode", bodega, sap, registrado, diferencia, "sapAl", "hechoPor", "creadoEn",
        CASE WHEN diferencia = 0 THEN 'cuadró' WHEN diferencia > 0 THEN 'sobra' ELSE 'falta' END AS resultado
 FROM inventario_cuadres WHERE primero ORDER BY "creadoEn";
+```
+
+Si el supervisor editó el conteo (por ejemplo, porque se cerró antes de contar todos los lotes), el resultado final es la última foto entre el primer conteo y sus ediciones:
+
+```sql
+SELECT DISTINCT ON (c."itemCode", c.bodega) c."itemCode", c.bodega, c.sap, c.registrado, c.diferencia, c.accion, c."creadoEn",
+       CASE WHEN c.diferencia = 0 THEN 'cuadró' WHEN c.diferencia > 0 THEN 'sobra' ELSE 'falta' END AS resultado
+FROM inventario_cuadres c
+WHERE c.primero OR c.accion = 'edicion'
+ORDER BY c."itemCode", c.bodega, c."creadoEn" DESC;
 ```
 
 Lo contado antes de que existiera la tabla no tiene foto. Las existencias de SAP pueden tener hasta la antigüedad de su frecuencia en el puente (`sapAl` lo dice): una venta o un traspaso hecho mientras se contaba aparece como diferencia.

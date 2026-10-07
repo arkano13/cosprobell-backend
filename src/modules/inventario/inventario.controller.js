@@ -29,3 +29,4 @@ export const registrarCodigo = manejar((req) => registrar(req.body, quien(req)))
 export const reasignar = manejar((req) => s.reasignarDescuento(req.params.id, req.body, quien(req)));
 export const contar = manejar((req) => s.contarPequena(req.params.itemCode, req.body, quien(req)));
 export const corregir = manejar((req) => s.corregirCaja(req.params.id, req.body, quien(req)));
+export const editarGrande = manejar((req) => s.editarConteoGrande(req.params.itemCode, req.body, quien(req)));

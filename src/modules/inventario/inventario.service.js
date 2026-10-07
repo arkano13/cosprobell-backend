@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import { AppError } from "../../shared/errors/AppError.js";
 import { inventarioRepository as repo } from "./inventario.repository.js";
 import { retirarLotes, contarLotes } from "./inventario.lotes.js";
-import { clasificar, codigoCaja, porPasar, repartirEnCajas, repartirTraspaso, lotesDeTraspaso, cajaParaUsarAntes, textoAsignacion } from "./inventario.calculo.js";
+import { clasificar, codigoCaja, porPasar, repartirEnCajas, repartirTraspaso, lotesDeTraspaso, cajaParaUsarAntes, textoAsignacion,
+  editarCajas } from "./inventario.calculo.js";
 
 const OPCION_FILTRAR_PEDIDOS = "pedidosSoloDeEstaBodega";
 const OPCION_ALMACENES_POR_BODEGA = "almacenesPorBodega";
@@ -261,6 +262,18 @@ function piezasRecepcion(entrada) {
   return b ? [...piezas, { unidades: b.unidades, lote: b.lote ?? null, vencimiento: b.vencimiento ?? null, suelto: true }] : piezas;
 }
 
+// Cajas nuevas de la grande, cada una con su código (CJ-000123) para la etiqueta.
+async function crearCajas(itemCode, piezas, aplicacion, tx) {
+  if (!piezas.length) return [];
+  const ids = await repo.reservarIdsCajas(piezas.length, tx);
+  const ahora = new Date();
+  const creadas = ids.map(({ id }, i) => ({ id, codigo: codigoCaja(id), itemCode, lote: piezas[i].lote, suelto: piezas[i].suelto,
+    vencimiento: piezas[i].vencimiento ? new Date(`${piezas[i].vencimiento}T00:00:00.000Z`) : null,
+    unidadesIniciales: piezas[i].unidades, unidades: piezas[i].unidades, recibidaEn: ahora, recibidaPor: aplicacion }));
+  await repo.crearCajas(creadas, tx);
+  return creadas;
+}
+
 export async function recibir(entrada, { aplicacion }) {
   const { itemCode, modo, lote = null, vencimiento = null, adelantar = false } = entrada;
   const destino = modo === "suelto" ? entrada.destino : modo === "lotes" ? "pequena" : "grande";
@@ -283,12 +296,7 @@ export async function recibir(entrada, { aplicacion }) {
     const g = randomUUID();
     let creadas = [];
     if (destino === "grande") {
-      const ids = await repo.reservarIdsCajas(piezas.length, tx);
-      const ahora = new Date();
-      creadas = ids.map(({ id }, i) => ({ id, codigo: codigoCaja(id), itemCode, lote: piezas[i].lote, suelto: piezas[i].suelto,
-        vencimiento: piezas[i].vencimiento ? new Date(`${piezas[i].vencimiento}T00:00:00.000Z`) : null,
-        unidadesIniciales: piezas[i].unidades, unidades: piezas[i].unidades, recibidaEn: ahora, recibidaPor: aplicacion }));
-      await repo.crearCajas(creadas, tx);
+      creadas = await crearCajas(itemCode, piezas, aplicacion, tx);
       await repo.registrarMovimientos(creadas.map((c) => ({ grupo: g, tipo: "recepcion", itemCode, bodega: "grande", cantidad: c.unidades,
         cajaId: c.id, lote: c.lote, hechoPor: aplicacion, observacion: excede > 0 ? "Recibido antes que SAP" : null })), tx);
     } else {
@@ -479,6 +487,44 @@ export async function corregirCaja(id, entrada, { aplicacion }) {
     }
     return { data: vistaCaja({ ...actual, unidades }) };
   }, { operacionId: entrada.operacionId, tipo: "corregirCaja", entrada, aplicacion, id });
+}
+
+// Editar el conteo de la grande (supervisor): el formulario dice cómo queda todo lo de ese producto en la grande. Se
+// conservan las cajas que coinciden (sus etiquetas siguen valiendo), las que sobran quedan en 0 con una corrección y las
+// que faltan se crean con etiqueta nueva. Solo si ninguna caja se usó todavía: una caja abierta o movida se corrige
+// desde el producto. Lo que pasa de lo que SAP tiene por ubicar queda como recibido antes que SAP, igual que al contar.
+export async function editarConteoGrande(itemCode, entrada, { aplicacion }) {
+  const deseadas = piezasRecepcion({ ...entrada, modo: "grupos" });
+  const despues = deseadas.reduce((t, p) => t + p.unidades, 0);
+  return repo.conProducto(itemCode, async (tx) => {
+    const estado = await estadoDe(itemCode, tx);
+    if (await esPrimero(itemCode, "grande", tx)) throw falla("SIN_CONTEO", 409,
+      "Este producto todavía no se contó en la grande: contalo primero.");
+    const existentes = await repo.cajasDe(itemCode, {}, tx);
+    if (existentes.some((c) => c.unidades !== c.unidadesIniciales)) throw falla("CONTEO_CON_MOVIMIENTOS", 409,
+      "Ya se sacaron unidades de alguna caja de este producto: corregí esa caja desde el producto.");
+    const antes = existentes.reduce((t, c) => t + c.unidades, 0);
+    const { anular, crear } = editarCajas(existentes, deseadas);
+    const g = randomUUID();
+    for (const c of anular) await repo.fijarUnidadesCaja(c.id, 0, tx);
+    const creadas = await crearCajas(itemCode, crear, aplicacion, tx);
+    await repo.registrarMovimientos([
+      ...anular.map((c) => ({ grupo: g, tipo: "correccion", itemCode, bodega: "grande", cantidad: -c.unidades, cajaId: c.id,
+        lote: c.lote, hechoPor: aplicacion, observacion: "Edición del conteo: caja anulada" })),
+      ...creadas.map((c) => ({ grupo: g, tipo: "conteo", itemCode, bodega: "grande", cantidad: c.unidades, cajaId: c.id,
+        lote: c.lote, hechoPor: aplicacion, observacion: "Edición del conteo" })),
+    ], tx);
+    const delta = despues - antes;
+    const adelantado = (await repo.estadoProducto(itemCode, tx))?.adelantado ?? 0;
+    if (delta > 0) {
+      const porUbicar = (await repo.comparacionDisponible(tx)) ? Math.max(0, estado.diferencia ?? 0) : delta;
+      if (delta > porUbicar) await repo.sumarAdelantado(itemCode, delta - porUbicar, tx);
+    } else if (delta < 0 && adelantado > 0) {
+      await repo.sumarAdelantado(itemCode, -Math.min(adelantado, -delta), tx);
+    }
+    await fotoCuadre(tx, { itemCode, bodega: "grande", accion: "edicion", cantidad: delta, primero: false, hechoPor: aplicacion });
+    return { data: { itemCode, antes, unidades: despues, cajas: creadas.map(vistaCaja), anuladas: anular.map((c) => c.codigo) } };
+  }, { operacionId: entrada.operacionId, tipo: "editarConteoGrande", entrada, aplicacion, itemCode });
 }
 
 // Al finalizar: exigir existencias físicas registradas y descontar los lotes elegidos en la misma transacción.

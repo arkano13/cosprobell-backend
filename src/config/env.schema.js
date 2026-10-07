@@ -38,6 +38,10 @@ const envSchema = z.object({
   ETIQUETAS_APPS_AUTORIZADAS: z.string().optional(),
   INVENTARIO_SAP_MAX_AGE_MINUTES: z.string().regex(/^\d+$/).default("30")
     .pipe(z.coerce.number().int().min(5).max(240)),
+  // Actualizaciones de la app de escritorio: token de GitHub de solo lectura del repositorio de la app (privado).
+  // Vacío cuenta como no configurado (no impide arrancar).
+  ACTUALIZACIONES_GITHUB_TOKEN: z.string().trim().optional().transform((v) => v || undefined),
+  ACTUALIZACIONES_REPO: z.string().trim().regex(/^[\w.-]+\/[\w.-]+$/).default("arkano13/cosprobell-bodega-escritorio"),
   INVENTARIO_SAP_WAREHOUSES: z.string().optional().transform(v => v === undefined ? [] : v.split(",").map(s => s.trim()))
     .refine(v => v.every(s => /^[A-Za-z0-9_-]{1,8}$/.test(s)) && new Set(v).size === v.length),
 });
@@ -68,6 +72,8 @@ export function parseEnv(variables) {
     bridgeApiKey: datos.BRIDGE_API_KEY,
     sapCompanyDb: datos.SAP_COMPANY_DB,
     appJwtSecret: datos.APP_JWT_SECRET,
+    actualizacionesToken: datos.ACTUALIZACIONES_GITHUB_TOKEN,
+    actualizacionesRepo: datos.ACTUALIZACIONES_REPO,
     inventarioSapMaxAgeMinutes: datos.INVENTARIO_SAP_MAX_AGE_MINUTES,
     inventarioSapWarehouses: Object.freeze(datos.INVENTARIO_SAP_WAREHOUSES),
     etiquetasAppsAutorizadas: Object.freeze((datos.ETIQUETAS_APPS_AUTORIZADAS ?? "")

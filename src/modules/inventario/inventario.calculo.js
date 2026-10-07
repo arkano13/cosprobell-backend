@@ -88,6 +88,27 @@ export function lotesDeTraspaso(partes) {
   return [...lotes.values()];
 }
 
+// Edición del conteo de la grande: qué cajas se anulan y cuáles se crean para que lo registrado quede como dice el
+// formulario. Se agrupan por lote, vencimiento, unidades y si es bulto. Dentro de cada grupo se conservan las cajas
+// más antiguas, porque sus etiquetas ya están puestas. existentes: cajas sin usar ({ id, lote, vencimiento, unidades,
+// suelto }); deseadas: piezas ({ lote, vencimiento "AAAA-MM-DD", unidades, suelto }).
+export function editarCajas(existentes, deseadas) {
+  const dia = (v) => (v ? (v instanceof Date ? v.toISOString() : String(v)).slice(0, 10) : null);
+  const clave = (c) => JSON.stringify([c.lote ?? null, dia(c.vencimiento), c.unidades, Boolean(c.suelto)]);
+  const porClave = new Map();
+  for (const c of [...existentes].sort((a, b) => a.id - b.id)) {
+    if (!porClave.has(clave(c))) porClave.set(clave(c), []);
+    porClave.get(clave(c)).push(c);
+  }
+  const crear = [];
+  for (const p of deseadas) {
+    const libres = porClave.get(clave(p));
+    if (libres?.length) libres.shift(); else crear.push(p);
+  }
+  const anular = [...porClave.values()].flat().sort((a, b) => a.id - b.id);
+  return { anular, crear };
+}
+
 // Unidades a restar de las cajas de un lote: primero las abiertas (para no abrir otra), después las
 // cerradas en el orden en que se recibieron.
 export function repartirEnCajas(cajas, unidades) {
