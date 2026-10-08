@@ -33,13 +33,15 @@ export const descuentosQuerySchema = z.object({ antesDe: id.optional(), limit: l
 
 // En cajas: N cajas iguales a la grande, cada una con su etiqueta. Suelto: un bulto a la grande o unidades a la pequeña.
 // Grupos: varias filas de cajas iguales, cada una con su lote, y lo que sobra como un bulto; todo junto a la grande.
-const grupoCajas = z.object({ cajas: z.number().int().min(1).max(200), unidadesPorCaja: unidades, lote,
+// Límites de cajas: hasta 2000 por fila (un lote) y 3000 por vez.
+const MAX_CAJAS_FILA = 2000, MAX_CAJAS = 3000;
+const grupoCajas = z.object({ cajas: z.number().int().min(1).max(MAX_CAJAS_FILA), unidadesPorCaja: unidades, lote,
   vencimiento: vence.nullable().optional() }).strict();
 const totalRecepcion = (r) => (r.modo === "cajas" ? r.cajas * r.unidadesPorCaja : r.modo === "suelto" ? r.unidades
   : r.modo === "lotes" ? r.lotes.reduce((t, l) => t + l.unidades, 0)
     : r.grupos.reduce((t, g) => t + g.cajas * g.unidadesPorCaja, 0) + (r.bulto?.unidades ?? 0));
 export const recepcionSchema = z.discriminatedUnion("modo", [
-  z.object({ operacionId, modo: z.literal("cajas"), itemCode, cajas: z.number().int().min(1).max(200), unidadesPorCaja: unidades,
+  z.object({ operacionId, modo: z.literal("cajas"), itemCode, cajas: z.number().int().min(1).max(MAX_CAJAS_FILA), unidadesPorCaja: unidades,
     lote, vencimiento: vence.nullable().optional(), adelantar: z.boolean().default(false) }).strict(),
   z.object({ operacionId, modo: z.literal("suelto"), itemCode, unidades, destino: z.enum(["grande", "pequena"]),
     lote, vencimiento: vence.nullable().optional(), adelantar: z.boolean().default(false) }).strict(),
@@ -52,8 +54,8 @@ export const recepcionSchema = z.discriminatedUnion("modo", [
       .refine((filas) => new Set(filas.map((f) => JSON.stringify([f.lote ?? null, f.vencimiento ?? null]))).size === filas.length, "No repetir lotes"),
     adelantar: z.boolean().default(false) }).strict(),
 ]).refine((r) => totalRecepcion(r) <= 1_000_000, { message: "Demasiadas unidades en una sola recepción", path: ["unidadesPorCaja"] })
-  .refine((r) => r.modo !== "grupos" || r.grupos.reduce((t, g) => t + g.cajas, 0) <= 500,
-    { message: "Hasta 500 cajas en una sola recepción", path: ["grupos"] });
+  .refine((r) => r.modo !== "grupos" || r.grupos.reduce((t, g) => t + g.cajas, 0) <= MAX_CAJAS,
+    { message: `Hasta ${MAX_CAJAS} cajas en una sola recepción`, path: ["grupos"] });
 
 export const reposicionSchema = z.object({ operacionId, caja: cajaParamsSchema.shape.codigo, unidades }).strict();
 
@@ -73,7 +75,7 @@ export const descuentoSchema = z.object({ operacionId, itemCode, unidades, asign
 export const traspasoSchema = z.object({ operacionId, itemCode, unidades,
   lotes: z.array(z.object({ lote: z.string().trim().min(1).max(60).nullable(), unidades }).strict()).min(1).max(50)
     .refine((lista) => new Set(lista.map((l) => l.lote ?? "")).size === lista.length, "Cada lote va una sola vez").optional(),
-  cajas: z.array(z.object({ lote: z.string().trim().min(1).max(60).nullable(), vencimiento: vence.nullable() }).strict()).min(1).max(500).optional(),
+  cajas: z.array(z.object({ lote: z.string().trim().min(1).max(60).nullable(), vencimiento: vence.nullable() }).strict()).min(1).max(MAX_CAJAS).optional(),
 }).strict().refine((t) => !(t.lotes && t.cajas), { message: "Lotes o cajas, no los dos", path: ["cajas"] });
 export const reasignacionSchema = z.object({ operacionId, asignaciones }).strict();
 export const conteoSchema = z.object({ operacionId, unidades: z.number().int().min(0).max(1_000_000),
@@ -84,7 +86,7 @@ export const conteoSchema = z.object({ operacionId, unidades: z.number().int().m
 // queda en 0.
 export const edicionGrandeSchema = z.object({ operacionId, grupos: z.array(grupoCajas).max(50),
   bulto: z.object({ unidades, lote, vencimiento: vence.nullable().optional() }).strict().nullable().optional() }).strict()
-  .refine((r) => r.grupos.reduce((t, g) => t + g.cajas, 0) <= 500, { message: "Hasta 500 cajas", path: ["grupos"] })
+  .refine((r) => r.grupos.reduce((t, g) => t + g.cajas, 0) <= MAX_CAJAS, { message: `Hasta ${MAX_CAJAS} cajas`, path: ["grupos"] })
   .refine((r) => r.grupos.reduce((t, g) => t + g.cajas * g.unidadesPorCaja, 0) + (r.bulto?.unidades ?? 0) <= 1_000_000,
     { message: "Demasiadas unidades", path: ["grupos"] });
 export const correccionCajaSchema = z.object({ operacionId, unidades: z.number().int().min(0).max(1_000_000) }).strict();
