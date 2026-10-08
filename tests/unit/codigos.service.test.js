@@ -17,6 +17,7 @@ function base({ producto = { itemCode: "P1", itemName: "Shampoo" }, activos = []
       update: async ({ where, data }) => { ops.push(["actualizar", where.id, data]); return { ...activos[0], ...data }; },
     },
     confirmacionEtiquetaPicking: { upsert: async (q) => { ops.push(["confirmar", q]); } },
+    inventarioCodigoCaja: { findUnique: async () => null },
   };
   const repo = { conCodigoBloqueado: async (codigo, op) => { ops.push(["bloquear", codigo]); return op(tx); } };
   return { repo, ops };
@@ -66,4 +67,13 @@ test("sin unidad: el cargado desde la app se corrige; el de SAP no se toca", asy
   ({ repo, ops } = base({ activos: [{ id: 9, itemCode: "P1", codigo: "X", uomEntry: null, origen: "sap", producto: {} }] }));
   await assert.rejects(registrarCodigo({ codigo: "X", itemCode: "P1" }, quien, { repo }), { code: "UNIDAD_NO_DEFINIDA" });
   assert.ok(!ops.some((o) => o[0] === "actualizar" || o[0] === "confirmar"));
+});
+
+test("un código de caja no se registra como unidad: en un pedido contaría una unidad por caja", async () => {
+  const { repo } = base();
+  const tx = { producto: { findUnique: async () => ({ itemCode: "P1", itemName: "Shampoo" }), findFirst: async () => null },
+    productoCodigoBarras: { findMany: async () => [] },
+    inventarioCodigoCaja: { findUnique: async () => ({ codigo: "C1", itemCode: "P1", producto: { itemCode: "P1", itemName: "Shampoo" } }) } };
+  repo.conCodigoBloqueado = async (codigo, op) => op(tx);
+  await assert.rejects(registrarCodigo({ codigo: "C1", itemCode: "P1" }, quien, { repo }), { code: "ES_CODIGO_DE_CAJA" });
 });

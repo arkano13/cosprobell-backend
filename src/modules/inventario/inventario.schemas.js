@@ -68,10 +68,13 @@ const asignaciones = z.array(asignacion).min(1).max(50).refine((lista) => {
 
 export const descuentoSchema = z.object({ operacionId, itemCode, unidades, asignaciones }).strict();
 // Traspaso de la 01 a la 02 que SAP ya registró: cuántas unidades y, si no se acepta la sugerencia, de qué lotes.
+// cajas: las que se escanearon, una por caja entera, con el lote y la fecha que dice cada una. Sin cajas (o con lotes)
+// solo el supervisor.
 export const traspasoSchema = z.object({ operacionId, itemCode, unidades,
   lotes: z.array(z.object({ lote: z.string().trim().min(1).max(60).nullable(), unidades }).strict()).min(1).max(50)
     .refine((lista) => new Set(lista.map((l) => l.lote ?? "")).size === lista.length, "Cada lote va una sola vez").optional(),
-}).strict();
+  cajas: z.array(z.object({ lote: z.string().trim().min(1).max(60).nullable(), vencimiento: vence.nullable() }).strict()).min(1).max(500).optional(),
+}).strict().refine((t) => !(t.lotes && t.cajas), { message: "Lotes o cajas, no los dos", path: ["cajas"] });
 export const reasignacionSchema = z.object({ operacionId, asignaciones }).strict();
 export const conteoSchema = z.object({ operacionId, unidades: z.number().int().min(0).max(1_000_000),
   lotes: z.array(z.object({ lote, vencimiento: vence.nullable().optional(), unidades: z.number().int().min(0).max(1_000_000) }).strict())

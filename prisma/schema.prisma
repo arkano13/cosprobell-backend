@@ -104,6 +104,7 @@ model Producto {
   inventario    InventarioProducto?
   lotesPequena  InventarioPequenaLote[]
   cajas         InventarioCaja[]
+  codigosCaja   InventarioCodigoCaja[]
 
   @@map("productos")
 }
@@ -787,6 +788,21 @@ model InventarioCaja {
   @@index([itemCode])
   @@index([vencimiento])
   @@map("inventario_cajas")
+}
+
+// Código de barras impreso de fábrica en la caja del proveedor (distinto del de la unidad). Es el mismo para todas las
+// cajas de un producto: dice qué producto es, no el lote ni la fecha. Se registra al contar la 01 y se escanea al pasar
+// cajas a la 02. No sirve en los pedidos (ahí se escanea la unidad).
+model InventarioCodigoCaja {
+  id            Int      @id @default(autoincrement())
+  codigo        String   @unique
+  itemCode      String
+  producto      Producto @relation(fields: [itemCode], references: [itemCode])
+  registradoPor String?
+  creadoEn      DateTime @default(now())
+
+  @@index([itemCode])
+  @@map("inventario_codigos_caja")
 }
 
 // Cada cambio de unidades, con quién, cuándo y por qué. cantidad con signo: + entra, − sale.

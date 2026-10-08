@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clasificar, codigoCaja, porPasar, repartirTraspaso, lotesDeTraspaso, repartirEnCajas, cajaParaUsarAntes, textoAsignacion, editarCajas, MINUTOS_PARA_ESTABILIZAR } from "../../src/modules/inventario/inventario.calculo.js";
+import { clasificar, codigoCaja, porPasar, repartirTraspaso, lotesDeTraspaso, repartirEnCajas, cajaParaUsarAntes, textoAsignacion, editarCajas, elegirCajas, MINUTOS_PARA_ESTABILIZAR } from "../../src/modules/inventario/inventario.calculo.js";
 
 const ahora = Date.parse("2026-10-01T15:00:00Z");
 const hace = (minutos) => new Date(ahora - minutos * 60_000);
@@ -131,4 +131,17 @@ test("editar el conteo de la grande: conserva las cajas que coinciden, anula las
   // Sin cambios no se toca nada.
   assert.deepEqual(editarCajas(existentes, existentes.map((c) => ({ ...c, vencimiento: c.vencimiento?.toISOString().slice(0, 10) ?? null }))),
     { anular: [], crear: [] });
+});
+
+test("elegirCajas: una caja por escaneo, del lote y fecha que dice; primero las enteras", () => {
+  const cajas = [{ id: 1, lote: "L1", vencimiento: new Date("2027-01-31"), unidades: 10, unidadesIniciales: 24 },
+    { id: 2, lote: "L1", vencimiento: new Date("2027-01-31"), unidades: 24, unidadesIniciales: 24 },
+    { id: 3, lote: "L1", vencimiento: "2027-02-28", unidades: 24, unidadesIniciales: 24 },
+    { id: 4, lote: null, vencimiento: null, unidades: 12, unidadesIniciales: 12 },
+    { id: 5, lote: "L1", vencimiento: new Date("2027-01-31"), unidades: 0, unidadesIniciales: 24 }];
+  const ids = (escaneadas) => elegirCajas(cajas, escaneadas).map((c) => c?.id ?? null);
+  assert.deepEqual(ids([{ lote: "L1", vencimiento: "2027-01-31" }]), [2]);
+  assert.deepEqual(ids([{ lote: "L1", vencimiento: "2027-01-31" }, { lote: "L1", vencimiento: "2027-01-31" }]), [2, 1]);
+  assert.deepEqual(ids([{ lote: "L1", vencimiento: "2027-01-31" }, { lote: "L1", vencimiento: "2027-01-31" }, { lote: "L1", vencimiento: "2027-01-31" }]), [2, 1, null]);
+  assert.deepEqual(ids([{ lote: "L1", vencimiento: "2027-02-28" }, { lote: null, vencimiento: null }]), [3, 4]);
 });

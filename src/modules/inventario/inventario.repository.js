@@ -300,13 +300,16 @@ export const inventarioRepository = {
     const patron = `%${literal(buscar)}%`;
     return db.$queryRaw`
       SELECT p."itemCode", p."itemName",
-             COALESCE(ARRAY_AGG(DISTINCT c.codigo) FILTER (WHERE c.codigo IS NOT NULL), '{}') AS codigos
+             COALESCE(ARRAY_AGG(DISTINCT c.codigo) FILTER (WHERE c.codigo IS NOT NULL), '{}') AS codigos,
+             COALESCE((SELECT ARRAY_AGG(k.codigo ORDER BY k.id) FROM inventario_codigos_caja k WHERE k."itemCode" = p."itemCode"), '{}') AS "codigosCaja"
       FROM productos p
       LEFT JOIN productos_codigos_barras c ON c."itemCode" = p."itemCode" AND c."retiradoEnSap" = false
       WHERE p."itemCode" ILIKE ${patron} OR p."itemName" ILIKE ${patron}
          OR EXISTS (SELECT 1 FROM productos_codigos_barras b WHERE b."itemCode" = p."itemCode" AND b.codigo = ${buscar} AND b."retiradoEnSap" = false)
+         OR EXISTS (SELECT 1 FROM inventario_codigos_caja k WHERE k."itemCode" = p."itemCode" AND k.codigo = ${buscar})
       GROUP BY p."itemCode", p."itemName"
-      ORDER BY (p."itemCode" = ${buscar} OR EXISTS (SELECT 1 FROM productos_codigos_barras b WHERE b."itemCode" = p."itemCode" AND b.codigo = ${buscar})) DESC,
+      ORDER BY (p."itemCode" = ${buscar} OR EXISTS (SELECT 1 FROM productos_codigos_barras b WHERE b."itemCode" = p."itemCode" AND b.codigo = ${buscar})
+                OR EXISTS (SELECT 1 FROM inventario_codigos_caja k WHERE k."itemCode" = p."itemCode" AND k.codigo = ${buscar})) DESC,
                p."itemName"
       LIMIT ${limite}`;
   },
@@ -314,7 +317,8 @@ export const inventarioRepository = {
   producto(itemCode, db = prisma) {
     return db.producto.findUnique({ where: { itemCode }, select: { itemCode: true, itemName: true, quantityOnStock: true,
       sincronizadoEn: true, inventario: true,
-      codigosBarras: { where: { retiradoEnSap: false }, select: { id: true, codigo: true, origen: true, registradoPor: true, confirmacionPicking: { select: { esUnidadIndividual: true } } }, orderBy: { id: "asc" } } } });
+      codigosBarras: { where: { retiradoEnSap: false }, select: { id: true, codigo: true, origen: true, registradoPor: true, confirmacionPicking: { select: { esUnidadIndividual: true } } }, orderBy: { id: "asc" } },
+      codigosCaja: { select: { id: true, codigo: true, registradoPor: true, creadoEn: true }, orderBy: { id: "asc" } } } });
   },
 
   cajasDe(itemCode, { conUnidades = true } = {}, db = prisma) {
