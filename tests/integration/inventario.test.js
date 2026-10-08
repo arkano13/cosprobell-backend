@@ -252,6 +252,17 @@ test("recibir en la 01 con un traspaso de SAP sin aceptar: vale lo que falta ubi
   assert.equal((await r.json()).data.adelantado, 0);
 });
 
+test("recibir: hasta 2000 cajas por lote y 3000 por vez (un lote de 265 cajas entra en una fila)", async (t) => {
+  const hecho = inventario(t, { sap: 100_000, activo: false });
+  const headers = conSesion(t);
+  const grupos = (...cajas) => ({ itemCode: "P1", modo: "grupos", grupos: cajas.map((n, i) => ({ cajas: n, unidadesPorCaja: 6, lote: `L${i}` })) });
+  const r = await enviar("/inventario/recepciones", headers, "POST", grupos(265));
+  assert.equal(r.status, 201);
+  assert.equal(hecho.cajas.length, 265);
+  assert.equal((await enviar("/inventario/recepciones", headers, "POST", grupos(2001))).status, 400);
+  assert.equal((await enviar("/inventario/recepciones", headers, "POST", grupos(2000, 1001))).status, 400);
+});
+
 test("recibir: datos inválidos se rechazan antes de tocar el inventario", async (t) => {
   const hecho = inventario(t, { sap: 100 });
   const headers = conSesion(t);
