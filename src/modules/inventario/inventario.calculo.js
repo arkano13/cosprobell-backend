@@ -109,6 +109,21 @@ export function editarCajas(existentes, deseadas) {
   return { anular, crear };
 }
 
+// Cajas escaneadas al pasar a la 02 (el código de la caja dice el producto; el lote y la fecha, lo impreso en la caja):
+// por cada una, una caja de la 01 con ese lote y vencimiento (mismo día). Primero las enteras, después la más antigua.
+// Devuelve una caja por escaneo, o null donde no queda ninguna. cajas: { id, lote, vencimiento, unidades, unidadesIniciales }.
+export function elegirCajas(cajas, escaneadas) {
+  const dia = (v) => (v ? (v instanceof Date ? v.toISOString() : String(v)).slice(0, 10) : null);
+  const libres = cajas.filter((c) => c.unidades > 0)
+    .sort((a, b) => Number(b.unidades === b.unidadesIniciales) - Number(a.unidades === a.unidadesIniciales) || a.id - b.id);
+  const usadas = new Set();
+  return escaneadas.map((e) => {
+    const caja = libres.find((c) => !usadas.has(c.id) && (c.lote ?? null) === (e.lote ?? null) && dia(c.vencimiento) === dia(e.vencimiento));
+    if (caja) usadas.add(caja.id);
+    return caja ?? null;
+  });
+}
+
 // Unidades a restar de las cajas de un lote: primero las abiertas (para no abrir otra), después las
 // cerradas en el orden en que se recibieron.
 export function repartirEnCajas(cajas, unidades) {

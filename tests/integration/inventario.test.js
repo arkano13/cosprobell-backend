@@ -510,7 +510,8 @@ test("traspasos de la 01 a la 02: SAP ya los registró y la bodega acepta de qu�
     { id: 4, codigo: "CJ-000004", lote: "L2", vencimiento: new Date("2027-06-30"), unidades: 24, unidadesIniciales: 24 },
     { id: 5, codigo: "CJ-000005", lote: "L2", vencimiento: new Date("2027-06-30"), unidades: 24, unidadesIniciales: 24 }];
   const hecho = inventario(t, { sap: 126, grande: 120, pequena: 6 });
-  const headers = conSesion(t);
+  // Aceptar sin escanear (por lote): solo el supervisor. El escaneo de cajas se prueba aparte.
+  const headers = conSesion(t, "supervisor");
   t.mock.method(repo, "almacenesDeEstaBodega", async () => ["01", "02"]);
   t.mock.method(repo, "opcion", async () => ({ grande: "01", pequena: "02" }));
   t.mock.method(repo, "resumenBodegas", async () => ({ grande: { cajas: 5 }, pequena: { unidades: 6 } }));
@@ -611,6 +612,65 @@ test("recibir por lotes a la pequeña: varios lotes en una sola operación", asy
   assert.equal(repetido.status, 400);
 });
 
+test("traspaso escaneando cajas: el operador escanea, cada caja es una entera del lote que dice", async (t) => {
+  const cajas = [{ id: 1, codigo: "CJ-000001", lote: "L2", vencimiento: new Date("2027-06-30"), unidades: 24, unidadesIniciales: 24 },
+    { id: 2, codigo: "CJ-000002", lote: "L1", vencimiento: new Date("2027-01-31"), unidades: 24, unidadesIniciales: 24 },
+    { id: 3, codigo: "CJ-000003", lote: "L1", vencimiento: new Date("2027-01-31"), unidades: 10, unidadesIniciales: 24 },
+    { id: 4, codigo: "CJ-000004", lote: "L1", vencimiento: new Date("2027-01-31"), unidades: 24, unidadesIniciales: 24 }];
+  const hecho = inventario(t, { sap: 130, grande: 82, pequena: 48 });
+  const operador = conSesion(t, "operador");
+  t.mock.method(repo, "almacenesDeEstaBodega", async () => ["01", "02"]);
+  t.mock.method(repo, "opcion", async () => ({ grande: "01", pequena: "02" }));
+  t.mock.method(repo, "pases", async () => [{ itemCode: "P1", itemName: "Shampoo", sapGrande: 34, sapPequena: 96, grande: 82, cajas: 4, pequena: 48, sinEntrega: 0 }]);
+  t.mock.method(repo, "cajasDeProductoBloqueadas", async () => cajas.map((c) => ({ ...c })));
+  const pasar = (cuerpo) => enviar("/inventario/traspasos", operador, "POST", { itemCode: "P1", unidades: 48, ...cuerpo });
+  // Sin escanear, el operador no puede.
+  const sinEscanear = await pasar({ lotes: [{ lote: "L1", unidades: 48 }] });
+  assert.deepEqual([sinEscanear.status, (await sinEscanear.json()).error.code], [403, "TRASPASO_SIN_ESCANEAR"]);
+  assert.equal((await pasar({})).status, 403);
+  // Una sola caja (24) no es lo que pasó SAP (48): solo cajas enteras.
+  const corta = await pasar({ cajas: [{ lote: "L1", vencimiento: "2027-01-31" }] });
+  assert.equal((await corta.json()).error.code, "NO_CUADRA_CON_CAJAS");
+  // Un lote que no está en la 01.
+  const otro = await pasar({ cajas: [{ lote: "L9", vencimiento: "2027-01-31" }, { lote: "L1", vencimiento: "2027-01-31" }] });
+  const { error } = await otro.json();
+  assert.deepEqual([error.code, error.message], ["CAJA_NO_DISPONIBLE", "En la 01 no hay otra caja del lote L9 que venza 01/2027. Avisale al supervisor."]);
+  // Una del L1 y una del L2 (vence después): se acepta. Del L1 toma la entera más antigua, no la abierta.
+  const r = await pasar({ cajas: [{ lote: "L1", vencimiento: "2027-01-31" }, { lote: "L2", vencimiento: "2027-06-30" }] });
+  assert.equal(r.status, 201);
+  const { data } = await r.json();
+  assert.deepEqual(data.cajas.map((c) => [c.codigo, c.unidades, c.entera]), [["CJ-000002", 24, true], ["CJ-000001", 24, true]]);
+  assert.deepEqual(hecho.cajaCambios, [[2, -24], [1, -24]]);
+  assert.deepEqual(hecho.pequena, [48]);
+});
+
+test("código de barras de la caja: se registra al contar (operador) y aparece en la ficha", async (t) => {
+  const headers = conSesion(t, "operador");
+  const creados = [];
+  let deUnidad = null, existente = null;
+  t.mock.method(codigosRepository, "conCodigoBloqueado", async (codigo, operacion) => operacion({
+    producto: { findUnique: async () => ({ itemCode: "P1", itemName: "Shampoo" }), findFirst: async () => null },
+    productoCodigoBarras: { findFirst: async () => deUnidad },
+    inventarioCodigoCaja: { findUnique: async () => existente, create: async ({ data }) => { creados.push(data); return { id: 9, ...data }; } },
+  }));
+  const registrar = (codigo) => pedir("/inventario/codigos-caja", headers, { method: "POST", body: JSON.stringify({ codigo, itemCode: "P1" }) });
+  const r = await registrar("17401234567893");
+  assert.equal(r.status, 200);
+  assert.deepEqual((await r.json()).data, { id: 9, codigo: "17401234567893", itemCode: "P1", itemName: "Shampoo", nuevo: true });
+  assert.deepEqual(creados, [{ codigo: "17401234567893", itemCode: "P1", registradoPor: "operador:Luis Pérez" }]);
+  // El de la unidad no sirve como código de caja.
+  deUnidad = { producto: { itemCode: "P1", itemName: "Shampoo" } };
+  const unidad = await registrar("7401234567890");
+  assert.deepEqual([unidad.status, (await unidad.json()).error.code], [409, "ES_CODIGO_DE_UNIDAD"]);
+  // La caja de otro producto, tampoco; la del mismo producto no se duplica.
+  deUnidad = null;
+  existente = { id: 4, codigo: "X", itemCode: "P2", producto: { itemCode: "P2", itemName: "Crema" } };
+  assert.equal((await (await registrar("X")).json()).error.code, "CODIGO_EN_USO");
+  existente = { id: 4, codigo: "X", itemCode: "P1", producto: { itemCode: "P1", itemName: "Shampoo" } };
+  assert.equal((await (await registrar("X")).json()).data.nuevo, false);
+  assert.equal(creados.length, 1);
+});
+
 test("registrar un código de barras al contar: también un operador, y queda quién lo registró", async (t) => {
   const headers = conSesion(t, "operador");
   const registrados = [];
@@ -618,6 +678,7 @@ test("registrar un código de barras al contar: también un operador, y queda qu
     producto: { findUnique: async () => ({ itemCode: "P1", itemName: "Shampoo" }), findFirst: async () => null },
     productoCodigoBarras: { findMany: async () => [], create: async ({ data }) => { registrados.push(data); return { id: 77, ...data }; } },
     confirmacionEtiquetaPicking: { upsert: async () => {} },
+    inventarioCodigoCaja: { findUnique: async () => null },
   }));
   const r = await pedir("/inventario/codigos", headers, { method: "POST", body: JSON.stringify({ codigo: "7401", itemCode: "P1" }) });
   assert.equal(r.status, 200);

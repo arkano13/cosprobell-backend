@@ -5,7 +5,7 @@ import { AppError } from "../../shared/errors/AppError.js";
 import { inventarioRepository as repo } from "./inventario.repository.js";
 import { retirarLotes, contarLotes } from "./inventario.lotes.js";
 import { clasificar, codigoCaja, porPasar, repartirEnCajas, repartirTraspaso, lotesDeTraspaso, cajaParaUsarAntes, textoAsignacion,
-  editarCajas } from "./inventario.calculo.js";
+  editarCajas, elegirCajas } from "./inventario.calculo.js";
 
 const OPCION_FILTRAR_PEDIDOS = "pedidosSoloDeEstaBodega";
 const OPCION_ALMACENES_POR_BODEGA = "almacenesPorBodega";
@@ -113,6 +113,7 @@ export async function consultarProducto(itemCode) {
     pequena: producto.inventario?.pequena ?? 0, enInventario: Boolean(producto.inventario),
     codigos: producto.codigosBarras.map((c) => ({ id: c.id, codigo: c.codigo, origen: c.origen, confirmado: c.confirmacionPicking?.esUnidadIndividual === true,
       registradoPor: c.registradoPor?.replace(/^operador:/, "") ?? null })),
+    codigosCaja: (producto.codigosCaja ?? []).map((c) => ({ id: c.id, codigo: c.codigo, registradoPor: c.registradoPor?.replace(/^operador:/, "") ?? null })),
     lotes: [...lotes.values()], lotesPequena, movimientos, documentos,
     sugerencia: ultima ? { unidadesPorCaja: ultima.unidadesIniciales } : null,
     bodegas: nombres, sapPorBodega: { grande: sapDe("grande"), pequena: sapDe("pequena") },
@@ -406,8 +407,9 @@ export async function descontar(entrada, { aplicacion }) {
 // SAP ya registró el traspaso de la 01 a la 02 (sin lotes ni cajas): la bodega acepta de qué lotes salió (la
 // sugerencia o los que elija) y se pasa de las cajas de la grande a la pequeña, con su lote y vencimiento. Hay que
 // pasar justo lo que SAP traspasó.
-export async function traspasar(entrada, { aplicacion }) {
-  const { itemCode, unidades, lotes } = entrada;
+export async function traspasar(entrada, { aplicacion, supervisor = true }) {
+  const { itemCode, unidades, lotes, cajas: escaneadas } = entrada;
+  if (!escaneadas && !supervisor) throw falla("TRASPASO_SIN_ESCANEAR", 403, "Escaneá las cajas que pasás: sin escanear lo acepta solo el supervisor");
   if (lotes && sumar(lotes) !== unidades) throw falla("ASIGNACION_INCOMPLETA", 400, `Hay que elegir lotes por ${numero(unidades)} unidades en total`);
   return repo.conProducto(itemCode, async (tx) => {
     await exigirAlmacenes();
@@ -417,7 +419,7 @@ export async function traspasar(entrada, { aplicacion }) {
     if (pendiente !== unidades) throw falla("CANTIDAD_CAMBIO", 409, pendiente === 0 ? "Ya no hay nada por pasar de este producto"
       : `Ahora SAP tiene ${numero(pendiente)} por pasar (antes ${numero(unidades)}). Revisá y volvé a intentar.`);
     const cajas = await repo.cajasDeProductoBloqueadas(itemCode, tx);
-    const partes = lotes
+    const partes = escaneadas ? cajasEscaneadas(cajas, escaneadas, unidades) : lotes
       ? lotes.flatMap((l) => repartirTraspaso(cajas.filter((c) => (c.lote ?? null) === l.lote), l.unidades, { lote: l.lote }))
       : repartirTraspaso(cajas, unidades);
     await repo.activar(itemCode, tx);
@@ -436,6 +438,20 @@ export async function traspasar(entrada, { aplicacion }) {
       lotes: lotesDeTraspaso(partes).map((l) => ({ ...l, vencimiento: fechaIso(l.vencimiento) })),
       cajas: partes.map((p) => ({ codigo: p.codigo, lote: p.lote, unidades: p.unidades, entera: p.entera })) } };
   }, { operacionId: entrada.operacionId, tipo: "traspasar", entrada, aplicacion, itemCode });
+}
+
+// Cajas escaneadas al pasar a la 02: cada una es una caja entera de la 01 con ese lote y fecha (ver elegirCajas).
+function cajasEscaneadas(cajas, escaneadas, unidades) {
+  const elegidas = elegirCajas(cajas, escaneadas);
+  const falta = elegidas.findIndex((c) => !c);
+  if (falta >= 0) {
+    const e = escaneadas[falta];
+    throw falla("CAJA_NO_DISPONIBLE", 409, `En la 01 no hay otra caja del lote ${e.lote ?? "sin lote"}${e.vencimiento ? ` que venza ${e.vencimiento.slice(5, 7)}/${e.vencimiento.slice(0, 4)}` : ""}. Avisale al supervisor.`);
+  }
+  const total = elegidas.reduce((t, c) => t + c.unidades, 0);
+  if (total !== unidades) throw falla("NO_CUADRA_CON_CAJAS", 409,
+    `Las cajas escaneadas suman ${numero(total)} unidades y SAP pasó ${numero(unidades)}. Solo se pasan cajas enteras: avisale al supervisor.`);
+  return elegidas.map((c) => ({ cajaId: c.id, codigo: c.codigo, lote: c.lote ?? null, vencimiento: c.vencimiento ?? null, unidades: c.unidades, entera: true }));
 }
 
 // "Cambiar lote": devuelve lo restado a sus cajas (o a la pequeña) y lo resta según la nueva elección.

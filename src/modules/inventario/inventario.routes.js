@@ -27,6 +27,7 @@ router.post("/reposiciones", validate({ body: v.reposicionSchema }), c.reponer);
 router.post("/descuentos", validate({ body: v.descuentoSchema }), c.descontar);
 router.post("/traspasos", validate({ body: v.traspasoSchema }), c.traspasar);
 router.post("/codigos", validate({ body: v.registroCodigoSchema }), c.registrarCodigo);
+router.post("/codigos-caja", validate({ body: v.registroCodigoSchema }), c.registrarCodigoCaja);
 router.post("/descuentos/:id/reasignacion", soloSupervisor, validate({ params: v.idParamsSchema, body: v.reasignacionSchema }), c.reasignar);
 router.put("/productos/:itemCode/pequena", soloSupervisor, validate({ params: v.itemCodeParamsSchema, body: v.conteoSchema }), c.contar);
 router.put("/productos/:itemCode/grande", soloSupervisor, validate({ params: v.itemCodeParamsSchema, body: v.edicionGrandeSchema }), c.editarGrande);

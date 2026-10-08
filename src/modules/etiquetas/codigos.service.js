@@ -8,6 +8,9 @@ import { UNIDAD_MANUAL, unidadConocida } from "../picking/picking.cantidades.js"
 const enUso = (otro) => new AppError({ code: "CODIGO_EN_USO", statusCode: 409,
   message: `Ese código ya está registrado para ${otro.itemName} (${otro.itemCode})` });
 
+const esDeCaja = (p) => new AppError({ code: "ES_CODIGO_DE_CAJA", statusCode: 409,
+  message: `Ese es el código de la caja de ${p.itemName} (${p.itemCode}), no el de la unidad` });
+
 export const codigosRepository = {
   // Un registro a la vez por código: dos personas no pueden asignarlo a productos distintos.
   conCodigoBloqueado(codigo, operacion) {
@@ -31,6 +34,9 @@ export async function registrarCodigo({ codigo, itemCode }, { aplicacion }, { re
     if (deOtro) throw enUso(deOtro.producto);
     const fichaDeOtro = await tx.producto.findFirst({ where: { barCode: codigo, itemCode: { not: itemCode } }, select: { itemCode: true, itemName: true } });
     if (fichaDeOtro) throw enUso(fichaDeOtro);
+    // Un código de caja no sirve como unidad: en un pedido contaría una unidad por cada caja.
+    const deCaja = await tx.inventarioCodigoCaja.findUnique({ where: { codigo }, include: { producto: { select: { itemCode: true, itemName: true } } } });
+    if (deCaja) throw esDeCaja(deCaja.producto);
 
     let fila = activos[0] ?? null;
     const nuevo = !fila;
@@ -64,4 +70,30 @@ export async function quitarCodigo(id, { repo = codigosRepository } = {}) {
     await tx.productoCodigoBarras.delete({ where: { id } });
     return { data: { id: actual.id, codigo: actual.codigo, itemCode: actual.itemCode } };
   });
+}
+
+// Código de barras de la caja del proveedor (ver InventarioCodigoCaja): se registra al contar la 01 y se escanea al
+// pasar cajas a la 02. No puede ser el código de una unidad (de este u otro producto) ni la caja de otro producto.
+export async function registrarCodigoCaja({ codigo, itemCode }, { aplicacion }, { repo = codigosRepository } = {}) {
+  return repo.conCodigoBloqueado(codigo, async (tx) => {
+    const producto = await tx.producto.findUnique({ where: { itemCode }, select: { itemCode: true, itemName: true } });
+    if (!producto) throw new AppError({ code: "PRODUCTO_NO_ENCONTRADO", message: "Producto no encontrado", statusCode: 404 });
+    const deUnidad = await tx.productoCodigoBarras.findFirst({ where: { codigo, retiradoEnSap: false },
+      include: { producto: { select: { itemCode: true, itemName: true } } }, orderBy: { id: "asc" } })
+      ?? await tx.producto.findFirst({ where: { barCode: codigo }, select: { itemCode: true, itemName: true } }).then((p) => (p ? { producto: p } : null));
+    if (deUnidad) throw new AppError({ code: "ES_CODIGO_DE_UNIDAD", statusCode: 409,
+      message: `Ese es el código de la unidad de ${deUnidad.producto.itemName} (${deUnidad.producto.itemCode}): escaneá el de la caja` });
+    const actual = await tx.inventarioCodigoCaja.findUnique({ where: { codigo }, include: { producto: { select: { itemCode: true, itemName: true } } } });
+    if (actual && actual.itemCode !== itemCode) throw new AppError({ code: "CODIGO_EN_USO", statusCode: 409,
+      message: `Ese código ya es de la caja de ${actual.producto.itemName} (${actual.producto.itemCode})` });
+    const fila = actual ?? await tx.inventarioCodigoCaja.create({ data: { codigo, itemCode, registradoPor: aplicacion } });
+    return { data: { id: fila.id, codigo: fila.codigo, itemCode: producto.itemCode, itemName: producto.itemName, nuevo: !actual } };
+  });
+}
+
+export async function quitarCodigoCaja(id) {
+  const fila = await prisma.inventarioCodigoCaja.findUnique({ where: { id } });
+  if (!fila) throw new AppError({ code: "CODIGO_NO_ENCONTRADO", message: "Código no encontrado", statusCode: 404 });
+  await prisma.inventarioCodigoCaja.delete({ where: { id } });
+  return { data: { id: fila.id, codigo: fila.codigo, itemCode: fila.itemCode } };
 }
