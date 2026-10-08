@@ -1,6 +1,7 @@
 # Mapa de datos y trabajo pendiente
 
 Fecha: 27 de septiembre de 2026.
+Ampliación del alcance financiero: 6 de octubre de 2026 (sección 7). Las secciones anteriores conservan el contexto histórico; no describen el estado actual del despliegue.
 Estado: propuesta basada en el ZIP, el esquema Prisma y el alcance acordado en la conversación.
 
 Complementa [el contexto del proyecto](CONTEXTO_PROYECTO_COSPROBELL.md). No es una migración ni un contrato definitivo de integración. “Existe en el modelo” significa que hay una estructura local para guardarlo; no demuestra que ya esté sincronizado ni que cubra todos los casos reales.
@@ -90,3 +91,62 @@ Este orden es una propuesta técnica; no establece fechas ni reduce el alcance d
 ## 6. Qué no se ha hecho en esta etapa
 
 No se modificó el esquema Prisma, no se ejecutaron migraciones, no se cargaron las muestras a una base ni se conectó a SAP. Los cambios de implementación dependerán de las reglas y ejemplos que faltan. Las tablas anteriores describen fuentes observadas y trabajo pendiente, no funcionalidades certificadas en producción.
+
+## 7. Alcance financiero acordado — 6 de octubre de 2026
+
+El usuario pidió incorporar a la lista de trabajo futuro los requisitos de cartera y estado de cuenta que no estuvieran contemplados. Este cambio es de planificación: no implementa nuevas consultas, migraciones ni sincronización en SAP o Railway. La ampliación se hará sobre el mismo puente, con lectura de SAP y procesamiento en nuestra base; no escribirá cobros ni conciliaciones en SAP.
+
+### 7.1 Lista consolidada que debe cubrir la ampliación
+
+| Conjunto | Datos y resultado requerido |
+|---|---|
+| Clientes | Código, nombre, saldo actual, estado activo/inactivo, vendedor, condiciones de pago y zona/ruta cuando exista en SAP. Confirmar significado de campos personalizados; no asumir que U_ZONA equivale a ruta. |
+| Facturas | Identificador interno y número visible, cliente, fecha, vencimiento, total, saldo pendiente, estado y cancelación/anulación. Conservar moneda e identidad suficiente para no confundir documentos con igual número de distintas series. |
+| Pagos recibidos | Número/documento, cliente, fecha, monto total, facturas/documentos a los que se aplicó y monto aplicado por factura/documento. Conservar pagos sin aplicar, aplicaciones parciales y cancelaciones. |
+| Notas de crédito | Número, cliente, fecha, monto y aplicación real: documento y monto aplicado, saldo sin aplicar si corresponde y cancelación. La relación de documento base no sustituye una aplicación o conciliación posterior. |
+| Cartera abierta | Documentos y partidas abiertas, saldo pendiente real, vencimientos, antigüedad y distinción entre saldo total, vencido y a favor. Incluir conciliaciones/aplicaciones necesarias para justificar exactamente qué queda pendiente. |
+| Vendedores y condiciones de pago | Código y nombre del vendedor y de la condición del cliente, más datos necesarios para interpretar vencimientos. Diferenciar valores actuales del cliente de los que correspondían al documento. |
+| Estado de cuenta | Movimientos del período, saldo inicial del período, cargos, abonos y saldo final explicable, enlazados con documentos y aplicaciones. Definir fecha de corte y profundidad del histórico antes de implementar. |
+
+### 7.2 Qué se agrega y qué se hace obligatorio
+
+**Requisitos que ahora quedan explícitos y no estaban detallados como entregables:**
+
+1. Zona/ruta del cliente, si existe el dato, con su diccionario de negocio.
+2. Cartera por antigüedad y vencimientos, con fecha de corte y rangos acordados; no solo consultar un saldo agregado.
+3. Estado de cuenta completo y trazable de cada cliente: saldo inicial, movimientos y saldo final.
+4. Comprobación de que el saldo pendiente y el estado de cuenta coinciden con los reportes de SAP, para la misma fecha, moneda y criterios. Una diferencia pendiente de explicar no se presentará como dato definitivo.
+
+**Ya mencionados, pero ahora se convierten en parte necesaria del alcance cuando afecten al saldo:**
+
+- Conciliaciones internas y aplicaciones posteriores, parciales o canceladas. Antes se dejaba abierta la decisión de si eran necesarias.
+- Cuotas y sus vencimientos individuales.
+- Importe aplicado de cada pago y nota de crédito, importes no aplicados y su efecto en el saldo a favor.
+- Estados, cancelaciones, monedas y precisión de importes. Los catálogos/documentos ya estaban previstos; ahora se exige su efecto correcto en cartera.
+- Condiciones de pago del cliente: ya figuraba PaymentTermsTypes como fuente; se formaliza como dato consultable junto al vendedor.
+
+Facturas, pagos, notas de crédito, vendedores y saldo del cliente no son entidades recién añadidas al plan: ya estaban en la sección 3. Código, nombre y estado del cliente también estaban contemplados. La lista del usuario precisa los campos mínimos de cada una.
+
+### 7.3 Datos de apoyo necesarios para reconstruir correctamente
+
+Como parte del pedido de incluir otros datos necesarios, se investigarán e incorporarán cuando existan y afecten a la cuenta:
+
+- Saldos iniciales y asientos contables manuales del cliente.
+- Pagos a cuenta, anticipos y otros créditos pendientes, sin asignarlos ficticiamente a facturas.
+- Anulaciones y reversos de documentos, pagos y conciliaciones.
+- Moneda del documento, moneda local/sistema y tipos de cambio pertinentes, evitando sumar importes de monedas distintas.
+- Identificadores de sociedad, tipo/documento, línea contable y aplicación necesarios para enlazar sin duplicar.
+- Fecha de corte y momento de sincronización. No confundir el saldo actual con un saldo reconstruido a una fecha pasada.
+
+No se promete una entidad o endpoint concreto sin verificar su disponibilidad, campos y permisos en el SAP B1 FP 2111 instalado. No se descargará toda la contabilidad si basta el subconjunto de cuentas de clientes necesario.
+
+### 7.4 Orden y criterio de terminación
+
+1. Confirmar reporte de SAP de referencia, fecha/moneda, histórico requerido y significado de zona/ruta.
+2. Verificar datos accesibles por Service Layer y consultas oficiales, incluyendo saldos abiertos y conciliaciones.
+3. Ampliar clientes y catálogos; después documentos, aplicaciones y partidas necesarias. Revisar almacenamiento decimal de importes antes de calcular cartera.
+4. Sincronizar con presupuestos y frecuencias propios; detectar cambios en documentos antiguos que reciben pagos o conciliaciones nuevas. No basta traer documentos recién creados.
+5. Validar factura abierta, pago parcial/total, pago a cuenta, nota de crédito parcial/no aplicada, cancelación, conciliación posterior/anulada, cuotas, saldo inicial y moneda extranjera cuando apliquen.
+6. Habilitar consultas de cartera/estado de cuenta, incluidas las futuras de WhatsApp, solo cuando el resultado cuadre con SAP y se informe su fecha de actualización.
+
+El filtro de los siete almacenes de inventario no se aplicará automáticamente a cartera: podría omitir documentos o aplicaciones necesarios para cuadrar el saldo del cliente. El alcance financiero se determina por sociedad/clientes y los criterios contables acordados.

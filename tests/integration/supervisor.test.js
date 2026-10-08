@@ -13,6 +13,7 @@ const { operadoresAdminRepository: adminRepo, listarOperadoresAdmin, crearOperad
   await import("../../src/modules/operadores/operadores.admin.js");
 const { listarRevisiones, revisionesRepository, anularRevision } = await import("../../src/modules/supervisor/revisiones.service.js");
 const { estadoSincronizacion } = await import("../../src/modules/supervisor/sincronizacion.service.js");
+const { solicitudesService } = await import("../../src/modules/sincronizacion/solicitudes.service.js");
 const { BLOQUEO_INDEFINIDO } = await import("../../src/modules/operadores/operadores.service.js");
 const { verificarPin } = await import("../../src/shared/security/pin.js");
 const { hashApiKey } = await import("../../src/shared/security/hash.js");
@@ -42,6 +43,22 @@ test("el panel es solo para supervisores con sesión de PIN", async (t) => {
   sustituir(t, prisma.apiKey, "findUnique", async () => ({ id: 1, activa: true, nombre: "app", alcance: "completo" }));
   sustituir(t, prisma.apiKey, "update", async () => ({}));
   assert.equal((await pedir("/supervisor/sincronizacion", { "X-API-Key": "x" })).status, 403);
+});
+
+test("actualización manual: solo supervisor, registra actor y permite consultar progreso", async t => {
+  const ruta = "/supervisor/sincronizacion/solicitud";
+  assert.equal((await enviar(ruta, { "Content-Type": "application/json" }, "POST", {})).status, 401);
+  assert.equal((await enviar(ruta, conSesion(t, "operador"), "POST", {})).status, 403);
+  t.mock.restoreAll();
+  const headers = conSesion(t, "supervisor");
+  const trabajo = { id: "prueba", estado: "pendiente" };
+  t.mock.method(solicitudesService, "solicitar", async (_empresa, actor) => {
+    assert.equal(actor, 9); return trabajo;
+  });
+  t.mock.method(solicitudesService, "estado", async () => ({ solicitud: trabajo }));
+  const r = await enviar(ruta, headers, "POST", {});
+  assert.equal(r.status, 200); assert.deepEqual((await r.json()).data, trabajo);
+  assert.deepEqual((await (await pedir(ruta, headers)).json()).data.solicitud, trabajo);
 });
 
 test("el ingreso devuelve el rol y la sesión del supervisor llega a pedidos y al panel, no al resto", async (t) => {

@@ -9,6 +9,26 @@ export function crearClienteBackend(config, fetchImpl = fetch) {
   const headers = { Authorization: `Bearer ${config.clave}`, "Content-Type": "application/json" };
   const pedir = (ruta, opciones = { headers }) => solicitar(`${config.backendUrl}/integracion/${ruta}`, opciones, fetchImpl, codigoDelBackend);
   return {
+    async solicitud(entidades) {
+      const { data } = await leerJson(await pedir("solicitud/consultar", {
+        method: "POST", headers, body: JSON.stringify({ entidades: entidades.map(e => e.nombre) }),
+      }));
+      if (data !== null && (!data || typeof data.id !== "string" ||
+          !/^[a-f0-9-]{36}$/i.test(data.id) || !Array.isArray(data.entidades) || !data.entidades.length ||
+          new Set(data.entidades).size !== data.entidades.length ||
+          !data.entidades.every(n => entidades.some(e => e.nombre === n)) ||
+          !Array.isArray(data.completas) || !data.completas.every(n => data.entidades.includes(n)))) {
+        throw new ErrorPuente("SOLICITUD_MANUAL_INVALIDA");
+      }
+      return data;
+    },
+    async progresoSolicitud(id, completas, error) {
+      const { data } = await leerJson(await pedir("solicitud/progreso", {
+        method: "POST", headers, body: JSON.stringify({ id, completas, ...(error ? { error } : {}) }),
+      }));
+      if (data?.id !== id) throw new ErrorPuente("CONFIRMACION_INVALIDA");
+      return data;
+    },
     async recorrido(entidad, accion, recorridoId, secuencia) {
       const { data } = await leerJson(await pedir(`${entidad.nombre}/recorrido/${accion}`, {
         method: "POST", headers, body: JSON.stringify({ recorridoId, ...(accion === "finalizar" ? { secuencia } : {}) }),

@@ -6,6 +6,7 @@ import { sincronizar } from "./sincronizar.js";
 import { ErrorPuente } from "./http.js";
 import { entidadesHabilitadas } from "./entidades.js";
 import { crearControl, entidadPendiente, ordenarEntidades } from "./control.js";
+import { faltaSolicitud, prepararSolicitud, confirmarSolicitudLocal } from "./solicitud-manual.js";
 
 let parar = false, despertar;
 for (const senal of ["SIGINT", "SIGTERM"]) process.on(senal, () => { parar = true; despertar?.(); });
@@ -46,11 +47,23 @@ try {
   let fallos = 0;
   do {
     config.control = crearControl(config);
+    let solicitud = null;
+    try { solicitud = await backend.solicitud(ENTIDADES); }
+    catch (error) {
+      // Un backend anterior aún puede recibir los lotes. El sondeo no llega aquí.
+      console.error(JSON.stringify({ evento: "solicitud_no_disponible", codigo: error.code ?? "ERROR_LOCAL" }));
+    }
+    if (solicitud) {
+      await confirmarSolicitudLocal(solicitud, ENTIDADES, almacenes, backend);
+      console.log(JSON.stringify({ evento: "solicitud_manual", id: solicitud.id,
+        completas: solicitud.completas, entidades: solicitud.entidades }));
+    }
     // Un error de datos en una entidad no impide sincronizar las demás; sin conexión se corta el ciclo.
     let temporal = false, fallidas = 0;
     for (const { i, entidad } of ordenarEntidades(ENTIDADES, almacenes)) {
       if (parar) break;
-      if (!entidadPendiente(almacenes[i].estado, entidad.nombre, config)) {
+      if (solicitud && !faltaSolicitud(solicitud, entidad.nombre)) continue;
+      if (!solicitud && !entidadPendiente(almacenes[i].estado, entidad.nombre, config)) {
         console.log(JSON.stringify({ evento: "omitida_por_frecuencia", entidad: entidad.nombre }));
         continue;
       }
@@ -61,8 +74,10 @@ try {
       const atendido = { ...almacenes[i].estado, ultimaAtencion: new Date().toISOString() };
       await almacenes[i].guardar(atendido); almacenes[i].estado = atendido;
       try {
+        if (solicitud) await prepararSolicitud(almacenes[i], solicitud.id);
         const resultado = await sincronizar({ config, almacen: almacenes[i], sap, backend, entidad, detenido: () => parar });
         console.log(JSON.stringify({ evento: "ciclo", entidad: entidad.nombre, ...resultado }));
+        if (solicitud) await confirmarSolicitudLocal(solicitud, ENTIDADES, almacenes, backend);
       } catch (error) {
         if (error.code === "PRESUPUESTO_AGOTADO") {
           console.log(JSON.stringify({ evento: "pausa_por_presupuesto", entidad: entidad.nombre }));
@@ -72,6 +87,13 @@ try {
         // El detalle solo viene de ErrorPuente: código del registro y campo, sin valores.
         const detalle = error instanceof ErrorPuente ? error.detalle : undefined;
         console.error(JSON.stringify({ evento: "fallo", entidad: entidad.nombre, codigo: error.code ?? "ERROR_LOCAL", temporal: error.temporal === true, detalle }));
+        if (solicitud) {
+          const codigo = /^[A-Z0-9_]{1,60}$/.test(error.code ?? "") ? error.code : "ERROR_LOCAL";
+          // Si se cortó la red, mantener el trabajo para reintentar desde el estado guardado.
+          if (!error.temporal) await backend.progresoSolicitud(solicitud.id, [], codigo).catch(() => {});
+          fallidas++;
+          break;
+        }
         if (error.temporal) { temporal = true; break; }
         fallidas++;
       }

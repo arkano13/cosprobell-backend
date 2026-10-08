@@ -22,6 +22,8 @@ router.put("/operadores/:id/activo", validate({ params: idParamsSchema, body: ac
 router.get("/revisiones", c.revisiones);
 router.post("/revisiones/:id/anulacion", validate({ params: idParamsSchema }), c.anulacion);
 router.get("/sincronizacion", c.sincronizacion);
+router.get("/sincronizacion/solicitud", c.estadoSolicitud);
+router.post("/sincronizacion/solicitud", c.solicitarSincronizacion);
 router.get("/almacenes", c.almacenes);
 router.put("/almacenes", validate({ body: almacenesSchema }), c.elegirAlmacenes);
 router.post("/codigos", validate({ body: registroCodigoSchema }), c.registrarCodigo);

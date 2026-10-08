@@ -97,6 +97,7 @@ export async function sincronizar({ config, almacen, sap, backend, entidad = PRO
     await backend.recorrido(entidad, "finalizar", estado.recorridoId, estado.secuencia);
   }
   await guardar({ ...estado, cursor: null, ultimoCompleto: new Date().toISOString(),
+    ...(estado.solicitudManualId ? { solicitudManualCompletaId: estado.solicitudManualId } : {}),
     ...(entidad.confirmarRecorrido ? { recorridoId: null, finalizando: false } : {}),
     ...(conInicio ? { porRevisar: null, inicioRecorrido: null } : {}) });
   return { completo: true, lotes, ultimaSecuencia: estado.secuencia };

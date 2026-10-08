@@ -45,6 +45,7 @@ await copiar("docs/PRUEBAS_PEDIDOS_SCANNER.md", "PRUEBAS_PEDIDOS_SCANNER.md");
 await copiar("docs/ACTUALIZAR_ALMACENES_EXISTENCIAS.md", "ACTUALIZAR_ALMACENES_EXISTENCIAS.md");
 await copiar("docs/REDUCIR_CARGA_PUENTE.md", "REDUCIR_CARGA_PUENTE.md");
 await copiar("docs/PRODUCCION_ALMACENES.md", "PRODUCCION_ALMACENES.md");
+await copiar("docs/ACTUALIZACION_MANUAL.md", "ACTUALIZACION_MANUAL.md");
 
 const { version } = JSON.parse(await readFile(join(raiz, "package.json"), "utf8"));
 await writeFile(join(destino, "package.json"), JSON.stringify({

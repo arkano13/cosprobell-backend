@@ -14,6 +14,7 @@ const { recibirLote, consultarEstadoLote } = await import("../../src/modules/sin
 const recibirProductos = (lote, empresa) => recibirLote("productos", lote, empresa);
 const consultarEstadoProductos = (empresa) => consultarEstadoLote("productos", empresa);
 const { crearAutenticacionPuente } = await import("../../src/middleware/bridgeAuth.js");
+const { solicitudesRepository, solicitudesService } = await import("../../src/modules/sincronizacion/solicitudes.service.js");
 logger.level = "silent";
 let server, url;
 before(async () => { server = app.listen(0, "127.0.0.1"); await once(server, "listening"); url = `http://127.0.0.1:${server.address().port}`; });
@@ -21,6 +22,28 @@ after(async () => { await new Promise((resolve) => { server.close(resolve); serv
 const producto = { itemCode: "P1", itemName: "Champú", barCode: "001234", valid: true, frozen: false };
 const lote = (extra = {}) => ({ version: 1, empresa: "XPRUEBAS2026", secuencia: 1, productos: [{ ...producto }], ...extra });
 const empresa = "XPRUEBAS2026";
+
+test("HTTP solicitud manual: puente autenticado obtiene y confirma el trabajo sin exponerlo a otros", async t => {
+  let datos = {};
+  t.mock.method(solicitudesRepository, "cambiar", async (recibida, fn) => {
+    assert.equal(recibida, empresa);
+    const { siguiente, resultado } = fn(structuredClone(datos)); datos = siguiente; return resultado;
+  });
+  const headers = { Authorization: `Bearer ${process.env.BRIDGE_API_KEY}`, "Content-Type": "application/json" };
+  const post = (accion, body, h = headers) => fetch(`${url}/integracion/solicitud/${accion}`, {
+    method: "POST", headers: h, body: JSON.stringify(body),
+  });
+  assert.equal((await post("consultar", { entidades: ["productos"] }, { "Content-Type": "application/json" })).status, 401);
+  assert.equal((await post("progreso", {}, { Authorization: "Bearer token-operador" })).status, 401);
+  assert.equal((await post("consultar", { entidades: ["clientes", "clientes"] })).status, 400);
+  assert.deepEqual(await (await post("consultar", { entidades: ["productos"] })).json(), { data: null });
+  const j = await solicitudesService.solicitar(empresa, 9);
+  const tomado = await (await post("consultar", { entidades: ["productos"] })).json();
+  assert.equal(tomado.data.id, j.id); assert.equal(tomado.data.estado, "sincronizando");
+  assert.equal((await post("progreso", { id: j.id, completas: ["clientes"] })).status, 400);
+  const final = await (await post("progreso", { id: j.id, completas: ["productos"] })).json();
+  assert.equal(final.data.estado, "completado");
+});
 
 test("HTTP recorridos de inventario: autenticación, contrato y fin confirmado", async t => {
   const recorridoId = "11111111-1111-4111-8111-111111111111";
