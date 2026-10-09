@@ -27,4 +27,5 @@ router.put("/almacenes", validate({ body: almacenesSchema }), c.elegirAlmacenes)
 router.post("/codigos", validate({ body: registroCodigoSchema }), c.registrarCodigo);
 router.delete("/codigos/:id", validate({ params: idParamsSchema }), c.quitarCodigo);
 router.delete("/codigos-caja/:id", validate({ params: idParamsSchema }), c.quitarCodigoCaja);
+router.get("/reportes/cuadre", c.reporteCuadre);
 export default router;

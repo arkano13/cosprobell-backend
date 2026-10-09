@@ -6,6 +6,7 @@ import { inventarioRepository as repo } from "./inventario.repository.js";
 import { retirarLotes, contarLotes } from "./inventario.lotes.js";
 import { clasificar, codigoCaja, porPasar, repartirEnCajas, repartirTraspaso, lotesDeTraspaso, cajaParaUsarAntes, textoAsignacion,
   editarCajas, elegirCajas } from "./inventario.calculo.js";
+import { armarCuadre } from "./inventario.reporte.js";
 
 const OPCION_FILTRAR_PEDIDOS = "pedidosSoloDeEstaBodega";
 const OPCION_ALMACENES_POR_BODEGA = "almacenesPorBodega";
@@ -149,6 +150,20 @@ export async function listarPendientes() {
     faltaEnSap: vistas.filter((v) => v.faltaEnSap > 0),
     conteoInicial: { productos: inicial.length, unidades: inicial.reduce((t, v) => t + v.diferencia, 0) },
   } };
+}
+
+// Reporte de cuadre con SAP (panel del supervisor): qué cuadró, qué tiene menos y qué tiene más, bodega por bodega.
+// Hace falta que cada bodega tenga su almacén de SAP.
+export async function reporteCuadre() {
+  await exigirAlmacenes();
+  const bodegas = await bodegasConNombre();
+  if (!bodegas.grande || !bodegas.pequena) throw falla("BODEGAS_SIN_ALMACEN", 409,
+    "Falta asignar el almacén de SAP de cada bodega (Panel del supervisor → Almacenes)");
+  const [filas, porBodega, existenciasSapAl] = await Promise.all([repo.estados(),
+    repo.cuadrePorBodega(bodegas.grande.almacen, bodegas.pequena.almacen), repo.existenciasSapAl()]);
+  const ahora = Date.now();
+  return { data: { generadoEn: new Date(ahora).toISOString(), existenciasSapAl, bodegas,
+    ...armarCuadre({ filas, porBodega: new Map(porBodega.map((b) => [b.itemCode, b])), ahora }) } };
 }
 
 // Productos que todavía no entraron al inventario y SAP dice que hay: la lista del conteo inicial.

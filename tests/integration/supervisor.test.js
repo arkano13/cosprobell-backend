@@ -234,3 +234,44 @@ test("una preparación anulada queda en el historial y no impide empezar otra co
   assert.equal(r.creada, true);
   assert.deepEqual(creadas[0].lineas, [{ pedidoLineNum: 0, itemCode: "P1", cantidadPedida: 2, uomEntry: -1, uomCode: "Manual" }]);
 });
+
+test("reporte de cuadre: solo el supervisor, con la bodega de cada almacén y sin lo que falta contar", async (t) => {
+  const { inventarioRepository: inv } = await import("../../src/modules/inventario/inventario.repository.js");
+  const almacenesAsignados = (asignados) => {
+    t.mock.method(inv, "almacenesDeEstaBodega", async () => ["01", "02"]);
+    t.mock.method(inv, "comparacionDisponible", async () => true);
+    t.mock.method(inv, "opcion", async () => asignados);
+    t.mock.method(inv, "nombresDeAlmacenes", async () => new Map([["01", "Almacén Principal"], ["02", "Bodega Despacho"]]));
+  };
+  assert.equal((await pedir("/supervisor/reportes/cuadre", conSesion(t, "operador"))).status, 403);
+  t.mock.restoreAll();
+
+  const headers = conSesion(t, "supervisor");
+  almacenesAsignados({ grande: "01", pequena: null });
+  const sinBodega = await pedir("/supervisor/reportes/cuadre", headers);
+  assert.equal(sinBodega.status, 409);
+  assert.equal((await sinBodega.json()).error.code, "BODEGAS_SIN_ALMACEN");
+
+  almacenesAsignados({ grande: "01", pequena: "02" });
+  const base = { sinEntrega: 0, adelantado: 0, activo: true, sapCambioEn: null };
+  t.mock.method(inv, "estados", async () => [
+    { ...base, itemCode: "Z12", itemName: "Z12P Purify Shampoo 750ml", sap: 66, grande: 42, pequena: 6 },
+    { ...base, itemCode: "RD5", itemName: "SH-RD Conditioner 500 ml", sap: 872, grande: 0, pequena: 21 },
+  ]);
+  const almacenes = [];
+  t.mock.method(inv, "cuadrePorBodega", async (...args) => { almacenes.push(args.slice(0, 2)); return [
+    { itemCode: "Z12", sapGrande: 60, sapPequena: 6, contadoGrande: true, contadoPequena: true },
+    { itemCode: "RD5", sapGrande: 840, sapPequena: 32, contadoGrande: false, contadoPequena: true },
+  ]; });
+  t.mock.method(inv, "existenciasSapAl", async () => new Date("2026-10-09T14:00:00Z"));
+  const r = await pedir("/supervisor/reportes/cuadre", headers);
+  assert.equal(r.status, 200);
+  const { data } = await r.json();
+  assert.deepEqual(almacenes, [["01", "02"]]);
+  assert.deepEqual(data.bodegas, { grande: { almacen: "01", nombre: "Almacén Principal" }, pequena: { almacen: "02", nombre: "Bodega Despacho" } });
+  assert.equal(data.existenciasSapAl, "2026-10-09T14:00:00.000Z");
+  assert.deepEqual(data.resumen, { contados: 1, cuadran: 0, menos: { productos: 1, unidades: -18 }, mas: { productos: 0, unidades: 0 },
+    pendientes: 1, actualizando: 0 });
+  assert.deepEqual(data.menos, [{ itemCode: "Z12", itemName: "Z12P Purify Shampoo 750ml", diferencia: -18,
+    grande: { contado: 42, sap: 60, diferencia: -18 }, pequena: { contado: 6, sinEntrega: 0, sap: 6, diferencia: 0 } }]);
+});

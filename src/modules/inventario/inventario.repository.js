@@ -190,6 +190,21 @@ export const inventarioRepository = {
       WHERE "itemCode" = ${itemCode} AND "warehouseCode" = ${almacen}`;
     return fila?.sap ?? 0;
   },
+  // Para el reporte de cuadre: lo que SAP tiene en el almacén de cada bodega y si el producto ya se contó (o recibió) en
+  // cada una, de todos los productos con existencia en esos almacenes o con movimientos de conteo.
+  cuadrePorBodega(almacenGrande, almacenPequena, db = prisma) {
+    return db.$queryRaw`
+      WITH s AS (SELECT "itemCode",
+                   ROUND(COALESCE(SUM("inStock") FILTER (WHERE "warehouseCode" = ${almacenGrande}), 0))::int AS "sapGrande",
+                   ROUND(COALESCE(SUM("inStock") FILTER (WHERE "warehouseCode" = ${almacenPequena}), 0))::int AS "sapPequena"
+                 FROM productos_existencias WHERE "warehouseCode" IN (${almacenGrande}, ${almacenPequena}) GROUP BY "itemCode"),
+           c AS (SELECT "itemCode", bool_or(bodega = 'grande') AS grande, bool_or(bodega = 'pequena') AS pequena
+                 FROM inventario_movimientos WHERE tipo IN ('recepcion', 'conteo') GROUP BY "itemCode")
+      SELECT COALESCE(s."itemCode", c."itemCode") AS "itemCode", COALESCE(s."sapGrande", 0) AS "sapGrande",
+             COALESCE(s."sapPequena", 0) AS "sapPequena", COALESCE(c.grande, false) AS "contadoGrande",
+             COALESCE(c.pequena, false) AS "contadoPequena"
+      FROM s FULL JOIN c ON c."itemCode" = s."itemCode"`;
+  },
   // En qué bodegas ya se contó un producto.
   // Foto de cuadre (ver InventarioCuadre en el esquema), después del cambio y con el candado del producto tomado.
   // Las existencias y su hora se leen en el mismo momento, porque el puente las pisa en cada recorrido.
