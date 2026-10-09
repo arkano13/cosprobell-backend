@@ -774,3 +774,47 @@ test("editar el conteo de la grande: solo el supervisor, sobre un conteo sin caj
   assert.equal(mas.status, 200);
   assert.deepEqual(hecho.adelantado, [20]);
 });
+
+test("sueltas de varios lotes en la 01 (cajas de tintes mezcladas): un bulto por lote, con o sin cajas enteras", async (t) => {
+  const hecho = inventario(t, { sap: 120, activo: false });
+  const headers = conSesion(t);
+  const soloSueltas = await enviar("/inventario/recepciones", headers, "POST", { itemCode: "P1", modo: "grupos", grupos: [],
+    bultos: [{ unidades: 18, lote: "T1", vencimiento: "2027-05-31" }, { unidades: 24, lote: "T2", vencimiento: "2027-09-30" }, { unidades: 30, lote: "T3" }] });
+  assert.equal(soloSueltas.status, 201);
+  const { data } = await soloSueltas.json();
+  assert.deepEqual(data.cajas.map((c) => [c.lote, c.unidades, c.suelto, c.vencimiento]),
+    [["T1", 18, true, "2027-05-31"], ["T2", 24, true, "2027-09-30"], ["T3", 30, true, null]]);
+  assert.equal(data.unidades, 72);
+  const conCajas = await enviar("/inventario/recepciones", headers, "POST", { itemCode: "P1", modo: "grupos",
+    grupos: [{ cajas: 1, unidadesPorCaja: 24, lote: "T4" }], bultos: [{ unidades: 5, lote: "T1" }, { unidades: 6, lote: "T5" }] });
+  assert.equal(conCajas.status, 201);
+  assert.deepEqual((await conCajas.json()).data.cajas.map((c) => [c.lote, c.unidades, c.suelto]), [["T4", 24, false], ["T1", 5, true], ["T5", 6, true]]);
+  assert.equal(hecho.cajas.length, 6);
+  const repetido = await enviar("/inventario/recepciones", headers, "POST", { itemCode: "P1", modo: "grupos", grupos: [],
+    bultos: [{ unidades: 1, lote: "T1" }, { unidades: 2, lote: "T1" }] });
+  assert.equal(repetido.status, 400);
+  const losDos = await enviar("/inventario/recepciones", headers, "POST", { itemCode: "P1", modo: "grupos", grupos: [],
+    bulto: { unidades: 1 }, bultos: [{ unidades: 2 }] });
+  assert.equal(losDos.status, 400);
+  const nada = await enviar("/inventario/recepciones", headers, "POST", { itemCode: "P1", modo: "grupos", grupos: [], bultos: [] });
+  assert.equal(nada.status, 400);
+});
+
+test("editar el conteo de la 01 con sueltas de varios lotes: conserva los bultos iguales y anula o crea el resto", async (t) => {
+  const hecho = inventario(t, { sap: 80, grande: 42 });
+  const supervisor = conSesion(t, "supervisor");
+  const bulto = (id, lote, unidades) => ({ id, codigo: `CJ-${String(id).padStart(6, "0")}`, itemCode: "P1", lote, vencimiento: null, suelto: true,
+    unidadesIniciales: unidades, unidades, recibidaEn: new Date(), recibidaPor: "operador:Luis Pérez" });
+  t.mock.method(repo, "cajasDe", async () => [bulto(31, "T1", 18), bulto(32, "T2", 24)]);
+  t.mock.method(repo, "contadoEn", async () => new Set(["grande"]));
+  const fijadas = [];
+  t.mock.method(repo, "fijarUnidadesCaja", async (id, unidades) => fijadas.push([id, unidades]));
+  const r = await enviar("/inventario/productos/P1/grande", supervisor, "PUT", { grupos: [],
+    bultos: [{ unidades: 18, lote: "T1" }, { unidades: 20, lote: "T2" }, { unidades: 4, lote: "T3" }] });
+  assert.equal(r.status, 200);
+  const { data } = await r.json();
+  assert.deepEqual([data.antes, data.unidades, data.anuladas, data.cajas.map((c) => [c.lote, c.unidades, c.suelto])],
+    [42, 42, ["CJ-000032"], [["T2", 20, true], ["T3", 4, true]]]);
+  assert.deepEqual(fijadas, [[32, 0]]);
+  assert.equal(hecho.movimientos.length, 3);
+});

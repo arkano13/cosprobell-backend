@@ -143,3 +143,15 @@ test("almacenes: la 03 y la 04 se eligen para contar, sin marcarlas como de esta
   const desconocido = await enviar("/supervisor/almacenes", headers, "PUT", { ...base, soloConteo: [{ almacen: "99", tipo: "cajas" }] });
   assert.equal(desconocido.status, 400);
 });
+
+test("la 04 con sueltas de varios lotes: una línea por lote", async (t) => {
+  const headers = conSesion(t);
+  const { conteos } = almacenes(t);
+  const r = await enviar("/inventario/conteo-almacenes/04/productos/P1", headers, "PUT", { operacionId: randomUUID(),
+    grupos: [{ cajas: 1, unidadesPorCaja: 72, lote: "MIX" }], bultos: [{ unidades: 18, lote: "T1", vencimiento: "2027-05-31" }, { unidades: 24, lote: "T2" }] });
+  assert.equal(r.status, 200);
+  assert.deepEqual((await r.json()).data, { almacen: "04", itemCode: "P1", unidades: 114, cajas: 1, antes: null });
+  assert.deepEqual(conteos.get("04|P1").lineas.map((l) => [l.lote, l.cajas, l.unidades]), [["MIX", 1, 72], ["T1", null, 18], ["T2", null, 24]]);
+  const enLa03 = await enviar("/inventario/conteo-almacenes/03/productos/P2", headers, "PUT", { operacionId: randomUUID(), bultos: [{ unidades: 2 }] });
+  assert.equal(enLa03.status, 400);
+});

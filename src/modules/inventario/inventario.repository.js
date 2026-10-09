@@ -169,9 +169,12 @@ export const inventarioRepository = {
     return db.$queryRaw`
       WITH s AS (SELECT "itemCode", SUM("inStock")::float AS sap FROM productos_existencias WHERE "warehouseCode" = ${almacen}
                  GROUP BY "itemCode" HAVING SUM("inStock") > 0),
-           c AS (SELECT "itemCode", unidades, cajas FROM inventario_conteos_almacen WHERE almacen = ${almacen})
+           c AS (SELECT a."itemCode", a.unidades, a.cajas,
+                   (SELECT COUNT(*) FROM inventario_conteos_almacen_lineas l
+                    WHERE l.almacen = a.almacen AND l."itemCode" = a."itemCode" AND l.cajas IS NULL)::int AS sueltos
+                 FROM inventario_conteos_almacen a WHERE a.almacen = ${almacen})
       SELECT p."itemCode", p."itemName", COALESCE(s.sap, 0) AS sap, COALESCE(c.unidades, 0)::int AS unidades,
-             COALESCE(c.cajas, 0)::int AS cajas, (c."itemCode" IS NOT NULL) AS contado,
+             COALESCE(c.cajas, 0)::int AS cajas, COALESCE(c.sueltos, 0)::int AS sueltos, (c."itemCode" IS NOT NULL) AS contado,
              (SELECT COUNT(*) FROM productos_codigos_barras b WHERE b."itemCode" = p."itemCode" AND b."retiradoEnSap" = false)::int AS codigos
       FROM productos p LEFT JOIN s ON s."itemCode" = p."itemCode" LEFT JOIN c ON c."itemCode" = p."itemCode"
       WHERE s."itemCode" IS NOT NULL OR c."itemCode" IS NOT NULL
@@ -193,15 +196,17 @@ export const inventarioRepository = {
     return (await db.producto.count({ where: { itemCode } })) > 0;
   },
   conteoBodega(bodega, almacen, db = prisma) {
+    // En la grande: cajas enteras y bultos sueltos (uno por lote) por separado.
     const registrado = bodega === "grande"
-      ? Prisma.sql`SELECT "itemCode", SUM(unidades)::int AS unidades, (COUNT(*) FILTER (WHERE unidades > 0))::int AS cajas
-          FROM inventario_cajas GROUP BY "itemCode"`
-      : Prisma.sql`SELECT "itemCode", pequena AS unidades, 0 AS cajas FROM inventario_productos`;
+      ? Prisma.sql`SELECT "itemCode", SUM(unidades)::int AS unidades, (COUNT(*) FILTER (WHERE unidades > 0 AND NOT suelto))::int AS cajas,
+          (COUNT(*) FILTER (WHERE unidades > 0 AND suelto))::int AS sueltos FROM inventario_cajas GROUP BY "itemCode"`
+      : Prisma.sql`SELECT "itemCode", pequena AS unidades, 0 AS cajas, 0 AS sueltos FROM inventario_productos`;
     return db.$queryRaw`
       WITH s AS (SELECT "itemCode", SUM("inStock")::float AS sap FROM productos_existencias WHERE "warehouseCode" = ${almacen}
                  GROUP BY "itemCode" HAVING SUM("inStock") > 0),
            u AS (${registrado}), c AS (${CONTADOS(bodega)})
       SELECT p."itemCode", p."itemName", s.sap, COALESCE(u.unidades, 0)::int AS unidades, COALESCE(u.cajas, 0)::int AS cajas,
+             COALESCE(u.sueltos, 0)::int AS sueltos,
              (c."itemCode" IS NOT NULL OR COALESCE(u.unidades, 0) <> 0) AS contado,
              (SELECT COUNT(*) FROM productos_codigos_barras b WHERE b."itemCode" = p."itemCode" AND b."retiradoEnSap" = false)::int AS codigos
       FROM s JOIN productos p ON p."itemCode" = s."itemCode"
