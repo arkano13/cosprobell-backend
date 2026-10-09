@@ -280,8 +280,9 @@ function piezasRecepcion(entrada) {
   if (modo === "suelto") return entrada.destino === "grande" ? [{ unidades: entrada.unidades, lote, vencimiento, suelto: true }] : [];
   const piezas = entrada.grupos.flatMap((g) => repetir(g.cajas, { unidades: g.unidadesPorCaja, lote: g.lote ?? null,
     vencimiento: g.vencimiento ?? null, suelto: false }));
-  const b = entrada.bulto;
-  return b ? [...piezas, { unidades: b.unidades, lote: b.lote ?? null, vencimiento: b.vencimiento ?? null, suelto: true }] : piezas;
+  // Lo suelto: un bulto por lote (cada uno con su lote y vencimiento).
+  const sueltos = entrada.bultos ?? (entrada.bulto ? [entrada.bulto] : []);
+  return [...piezas, ...sueltos.map((b) => ({ unidades: b.unidades, lote: b.lote ?? null, vencimiento: b.vencimiento ?? null, suelto: true }))];
 }
 
 // Cajas nuevas de la grande, cada una con su código (CJ-000123) para la etiqueta.
@@ -766,7 +767,7 @@ export async function listarConteo(bodega, { buscar, estado, pagina, limit }) {
     `Falta elegir el almacén de SAP de la bodega ${bodega === "grande" ? "grande" : "pequeña"} (Panel del supervisor → Almacenes)`);
   const filas = await repo.conteoBodega(bodega, asignada.almacen);
   const vistas = filas.map((f) => ({ itemCode: f.itemCode, itemName: f.itemName, sap: Math.round(f.sap), unidades: f.unidades,
-    cajas: f.cajas, contado: f.contado === true, codigos: f.codigos }));
+    cajas: f.cajas, sueltos: f.sueltos ?? 0, contado: f.contado === true, codigos: f.codigos }));
   const texto = buscar ? normalizar(buscar) : null;
   const cumple = { falta: (v) => !v.contado, contados: (v) => v.contado, sin_codigo: (v) => v.codigos === 0, todos: () => true };
   const elegidas = vistas.filter(cumple[estado]).filter(coincide(texto));
@@ -818,7 +819,7 @@ async function exigirSoloConteo(almacen) {
 export async function listarConteoAlmacen(almacen, { buscar, estado, pagina, limit }) {
   const elegido = await exigirSoloConteo(almacen);
   const vistas = (await repo.conteoAlmacen(almacen)).map((f) => ({ itemCode: f.itemCode, itemName: f.itemName, sap: Math.round(f.sap),
-    unidades: f.unidades, cajas: f.cajas, contado: f.contado === true, codigos: f.codigos }));
+    unidades: f.unidades, cajas: f.cajas, sueltos: f.sueltos ?? 0, contado: f.contado === true, codigos: f.codigos }));
   const texto = buscar ? normalizar(buscar) : null;
   const cumple = { falta: (v) => !v.contado, contados: (v) => v.contado, sin_codigo: (v) => v.codigos === 0, todos: () => true };
   const elegidas = vistas.filter(cumple[estado]).filter(coincide(texto));
@@ -849,15 +850,15 @@ export async function consultarConteoAlmacen(almacen, itemCode) {
 export async function guardarConteoAlmacen(almacen, itemCode, entrada, { aplicacion, supervisor }) {
   const elegido = await exigirSoloConteo(almacen);
   const cajas = elegido.tipo === "cajas";
-  if (cajas ? entrada.lotes !== undefined : entrada.grupos !== undefined || entrada.bulto !== undefined) {
+  if (cajas ? entrada.lotes !== undefined : entrada.grupos !== undefined || entrada.bulto !== undefined || entrada.bultos !== undefined) {
     throw falla("CONTEO_NO_CORRESPONDE", 400, cajas ? `La ${almacen} se cuenta por cajas` : `La ${almacen} se cuenta por unidades de cada lote`);
   }
   const fecha = (v) => (v ? new Date(`${v}T00:00:00.000Z`) : null);
   const lineas = cajas
     ? [...(entrada.grupos ?? []).map((g) => ({ lote: g.lote ?? null, vencimiento: fecha(g.vencimiento), cajas: g.cajas,
       unidadesPorCaja: g.unidadesPorCaja, unidades: g.cajas * g.unidadesPorCaja })),
-    ...(entrada.bulto ? [{ lote: entrada.bulto.lote ?? null, vencimiento: fecha(entrada.bulto.vencimiento), cajas: null,
-      unidadesPorCaja: null, unidades: entrada.bulto.unidades }] : [])]
+    ...(entrada.bultos ?? (entrada.bulto ? [entrada.bulto] : [])).map((b) => ({ lote: b.lote ?? null, vencimiento: fecha(b.vencimiento), cajas: null,
+      unidadesPorCaja: null, unidades: b.unidades }))]
     : (entrada.lotes ?? []).map((l) => ({ lote: l.lote ?? null, vencimiento: fecha(l.vencimiento), cajas: null, unidadesPorCaja: null,
       unidades: l.unidades }));
   const unidades = lineas.reduce((t, l) => t + l.unidades, 0);

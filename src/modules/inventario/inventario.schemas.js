@@ -37,16 +37,23 @@ export const descuentosQuerySchema = z.object({ antesDe: id.optional(), limit: l
 const MAX_CAJAS_FILA = 2000, MAX_CAJAS = 3000;
 const grupoCajas = z.object({ cajas: z.number().int().min(1).max(MAX_CAJAS_FILA), unidadesPorCaja: unidades, lote,
   vencimiento: vence.nullable().optional() }).strict();
+// Unidades sueltas que quedan en la bodega de cajas, cada lote por separado (las cajas de tintes mezcladas, por ejemplo).
+// bulto (uno solo) es el formato anterior; bultos, varios lotes. No los dos.
+const bultoSuelto = z.object({ unidades, lote, vencimiento: vence.nullable().optional() }).strict();
+const bultosSueltos = z.array(bultoSuelto).max(50)
+  .refine((filas) => new Set(filas.map((f) => JSON.stringify([f.lote ?? null, f.vencimiento ?? null]))).size === filas.length, "No repetir lotes sueltos");
+const sueltosDe = (r) => r.bultos ?? (r.bulto ? [r.bulto] : []);
+const totalSueltos = (r) => sueltosDe(r).reduce((t, b) => t + b.unidades, 0);
 const totalRecepcion = (r) => (r.modo === "cajas" ? r.cajas * r.unidadesPorCaja : r.modo === "suelto" ? r.unidades
   : r.modo === "lotes" ? r.lotes.reduce((t, l) => t + l.unidades, 0)
-    : r.grupos.reduce((t, g) => t + g.cajas * g.unidadesPorCaja, 0) + (r.bulto?.unidades ?? 0));
+    : r.grupos.reduce((t, g) => t + g.cajas * g.unidadesPorCaja, 0) + totalSueltos(r));
 export const recepcionSchema = z.discriminatedUnion("modo", [
   z.object({ operacionId, modo: z.literal("cajas"), itemCode, cajas: z.number().int().min(1).max(MAX_CAJAS_FILA), unidadesPorCaja: unidades,
     lote, vencimiento: vence.nullable().optional(), adelantar: z.boolean().default(false) }).strict(),
   z.object({ operacionId, modo: z.literal("suelto"), itemCode, unidades, destino: z.enum(["grande", "pequena"]),
     lote, vencimiento: vence.nullable().optional(), adelantar: z.boolean().default(false) }).strict(),
-  z.object({ operacionId, modo: z.literal("grupos"), itemCode, grupos: z.array(grupoCajas).min(1).max(50),
-    bulto: z.object({ unidades, lote, vencimiento: vence.nullable().optional() }).strict().nullable().optional(),
+  z.object({ operacionId, modo: z.literal("grupos"), itemCode, grupos: z.array(grupoCajas).max(50),
+    bulto: bultoSuelto.nullable().optional(), bultos: bultosSueltos.optional(),
     adelantar: z.boolean().default(false) }).strict(),
   // Lotes: unidades sueltas de varios lotes a la pequeña, todo junto (el conteo de la 02).
   z.object({ operacionId, modo: z.literal("lotes"), itemCode,
@@ -55,7 +62,10 @@ export const recepcionSchema = z.discriminatedUnion("modo", [
     adelantar: z.boolean().default(false) }).strict(),
 ]).refine((r) => totalRecepcion(r) <= 1_000_000, { message: "Demasiadas unidades en una sola recepción", path: ["unidadesPorCaja"] })
   .refine((r) => r.modo !== "grupos" || r.grupos.reduce((t, g) => t + g.cajas, 0) <= MAX_CAJAS,
-    { message: `Hasta ${MAX_CAJAS} cajas en una sola recepción`, path: ["grupos"] });
+    { message: `Hasta ${MAX_CAJAS} cajas en una sola recepción`, path: ["grupos"] })
+  .refine((r) => r.modo !== "grupos" || !(r.bulto && r.bultos), { message: "Bulto o bultos, no los dos", path: ["bultos"] })
+  .refine((r) => r.modo !== "grupos" || r.grupos.length + sueltosDe(r).length > 0,
+    { message: "Escribí cuántas cajas o cuántas unidades sueltas hay", path: ["grupos"] });
 
 export const reposicionSchema = z.object({ operacionId, caja: cajaParamsSchema.shape.codigo, unidades }).strict();
 
@@ -85,9 +95,10 @@ export const conteoSchema = z.object({ operacionId, unidades: z.number().int().m
 // Edición del conteo de la grande (supervisor): cómo queda todo lo de ese producto en la grande. Sin filas ni bulto,
 // queda en 0.
 export const edicionGrandeSchema = z.object({ operacionId, grupos: z.array(grupoCajas).max(50),
-  bulto: z.object({ unidades, lote, vencimiento: vence.nullable().optional() }).strict().nullable().optional() }).strict()
+  bulto: bultoSuelto.nullable().optional(), bultos: bultosSueltos.optional() }).strict()
+  .refine((r) => !(r.bulto && r.bultos), { message: "Bulto o bultos, no los dos", path: ["bultos"] })
   .refine((r) => r.grupos.reduce((t, g) => t + g.cajas, 0) <= MAX_CAJAS, { message: `Hasta ${MAX_CAJAS} cajas`, path: ["grupos"] })
-  .refine((r) => r.grupos.reduce((t, g) => t + g.cajas * g.unidadesPorCaja, 0) + (r.bulto?.unidades ?? 0) <= 1_000_000,
+  .refine((r) => r.grupos.reduce((t, g) => t + g.cajas * g.unidadesPorCaja, 0) + totalSueltos(r) <= 1_000_000,
     { message: "Demasiadas unidades", path: ["grupos"] });
 export const correccionCajaSchema = z.object({ operacionId, unidades: z.number().int().min(0).max(1_000_000) }).strict();
 
@@ -132,10 +143,11 @@ export const almacenConteoParamsSchema = z.object({ almacen: codigoAlmacen });
 export const almacenProductoParamsSchema = z.object({ almacen: codigoAlmacen, itemCode });
 export const conteoAlmacenSchema = z.object({ operacionId,
   grupos: z.array(grupoCajas).max(50).optional(),
-  bulto: z.object({ unidades, lote, vencimiento: vence.nullable().optional() }).strict().nullable().optional(),
+  bulto: bultoSuelto.nullable().optional(), bultos: bultosSueltos.optional(),
   lotes: z.array(z.object({ unidades, lote, vencimiento: vence.nullable().optional() }).strict()).max(50)
     .refine((filas) => new Set(filas.map((f) => JSON.stringify([f.lote ?? null, f.vencimiento ?? null]))).size === filas.length, "No repetir lotes").optional(),
 }).strict()
+  .refine((r) => !(r.bulto && r.bultos), { message: "Bulto o bultos, no los dos", path: ["bultos"] })
   .refine((r) => (r.grupos ?? []).reduce((t, g) => t + g.cajas, 0) <= MAX_CAJAS, { message: `Hasta ${MAX_CAJAS} cajas`, path: ["grupos"] })
-  .refine((r) => (r.grupos ?? []).reduce((t, g) => t + g.cajas * g.unidadesPorCaja, 0) + (r.bulto?.unidades ?? 0)
+  .refine((r) => (r.grupos ?? []).reduce((t, g) => t + g.cajas * g.unidadesPorCaja, 0) + totalSueltos(r)
     + (r.lotes ?? []).reduce((t, l) => t + l.unidades, 0) <= 1_000_000, { message: "Demasiadas unidades", path: ["grupos"] });
