@@ -2,7 +2,7 @@ import { listarEtiquetas, confirmarEtiqueta, revocarConfirmacion, contarEtiqueta
 import { listarOperadoresAdmin, crearOperador, cambiarPin, desbloquear, cambiarActivo } from "../operadores/operadores.admin.js";
 import { listarRevisiones, anularRevision } from "./revisiones.service.js";
 import { estadoSincronizacion } from "./sincronizacion.service.js";
-import { listarAlmacenes, elegirAlmacenes as elegir } from "../inventario/inventario.service.js";
+import { listarAlmacenes, elegirAlmacenes as elegir, reporteCuadre as cuadre } from "../inventario/inventario.service.js";
 import { inventarioRepository } from "../inventario/inventario.repository.js";
 import { registrarCodigo as registrar, quitarCodigo as quitar, quitarCodigoCaja as quitarCaja } from "../etiquetas/codigos.service.js";
 
@@ -40,3 +40,4 @@ export const elegirAlmacenes = manejar((req) => elegir(req.body, quien(req)));
 export const registrarCodigo = manejar((req) => registrar(req.body, quien(req)));
 export const quitarCodigo = manejar((req) => quitar(req.params.id));
 export const quitarCodigoCaja = manejar((req) => quitarCaja(req.params.id));
+export const reporteCuadre = manejar(() => cuadre());
