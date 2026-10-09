@@ -59,18 +59,21 @@ export const inventarioRepository = {
     return fila?.al ?? null;
   },
   async comparacionDisponible(db = prisma) {
-    // La edad se mide desde el inicio: terminar un recorrido lento no rejuvenece sus primeras páginas.
+    // Cada existencia tiene que estar confirmada por SAP hace menos del máximo: la edad es la de la confirmación más
+    // vieja, así que terminar un recorrido lento no rejuvenece sus primeras páginas. Mientras el puente hace un
+    // recorrido nuevo se sigue comparando con lo que ya llegó (lo del recorrido anterior y lo ya actualizado); solo
+    // hace falta que algún recorrido haya terminado alguna vez (en el primero todavía faltan productos).
     const alcance = env.inventarioSapWarehouses.length ? Prisma.sql`
       AND NOT EXISTS (SELECT 1 FROM bodegas WHERE "deEstaBodega"
         AND "warehouseCode" NOT IN (${Prisma.join(env.inventarioSapWarehouses)}))` : Prisma.empty;
     const [fila] = await db.$queryRaw`
       SELECT EXISTS (SELECT 1 FROM bodegas WHERE "deEstaBodega")
-        AND (SELECT COUNT(*) = 2 FROM sincronizacion_recorridos
-             WHERE "finalizadoEn" IS NOT NULL AND (
-               (entidad = 'almacenes' AND "iniciadoEn" >= now() - interval '48 hours') OR
-               (entidad = 'existencias' AND "iniciadoEn" >= now() - (${env.inventarioSapMaxAgeMinutes} * interval '1 minute'))))
-        AND NOT EXISTS (SELECT 1 FROM productos_existencias e, sincronizacion_recorridos r
-          WHERE r.entidad = 'existencias' AND e."actualizadoEn" < r."iniciadoEn") ${alcance} AS disponible`;
+        AND EXISTS (SELECT 1 FROM sincronizacion_recorridos
+          WHERE entidad = 'almacenes' AND "finalizadoEn" IS NOT NULL AND "iniciadoEn" >= now() - interval '48 hours')
+        AND EXISTS (SELECT 1 FROM sincronizacion_recorridos r WHERE r.entidad = 'existencias' AND (r."finalizadoEn" IS NOT NULL
+          OR EXISTS (SELECT 1 FROM productos_existencias e WHERE e."actualizadoEn" < r."iniciadoEn")))
+        AND (SELECT MIN("actualizadoEn") FROM productos_existencias)
+          >= now() - (${env.inventarioSapMaxAgeMinutes} * interval '1 minute') ${alcance} AS disponible`;
     return fila?.disponible === true;
   },
   // Una operación por producto a la vez: recepciones, reposiciones, descuentos y picking no se pisan.
