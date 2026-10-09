@@ -6,10 +6,11 @@ import { inventarioRepository as repo } from "./inventario.repository.js";
 import { retirarLotes, contarLotes } from "./inventario.lotes.js";
 import { clasificar, codigoCaja, porPasar, repartirEnCajas, repartirTraspaso, lotesDeTraspaso, cajaParaUsarAntes, textoAsignacion,
   editarCajas, elegirCajas } from "./inventario.calculo.js";
-import { armarCuadre } from "./inventario.reporte.js";
+import { armarCuadre, armarCuadreAlmacen } from "./inventario.reporte.js";
 
 const OPCION_FILTRAR_PEDIDOS = "pedidosSoloDeEstaBodega";
 const OPCION_ALMACENES_POR_BODEGA = "almacenesPorBodega";
+const OPCION_SOLO_CONTEO = "almacenesSoloConteo";
 const falla = (code, statusCode, message) => new AppError({ code, statusCode, message });
 const sinProducto = () => falla("PRODUCTO_NO_ENCONTRADO", 404, "Producto no encontrado");
 const sinCaja = () => falla("CAJA_NO_ENCONTRADA", 404, "No hay una caja con ese código");
@@ -74,10 +75,14 @@ export async function resumenInventario() {
     const filas = await repo.conteoBodega(bodega, nombres[bodega].almacen);
     return { total: filas.length, contados: filas.filter((f) => f.contado).length };
   };
-  const [conteoGrande, conteoPequena, pases] = await Promise.all([avance("grande"), avance("pequena"),
-    comparacionDisponible ? pasesPendientes() : []]);
+  const [conteoGrande, conteoPequena, pases, soloConteo] = await Promise.all([avance("grande"), avance("pequena"),
+    comparacionDisponible ? pasesPendientes() : [], almacenesSoloConteo()]);
+  const conteoAlmacenes = await Promise.all(soloConteo.map(async (a) => {
+    const filas = await repo.conteoAlmacen(a.almacen);
+    return { ...a, avance: { total: filas.length, contados: filas.filter((f) => f.contado).length } };
+  }));
   return { data: { almacenes, comparacionDisponible, existenciasSapAl, bodegas: nombres,
-    conteo: { grande: conteoGrande, pequena: conteoPequena }, ...bodegas,
+    conteo: { grande: conteoGrande, pequena: conteoPequena }, soloConteo: conteoAlmacenes, ...bodegas,
     pendientes: { porUbicar: contar("por_ubicar"), porDescontar: contar("por_descontar"), porPasar: pases.length, actualizando: contar("actualizando"),
       conteoInicial: contar("conteo_inicial"), faltaEnSap: vistas.filter((v) => v.faltaEnSap > 0).length },
     porVencer: { vencidos: porVencer.filter((l) => l.vencido).length, proximos: porVencer.filter((l) => !l.vencido).length },
@@ -159,11 +164,12 @@ export async function reporteCuadre() {
   const bodegas = await bodegasConNombre();
   if (!bodegas.grande || !bodegas.pequena) throw falla("BODEGAS_SIN_ALMACEN", 409,
     "Falta asignar el almacén de SAP de cada bodega (Panel del supervisor → Almacenes)");
-  const [filas, porBodega, existenciasSapAl] = await Promise.all([repo.estados(),
-    repo.cuadrePorBodega(bodegas.grande.almacen, bodegas.pequena.almacen), repo.existenciasSapAl()]);
+  const [filas, porBodega, existenciasSapAl, soloConteo] = await Promise.all([repo.estados(),
+    repo.cuadrePorBodega(bodegas.grande.almacen, bodegas.pequena.almacen), repo.existenciasSapAl(), almacenesSoloConteo()]);
+  const almacenes = await Promise.all(soloConteo.map(async (a) => ({ ...a, ...armarCuadreAlmacen(await repo.conteoAlmacen(a.almacen)) })));
   const ahora = Date.now();
   return { data: { generadoEn: new Date(ahora).toISOString(), existenciasSapAl, bodegas,
-    ...armarCuadre({ filas, porBodega: new Map(porBodega.map((b) => [b.itemCode, b])), ahora }) } };
+    ...armarCuadre({ filas, porBodega: new Map(porBodega.map((b) => [b.itemCode, b])), ahora }), almacenes } };
 }
 
 // Productos que todavía no entraron al inventario y SAP dice que hay: la lista del conteo inicial.
@@ -655,12 +661,13 @@ async function pasesPendientes(itemCodes = null, db = undefined) {
 export async function listarAlmacenes() {
   const [almacenes, filtrar] = await Promise.all([repo.almacenes(), repo.opcion(OPCION_FILTRAR_PEDIDOS)]);
   const porBodega = await almacenesPorBodega(almacenes.filter((a) => a.deEstaBodega).map((a) => a.warehouseCode));
-  return { data: { almacenes, pedidosSoloDeEstaBodega: filtrar === true, almacenGrande: porBodega.grande, almacenPequena: porBodega.pequena } };
+  return { data: { almacenes, pedidosSoloDeEstaBodega: filtrar === true, almacenGrande: porBodega.grande, almacenPequena: porBodega.pequena,
+    soloConteo: (await guardadosSoloConteo()).map(({ almacen, tipo }) => ({ almacen, tipo })) } };
 }
 
-export async function elegirAlmacenes({ almacenes, pedidosSoloDeEstaBodega, almacenGrande, almacenPequena }, { aplicacion }) {
+export async function elegirAlmacenes({ almacenes, pedidosSoloDeEstaBodega, almacenGrande, almacenPequena, soloConteo }, { aplicacion }) {
   const conocidos = new Set((await repo.almacenes()).map((a) => a.warehouseCode));
-  const desconocidos = almacenes.filter((c) => !conocidos.has(c));
+  const desconocidos = [...almacenes, ...(soloConteo ?? []).map((a) => a.almacen)].filter((c) => !conocidos.has(c));
   if (desconocidos.length) throw falla("ALMACEN_DESCONOCIDO", 400, `Almacén desconocido: ${desconocidos.join(", ")}`);
   for (const [codigo, bodega] of [[almacenGrande, "grande"], [almacenPequena, "pequeña"]]) {
     if (codigo && !almacenes.includes(codigo)) throw falla("ALMACEN_NO_MARCADO", 400, `El almacén de la bodega ${bodega} (${codigo}) tiene que estar marcado`);
@@ -671,10 +678,18 @@ export async function elegirAlmacenes({ almacenes, pedidosSoloDeEstaBodega, alma
   const elegir = (nuevo, previo) => { const c = nuevo !== undefined ? nuevo : previo ?? null; return c && almacenes.includes(c) ? c : null; };
   const porBodega = { grande: elegir(almacenGrande, anterior?.grande), pequena: elegir(almacenPequena, anterior?.pequena) };
   if (porBodega.grande && porBodega.grande === porBodega.pequena) porBodega.pequena = null;
+  // Solo conteo: no pueden estar marcados como de esta bodega (sumarían en la comparación de la 01 y la 02). Sin enviar,
+  // quedan como estaban, menos los que ahora se marcaron.
+  const marcadoYConteo = (soloConteo ?? []).find((a) => almacenes.includes(a.almacen));
+  if (marcadoYConteo) throw falla("ALMACEN_SOLO_CONTEO_MARCADO", 400,
+    `La ${marcadoYConteo.almacen} es solo para contar: desmarcala de los almacenes de esta bodega`);
+  const conteo = (soloConteo ?? await guardadosSoloConteo()).filter((a) => !almacenes.includes(a.almacen))
+    .map(({ almacen, tipo }) => ({ almacen, tipo }));
   await repo.transaccion(async (tx) => {
     await repo.marcarAlmacenes(almacenes, tx);
     await repo.guardarOpcion(OPCION_FILTRAR_PEDIDOS, pedidosSoloDeEstaBodega, aplicacion, tx);
     await repo.guardarOpcion(OPCION_ALMACENES_POR_BODEGA, porBodega, aplicacion, tx);
+    await repo.guardarOpcion(OPCION_SOLO_CONTEO, conteo, aplicacion, tx);
   });
   return listarAlmacenes();
 }
@@ -775,6 +790,86 @@ export async function marcarSinExistencia(itemCode, entrada, { aplicacion }) {
     await fotoCuadre(tx, { itemCode, bodega, accion: "no_hay", cantidad: 0, primero, hechoPor: aplicacion });
     return { data: { itemCode, bodega, unidades: 0 } };
   }, { operacionId: entrada.operacionId, tipo: "sinExistencia", entrada, aplicacion, itemCode });
+}
+
+// ---------- Almacenes "solo conteo" (la 03 y la 04) ----------
+// Se cuentan y se comparan con lo que SAP tiene ahora en ese almacén; no tienen recepciones, traspasos ni pedidos y no
+// entran en la comparación de la 01 y la 02. "cajas": cajas enteras por lote y un bulto (como la 01, sin etiquetas);
+// "sueltas": unidades por lote (como la 02). Cualquiera cuenta; un conteo ya guardado lo corrige el supervisor.
+
+async function guardadosSoloConteo() {
+  const guardado = await repo.opcion(OPCION_SOLO_CONTEO);
+  return Array.isArray(guardado)
+    ? guardado.filter((a) => a && typeof a.almacen === "string" && ["cajas", "sueltas"].includes(a.tipo)) : [];
+}
+async function almacenesSoloConteo() {
+  const lista = await guardadosSoloConteo();
+  if (!lista.length) return [];
+  const nombres = await repo.nombresDeAlmacenes(lista.map((a) => a.almacen));
+  return lista.map((a) => ({ almacen: a.almacen, nombre: nombres.get(a.almacen) ?? a.almacen, tipo: a.tipo }));
+}
+async function exigirSoloConteo(almacen) {
+  const elegido = (await almacenesSoloConteo()).find((a) => a.almacen === almacen);
+  if (!elegido) throw falla("ALMACEN_NO_ES_DE_CONTEO", 404,
+    `La ${almacen} no está elegida para contar (Panel del supervisor → Almacenes)`);
+  return elegido;
+}
+
+export async function listarConteoAlmacen(almacen, { buscar, estado, pagina, limit }) {
+  const elegido = await exigirSoloConteo(almacen);
+  const vistas = (await repo.conteoAlmacen(almacen)).map((f) => ({ itemCode: f.itemCode, itemName: f.itemName, sap: Math.round(f.sap),
+    unidades: f.unidades, cajas: f.cajas, contado: f.contado === true, codigos: f.codigos }));
+  const texto = buscar ? normalizar(buscar) : null;
+  const cumple = { falta: (v) => !v.contado, contados: (v) => v.contado, sin_codigo: (v) => v.codigos === 0, todos: () => true };
+  const elegidas = vistas.filter(cumple[estado]).filter(coincide(texto));
+  return { data: elegidas.slice(pagina * limit, (pagina + 1) * limit), total: elegidas.length, almacen: elegido,
+    avance: { total: vistas.length, contados: vistas.filter((v) => v.contado).length }, sinCodigo: vistas.filter(cumple.sin_codigo).length };
+}
+
+export async function consultarConteoAlmacen(almacen, itemCode) {
+  const elegido = await exigirSoloConteo(almacen);
+  const [producto, conteo, sap, ultima] = await Promise.all([repo.producto(itemCode), repo.conteoAlmacenProducto(almacen, itemCode),
+    repo.sapEnAlmacen(itemCode, almacen), repo.ultimaRecepcion(itemCode)]);
+  if (!producto) throw sinProducto();
+  return { data: {
+    itemCode: producto.itemCode, itemName: producto.itemName, almacen: elegido, sap,
+    codigos: producto.codigosBarras.map((c) => ({ id: c.id, codigo: c.codigo, origen: c.origen, confirmado: c.confirmacionPicking?.esUnidadIndividual === true,
+      registradoPor: c.registradoPor?.replace(/^operador:/, "") ?? null })),
+    codigosCaja: (producto.codigosCaja ?? []).map((c) => ({ id: c.id, codigo: c.codigo, registradoPor: c.registradoPor?.replace(/^operador:/, "") ?? null })),
+    contado: Boolean(conteo), unidades: conteo?.unidades ?? 0, cajas: conteo?.cajas ?? 0,
+    lineas: (conteo?.lineas ?? []).map((l) => ({ lote: l.lote, vencimiento: fechaIso(l.vencimiento), cajas: l.cajas, unidadesPorCaja: l.unidadesPorCaja,
+      unidades: l.unidades })),
+    contadoPor: conteo?.contadoPor?.replace(/^operador:/, "") ?? null, contadoEn: conteo?.contadoEn ?? null,
+    actualizadoPor: conteo?.actualizadoPor?.replace(/^operador:/, "") ?? null, actualizadoEn: conteo?.actualizadoEn ?? null,
+    sugerencia: ultima ? { unidadesPorCaja: ultima.unidadesIniciales } : null,
+  } };
+}
+
+// Guarda (o reemplaza) lo contado de un producto en el almacén. Sin grupos, bulto ni lotes: "no hay".
+export async function guardarConteoAlmacen(almacen, itemCode, entrada, { aplicacion, supervisor }) {
+  const elegido = await exigirSoloConteo(almacen);
+  const cajas = elegido.tipo === "cajas";
+  if (cajas ? entrada.lotes !== undefined : entrada.grupos !== undefined || entrada.bulto !== undefined) {
+    throw falla("CONTEO_NO_CORRESPONDE", 400, cajas ? `La ${almacen} se cuenta por cajas` : `La ${almacen} se cuenta por unidades de cada lote`);
+  }
+  const fecha = (v) => (v ? new Date(`${v}T00:00:00.000Z`) : null);
+  const lineas = cajas
+    ? [...(entrada.grupos ?? []).map((g) => ({ lote: g.lote ?? null, vencimiento: fecha(g.vencimiento), cajas: g.cajas,
+      unidadesPorCaja: g.unidadesPorCaja, unidades: g.cajas * g.unidadesPorCaja })),
+    ...(entrada.bulto ? [{ lote: entrada.bulto.lote ?? null, vencimiento: fecha(entrada.bulto.vencimiento), cajas: null,
+      unidadesPorCaja: null, unidades: entrada.bulto.unidades }] : [])]
+    : (entrada.lotes ?? []).map((l) => ({ lote: l.lote ?? null, vencimiento: fecha(l.vencimiento), cajas: null, unidadesPorCaja: null,
+      unidades: l.unidades }));
+  const unidades = lineas.reduce((t, l) => t + l.unidades, 0);
+  const totalCajas = lineas.reduce((t, l) => t + (l.cajas ?? 0), 0);
+  return repo.conProducto(itemCode, async (tx) => {
+    if (!(await repo.existeProducto(itemCode, tx))) throw sinProducto();
+    const anterior = await repo.conteoAlmacenProducto(almacen, itemCode, tx);
+    if (anterior && !supervisor) throw falla("CONTEO_YA_HECHO", 403,
+      `Ya está contado en la ${almacen}: si faltó algo, el supervisor puede editar el conteo.`);
+    await repo.guardarConteoAlmacen({ almacen, itemCode, unidades, cajas: totalCajas, lineas, quien: aplicacion }, tx);
+    return { data: { almacen, itemCode, unidades, cajas: totalCajas, antes: anterior?.unidades ?? null } };
+  }, { operacionId: entrada.operacionId, tipo: "conteoAlmacen", entrada, aplicacion, itemCode });
 }
 
 // Para la lista de pedidos: los almacenes por los que filtrar, o null si no se filtra.

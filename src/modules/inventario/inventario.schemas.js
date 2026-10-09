@@ -102,7 +102,11 @@ export const almacenesSchema = z.object({
   // Qué almacén marcado es la bodega grande y cuál la pequeña. Sin enviar, queda como estaba.
   almacenGrande: codigoAlmacen.nullable().optional(),
   almacenPequena: codigoAlmacen.nullable().optional(),
-}).strict();
+  // Almacenes solo para contar (la 03, la 04), con cómo se cuentan. Sin enviar, quedan como estaban.
+  soloConteo: z.array(z.object({ almacen: codigoAlmacen, tipo: z.enum(["cajas", "sueltas"]) }).strict()).max(10)
+    .refine((lista) => new Set(lista.map((a) => a.almacen)).size === lista.length, "Hay almacenes repetidos").optional(),
+}).strict().refine((a) => !(a.soloConteo ?? []).some((c) => c.almacen === a.almacenGrande || c.almacen === a.almacenPequena),
+  { message: "Un almacén solo para contar no puede ser la bodega grande ni la pequeña", path: ["soloConteo"] });
 export const bodegaParamsSchema = z.object({ bodega: z.enum(["grande", "pequena"]) });
 export const almacenParamsSchema = z.object({ codigo: codigoAlmacen });
 export const conteoQuerySchema = z.object({
@@ -122,3 +126,16 @@ export const registroCodigoSchema = z.object({
   codigo: z.string().trim().min(1).max(64).regex(/^[\x20-\x7E]+$/, "El código solo puede tener letras, números y símbolos"),
   itemCode,
 }).strict();
+
+// Conteo de un almacén "solo conteo": por cajas (grupos y bulto, como la 01) o por lotes (como la 02). Vacío: no hay.
+export const almacenConteoParamsSchema = z.object({ almacen: codigoAlmacen });
+export const almacenProductoParamsSchema = z.object({ almacen: codigoAlmacen, itemCode });
+export const conteoAlmacenSchema = z.object({ operacionId,
+  grupos: z.array(grupoCajas).max(50).optional(),
+  bulto: z.object({ unidades, lote, vencimiento: vence.nullable().optional() }).strict().nullable().optional(),
+  lotes: z.array(z.object({ unidades, lote, vencimiento: vence.nullable().optional() }).strict()).max(50)
+    .refine((filas) => new Set(filas.map((f) => JSON.stringify([f.lote ?? null, f.vencimiento ?? null]))).size === filas.length, "No repetir lotes").optional(),
+}).strict()
+  .refine((r) => (r.grupos ?? []).reduce((t, g) => t + g.cajas, 0) <= MAX_CAJAS, { message: `Hasta ${MAX_CAJAS} cajas`, path: ["grupos"] })
+  .refine((r) => (r.grupos ?? []).reduce((t, g) => t + g.cajas * g.unidadesPorCaja, 0) + (r.bulto?.unidades ?? 0)
+    + (r.lotes ?? []).reduce((t, l) => t + l.unidades, 0) <= 1_000_000, { message: "Demasiadas unidades", path: ["grupos"] });

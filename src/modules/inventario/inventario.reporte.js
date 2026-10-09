@@ -38,3 +38,26 @@ export function armarCuadre({ filas, porBodega, ahora = Date.now() }) {
     menos, mas,
   };
 }
+
+// Almacén "solo conteo" (la 03, la 04): lo contado frente a lo que SAP tiene ahora en ese almacén. filas: las de
+// repo.conteoAlmacen(). Lo que SAP tiene y no se contó va como número en pendientes; lo contado que SAP no tiene ahí, como
+// sobrante.
+export function armarCuadreAlmacen(filas) {
+  const menos = [], mas = [];
+  let cuadran = 0, pendientes = 0;
+  for (const f of filas) {
+    if (!f.contado) { pendientes += 1; continue; }
+    const sap = Math.round(f.sap ?? 0);
+    const diferencia = f.unidades - sap;
+    if (diferencia === 0) { cuadran += 1; continue; }
+    (diferencia < 0 ? menos : mas).push({ itemCode: f.itemCode, itemName: f.itemName, contado: f.unidades, cajas: f.cajas, sap, diferencia });
+  }
+  menos.sort((a, b) => a.diferencia - b.diferencia || porNombre(a, b));
+  mas.sort((a, b) => b.diferencia - a.diferencia || porNombre(a, b));
+  const unidades = (lista) => lista.reduce((t, x) => t + x.diferencia, 0);
+  return {
+    resumen: { contados: cuadran + menos.length + mas.length, cuadran,
+      menos: { productos: menos.length, unidades: unidades(menos) }, mas: { productos: mas.length, unidades: unidades(mas) }, pendientes },
+    menos, mas,
+  };
+}

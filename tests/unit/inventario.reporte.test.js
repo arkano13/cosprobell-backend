@@ -64,3 +64,13 @@ test("ordena por la diferencia más grande y, si empatan, por nombre", () => {
     [bodega("A", { sapPequena: 12 }), bodega("B", { sapPequena: 12 }), bodega("C", { sapPequena: 1 })]);
   assert.deepEqual(r.menos.map((x) => x.itemName), ["Alfa", "Beta", "Ce"]);
 });
+
+test("almacén solo conteo: compara lo contado con SAP de ahora; lo no contado es pendiente y lo que SAP no tiene, sobrante", async () => {
+  const { armarCuadreAlmacen } = await import("../../src/modules/inventario/inventario.reporte.js");
+  const f = (itemCode, sap, unidades, contado = true, cajas = 0) => ({ itemCode, itemName: `Producto ${itemCode}`, sap, unidades, cajas, contado });
+  const r = armarCuadreAlmacen([f("A", 50, 50), f("B", 50, 40), f("C", 0, 5), f("D", 30.4, 0, false), f("E", 12, 36, true, 3), f("F", 7, 0)]);
+  assert.deepEqual(r.resumen, { contados: 5, cuadran: 1, menos: { productos: 2, unidades: -17 }, mas: { productos: 2, unidades: 29 }, pendientes: 1 });
+  assert.deepEqual(r.menos.map((x) => [x.itemCode, x.diferencia]), [["B", -10], ["F", -7]]);
+  assert.deepEqual(r.mas, [{ itemCode: "E", itemName: "Producto E", contado: 36, cajas: 3, sap: 12, diferencia: 24 },
+    { itemCode: "C", itemName: "Producto C", contado: 5, cajas: 0, sap: 0, diferencia: 5 }]);
+});

@@ -5,7 +5,8 @@ import * as v from "./inventario.schemas.js";
 import * as c from "./inventario.controller.js";
 
 // Inventario de la bodega. Se monta en /inventario. Consultar, recibir, reponer, aceptar un traspaso de SAP, elegir el
-// lote de lo que SAP descontó y registrar un código de barras al contar: aplicaciones y operadores. Cambiar un lote ya elegido, contar la pequeña, editar el conteo de la grande y corregir una caja: solo el supervisor.
+// lote de lo que SAP descontó, registrar un código de barras al contar y contar los almacenes solo para conteo (la 03, la 04):
+// aplicaciones y operadores. Cambiar un lote ya elegido, contar la pequeña, editar el conteo de la grande y corregir una caja: solo el supervisor.
 const router = Router();
 router.get("/resumen", c.resumen);
 router.get("/productos", validate({ query: v.buscarQuerySchema }), c.productos);
@@ -16,6 +17,10 @@ router.get("/existencias", validate({ query: v.existenciasQuerySchema }), c.exis
 router.get("/bodegas/:bodega", validate({ params: v.bodegaParamsSchema, query: v.bodegaQuerySchema }), c.bodega);
 router.get("/almacenes", c.almacenes);
 router.get("/conteo/:bodega", validate({ params: v.bodegaParamsSchema, query: v.conteoQuerySchema }), c.conteo);
+router.get("/conteo-almacenes/:almacen", validate({ params: v.almacenConteoParamsSchema, query: v.conteoQuerySchema }), c.conteoAlmacen);
+router.get("/conteo-almacenes/:almacen/productos/:itemCode", validate({ params: v.almacenProductoParamsSchema }), c.productoConteoAlmacen);
+router.put("/conteo-almacenes/:almacen/productos/:itemCode", validate({ params: v.almacenProductoParamsSchema, body: v.conteoAlmacenSchema }),
+  c.guardarConteoAlmacen);
 router.post("/productos/:itemCode/sin-existencia", validate({ params: v.itemCodeParamsSchema, body: v.sinExistenciaSchema }), c.sinExistencia);
 router.get("/almacenes/:codigo/productos", validate({ params: v.almacenParamsSchema, query: v.almacenQuerySchema }), c.productosDeAlmacen);
 router.get("/cajas/:codigo", validate({ params: v.cajaParamsSchema }), c.caja);
