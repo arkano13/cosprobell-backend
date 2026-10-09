@@ -163,6 +163,35 @@ export const inventarioRepository = {
   },
 
   // Conteo de una bodega: los productos que SAP tiene en su almacén, con lo registrado y si ya se contaron.
+  // Almacenes "solo conteo": lo que SAP tiene en el almacén y lo contado ahí, producto por producto (también lo contado
+  // que SAP no tiene en ese almacén).
+  conteoAlmacen(almacen, db = prisma) {
+    return db.$queryRaw`
+      WITH s AS (SELECT "itemCode", SUM("inStock")::float AS sap FROM productos_existencias WHERE "warehouseCode" = ${almacen}
+                 GROUP BY "itemCode" HAVING SUM("inStock") > 0),
+           c AS (SELECT "itemCode", unidades, cajas FROM inventario_conteos_almacen WHERE almacen = ${almacen})
+      SELECT p."itemCode", p."itemName", COALESCE(s.sap, 0) AS sap, COALESCE(c.unidades, 0)::int AS unidades,
+             COALESCE(c.cajas, 0)::int AS cajas, (c."itemCode" IS NOT NULL) AS contado,
+             (SELECT COUNT(*) FROM productos_codigos_barras b WHERE b."itemCode" = p."itemCode" AND b."retiradoEnSap" = false)::int AS codigos
+      FROM productos p LEFT JOIN s ON s."itemCode" = p."itemCode" LEFT JOIN c ON c."itemCode" = p."itemCode"
+      WHERE s."itemCode" IS NOT NULL OR c."itemCode" IS NOT NULL
+      ORDER BY p."itemName", p."itemCode"`;
+  },
+  conteoAlmacenProducto(almacen, itemCode, db = prisma) {
+    return db.inventarioConteoAlmacen.findUnique({ where: { almacen_itemCode: { almacen, itemCode } },
+      include: { lineas: { orderBy: { id: "asc" } } } });
+  },
+  // Reemplaza el conteo del producto en el almacén. contadoPor queda con quien lo contó la primera vez.
+  async guardarConteoAlmacen({ almacen, itemCode, unidades, cajas, lineas, quien }, db = prisma) {
+    await db.inventarioConteoAlmacen.upsert({ where: { almacen_itemCode: { almacen, itemCode } },
+      create: { almacen, itemCode, unidades, cajas, contadoPor: quien, actualizadoPor: quien },
+      update: { unidades, cajas, actualizadoPor: quien, actualizadoEn: new Date() } });
+    await db.inventarioConteoAlmacenLinea.deleteMany({ where: { almacen, itemCode } });
+    if (lineas.length) await db.inventarioConteoAlmacenLinea.createMany({ data: lineas.map((l) => ({ almacen, itemCode, ...l })) });
+  },
+  async existeProducto(itemCode, db = prisma) {
+    return (await db.producto.count({ where: { itemCode } })) > 0;
+  },
   conteoBodega(bodega, almacen, db = prisma) {
     const registrado = bodega === "grande"
       ? Prisma.sql`SELECT "itemCode", SUM(unidades)::int AS unidades, (COUNT(*) FILTER (WHERE unidades > 0))::int AS cajas

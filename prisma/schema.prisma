@@ -105,6 +105,7 @@ model Producto {
   lotesPequena  InventarioPequenaLote[]
   cajas         InventarioCaja[]
   codigosCaja   InventarioCodigoCaja[]
+  conteosAlmacen InventarioConteoAlmacen[]
 
   @@map("productos")
 }
@@ -803,6 +804,41 @@ model InventarioCodigoCaja {
 
   @@index([itemCode])
   @@map("inventario_codigos_caja")
+}
+
+// Almacenes "solo conteo" (la 03 y la 04): se cuentan y se comparan con SAP, sin movimientos. Un conteo por producto y
+// almacén; cada edición reemplaza sus líneas. La configuración almacenesSoloConteo dice qué almacenes y de qué tipo.
+model InventarioConteoAlmacen {
+  almacen        String
+  itemCode       String
+  producto       Producto @relation(fields: [itemCode], references: [itemCode])
+  unidades       Int // total contado (0 = no hay)
+  cajas          Int      @default(0) // cajas enteras contadas (almacenes por cajas)
+  contadoPor     String?
+  contadoEn      DateTime @default(now())
+  actualizadoPor String?
+  actualizadoEn  DateTime @default(now())
+  lineas         InventarioConteoAlmacenLinea[]
+
+  @@id([almacen, itemCode])
+  @@map("inventario_conteos_almacen")
+}
+
+// Lo contado por lote: cajas × unidadesPorCaja (por cajas), o unidades sueltas (por lote y el bulto de un almacén por
+// cajas, con cajas en null).
+model InventarioConteoAlmacenLinea {
+  id              Int       @id @default(autoincrement())
+  almacen         String
+  itemCode        String
+  conteo          InventarioConteoAlmacen @relation(fields: [almacen, itemCode], references: [almacen, itemCode], onDelete: Cascade)
+  lote            String?
+  vencimiento     DateTime? @db.Date
+  cajas           Int?
+  unidadesPorCaja Int?
+  unidades        Int
+
+  @@index([almacen, itemCode])
+  @@map("inventario_conteos_almacen_lineas")
 }
 
 // Cada cambio de unidades, con quién, cuándo y por qué. cantidad con signo: + entra, − sale.

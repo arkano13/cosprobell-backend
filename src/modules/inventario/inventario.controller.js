@@ -15,6 +15,11 @@ export const existencias = manejar((req) => s.listarExistencias(req.validatedQue
 export const bodega = manejar((req) => s.listarBodega(req.params.bodega, req.validatedQuery));
 export const almacenes = manejar(() => s.listarAlmacenesSap());
 export const conteo = manejar((req) => s.listarConteo(req.params.bodega, req.validatedQuery));
+export const conteoAlmacen = manejar((req) => s.listarConteoAlmacen(req.params.almacen, req.validatedQuery));
+export const productoConteoAlmacen = manejar((req) => s.consultarConteoAlmacen(req.params.almacen, req.params.itemCode));
+// Un conteo ya guardado lo cambia el supervisor (o una aplicación).
+export const guardarConteoAlmacen = manejar((req) => s.guardarConteoAlmacen(req.params.almacen, req.params.itemCode, req.body,
+  { ...quien(req), supervisor: req.operador?.rol === "supervisor" || !req.operador }));
 export const sinExistencia = manejar((req) => s.marcarSinExistencia(req.params.itemCode, req.body, quien(req)));
 export const productosDeAlmacen = manejar((req) => s.listarProductosDeAlmacen(req.params.codigo, req.validatedQuery));
 export const caja = manejar((req) => s.consultarCaja(req.params.codigo));
