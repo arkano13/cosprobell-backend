@@ -1,4 +1,5 @@
 import sincronizacionRoutes from "./modules/sincronizacion/sincronizacion.routes.js";
+import { ingresoFinanzas, consultasFinanzas } from "./modules/finanzas/finanzas.routes.js";
 import express from "express";
 import helmet from "helmet";
 import cors from "cors";
@@ -28,6 +29,7 @@ app.use(cors({ maxAge: 7200 }));
 app.use(express.json({ limit: "1mb" }));
 app.use(pinoHttp({ logger }));
 app.use(healthRoutes);
+app.use("/integracion/finanzas", ingresoFinanzas);
 app.use("/integracion", sincronizacionRoutes);
 // Ingreso con nombre y PIN: acepta la clave de solo ingreso de la app de escritorio.
 app.use(operadoresRoutes);
@@ -43,6 +45,7 @@ app.use("/supervisor", supervisorRoutes);
 app.use("/inventario", inventarioRoutes);
 // Un operador solo llega hasta pedidos, picking, el panel y el inventario.
 app.use(soloAplicaciones);
+app.use("/finanzas", consultasFinanzas);
 app.use(productosRoutes);
 app.use(bodegasRoutes);
 app.use(etiquetasRoutes);

@@ -38,6 +38,8 @@ for (const archivo of await readdir(join(raiz, "src/modules/sincronizacion"))) {
   if (archivo.endsWith(".schemas.js")) await copiar(join("src/modules/sincronizacion", archivo));
 }
 await copiar("node_modules/zod");
+await copiar("src/shared/finanzas");
+for (const archivo of ["ejecutar-finanzas.cmd", "ejecutar-finanzas-oculto.vbs"]) await copiar(join("puente/windows", archivo), archivo);
 for (const archivo of ["ejecutar-puente.cmd", "instalar-tarea.cmd", "desinstalar-tarea.cmd"]) await copiar(join("puente/windows", archivo), archivo);
 for (const archivo of ["scripts/ver-certificado.js", "scripts/comprobar-candado-puente.js", ".env.puente.example"]) await copiar(archivo);
 await copiar("docs/INSTALAR_PUENTE_WINDOWS.md", "LEEME.md");
@@ -45,6 +47,7 @@ await copiar("docs/PRUEBAS_PEDIDOS_SCANNER.md", "PRUEBAS_PEDIDOS_SCANNER.md");
 await copiar("docs/ACTUALIZAR_ALMACENES_EXISTENCIAS.md", "ACTUALIZAR_ALMACENES_EXISTENCIAS.md");
 await copiar("docs/REDUCIR_CARGA_PUENTE.md", "REDUCIR_CARGA_PUENTE.md");
 await copiar("docs/PRODUCCION_ALMACENES.md", "PRODUCCION_ALMACENES.md");
+await copiar("docs/INSTALAR_FINANZAS.md", "INSTALAR_FINANZAS.md");
 
 const { version } = JSON.parse(await readFile(join(raiz, "package.json"), "utf8"));
 await writeFile(join(destino, "package.json"), JSON.stringify({
@@ -58,7 +61,7 @@ await writeFile(join(destino, "VERSION.txt"), `puente-cosprobell ${version}\ncom
 // y zod se resuelve dentro del paquete (no desde node_modules del proyecto).
 const verificacion = `
 import { pathToFileURL } from "node:url";
-for (const m of ["entidades", "estado", "sap.client", "backend.client", "sincronizar", "config"]) await import("./puente/" + m + ".js");
+for (const m of ["entidades", "estado", "sap.client", "backend.client", "sincronizar", "config", "finanzas.sql", "finanzas.config", "finanzas.sincronizar", "finanzas.estado"]) await import("./puente/" + m + ".js");
 if (!import.meta.resolve("zod").startsWith(pathToFileURL(process.cwd() + "/node_modules/zod/").href)) throw new Error("zod se resolvió fuera del paquete");
 `;
 const prueba = spawnSync(process.execPath, ["--input-type=module", "-e", verificacion], { cwd: destino, encoding: "utf8" });

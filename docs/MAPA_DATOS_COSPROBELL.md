@@ -1,5 +1,10 @@
 # Mapa de datos y trabajo pendiente
 
+**Actualización del 8 de octubre de 2026:** el alcance financiero completo, la revisión
+del backend y el orden de la segunda etapa están en [Etapa 2: cartera y estado de cuenta](ETAPA_2_CARTERA.md).
+Las secciones siguientes conservan el diagnóstico histórico del 27 de septiembre;
+sus estados de implementación no describen por sí solos la versión actual.
+
 Fecha: 27 de septiembre de 2026.
 Estado: propuesta basada en el ZIP, el esquema Prisma y el alcance acordado en la conversación.
 

@@ -20,12 +20,14 @@ export function fuenteExistencias(config) {
 export function consultaParaConfig(config) {
   if (config.modoExistencias !== "sql-almacenes") return { consulta: CONSULTA_EXISTENCIAS, codigos: ["01", "02"] };
   const codigos = validarAlmacenesSql(config.almacenesSap);
+  // I pertenece a OITM. Conservar A-H para las consultas ya registradas.
+  const aliases = "ABCDEFGHJK";
   const columnas = codigos.map((_, i) => {
-    const a = String.fromCharCode(65 + i), n = i + 1;
+    const a = aliases[i], n = i + 1;
     return `${a}.[WhsCode] AS [Warehouse${n}], ${a}.[OnHand] AS [InStock${n}], ${a}.[IsCommited] AS [Committed${n}], ${a}.[OnOrder] AS [Ordered${n}]`;
   });
   const joins = codigos.map((codigo, i) => {
-    const a = String.fromCharCode(65 + i);
+    const a = aliases[i];
     return `LEFT JOIN [OITW] ${a} ON I.[ItemCode] = ${a}.[ItemCode] AND ${a}.[WhsCode] = '${codigo}'`;
   });
   return { codigos, consulta: {

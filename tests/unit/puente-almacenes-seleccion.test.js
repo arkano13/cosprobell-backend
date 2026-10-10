@@ -12,6 +12,29 @@ const seleccion = ["01", "02", "v01", "v03", "v05", "v05-1", "99"];
 const config = { modoExistencias: "sql-almacenes", almacenesSap: seleccion, inventarioHabilitado: true,
   sapUrl: "https://sap.test/b1s/v1", empresa: "TEST", usuario: "test", password: "test" };
 
+for (const almacenesSap of [
+  ["01", "02", "03", "04", "99", "V01", "V03", "V05", "V05-1"],
+  ["01", "02", "03", "04", "99", "V01", "V03", "V05", "V05-1", "V06"],
+]) {
+  test(`consulta de ${almacenesSap.length} almacenes obtiene cada saldo sin confundir tablas`, () => {
+    const { consulta, codigos } = consultaParaConfig({ ...config, almacenesSap });
+    const db = new DatabaseSync(":memory:");
+    try {
+      db.exec(`CREATE TABLE OITM(ItemCode TEXT PRIMARY KEY, InvntItem TEXT);
+        CREATE TABLE OITW(ItemCode TEXT, WhsCode TEXT, OnHand REAL, IsCommited REAL, OnOrder REAL);
+        INSERT INTO OITM VALUES ('A', 'Y'), ('B', 'Y');
+        INSERT INTO OITW VALUES ('A', 'OTRO', 999, 0, 0);`);
+      const insertar = db.prepare("INSERT INTO OITW VALUES ('A', ?, ?, ?, ?)");
+      codigos.forEach((codigo, i) => insertar.run(codigo, i + 1, i + 2, i + 3));
+      const filas = db.prepare(consulta.SqlText.replace("TOP 20 ", "") + " LIMIT 20").all({ after: "" });
+      assert.equal(filas.length, 2);
+      assert.deepEqual(convertirExistenciaAlmacenes(filas[0], codigos).ItemWarehouseInfoCollection,
+        codigos.map((WarehouseCode, i) => ({ WarehouseCode, InStock: i + 1, Committed: i + 2, Ordered: i + 3 })));
+      assert.deepEqual(convertirExistenciaAlmacenes(filas[1], codigos).ItemWarehouseInfoCollection, []);
+    } finally { db.close(); }
+  });
+}
+
 test("selección rechaza duplicados, SQL inyectado y listas vacías; preserva los códigos", () => {
   for (const lista of [[], ["01", "01"], ["v01", "V01"], ["' OR 1=1"], ["01", ""], Array.from({length:11}, (_,i)=>String(i))]) {
     assert.throws(() => validarAlmacenesSql(lista));

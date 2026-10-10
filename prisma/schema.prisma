@@ -989,3 +989,38 @@ model InventarioOperacion {
 
   @@map("inventario_operaciones")
 }
+
+// Espejo financiero v1: contratos estrictos por entidad, separado del borrador
+// Float y del scanner. JSON conserva referencias SAP e importes como strings.
+model FinanzaControl {
+  entidad String @id
+  empresa String
+  recorridoId String @db.Uuid
+  configuracion Json
+  iniciadoEn DateTime @default(now())
+  finalizadoEn DateTime?
+  secuencia Int @default(0)
+  ultimoHash String?
+  cantidad Int @default(0)
+  activoId String? @db.Uuid
+  publicadoEn DateTime?
+  lecturaPublicadaDesde DateTime?
+  @@map("finanzas_control")
+}
+
+model FinanzaRegistro {
+  entidad String
+  version String
+  clave String
+  cardCode String?
+  fecha DateTime? @db.Date
+  vencimiento DateTime? @db.Date
+  datos Json
+  debe Decimal? @db.Decimal(24, 6)
+  haber Decimal? @db.Decimal(24, 6)
+  saldo Decimal? @db.Decimal(24, 6)
+  actualizadoEn DateTime @default(now())
+  @@id([entidad, version, clave])
+  @@index([entidad, version, cardCode, fecha])
+  @@map("finanzas_registros")
+}

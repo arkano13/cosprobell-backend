@@ -1,0 +1,46 @@
+import test, { before, after } from "node:test";
+import assert from "node:assert/strict";
+import { once } from "node:events";
+import { randomUUID } from "node:crypto";
+process.env.DATABASE_URL = "postgresql://test:test@127.0.0.1:1/test";
+process.env.SAP_COMPANY_DB = "TEST";
+process.env.BRIDGE_API_KEY = "clave-finanzas-ficticia-123456789012345";
+process.env.FINANZAS_APPS_AUTORIZADAS = "app-cartera";
+const { default: app } = await import("../../src/app.js");
+const { finanzasRepository: repo } = await import("../../src/modules/finanzas/finanzas.repository.js");
+const { prisma } = await import("../../src/infrastructure/database/prisma.js");
+const { logger } = await import("../../src/infrastructure/logging/logger.js");
+logger.level = "silent";
+let server, url;
+before(async () => { server = app.listen(0, "127.0.0.1"); await once(server, "listening"); url = `http://127.0.0.1:${server.address().port}`; });
+after(async () => { await new Promise(r => { server.close(r); server.closeAllConnections(); }); await prisma.$disconnect(); });
+test("HTTP finanzas: autenticación independiente y recorrido vacío confirmado", async t => {
+  let control = null;
+  t.mock.method(repo, "conBloqueo", fn => fn({}));
+  t.mock.method(repo, "otraEmpresa", async () => false);
+  t.mock.method(repo, "control", async () => control);
+  t.mock.method(repo, "iniciar", async (_e, entrada) => { control = { ...entrada, secuencia: 0, finalizadoEn: null }; });
+  t.mock.method(repo, "publicar", async () => { control.finalizadoEn = new Date(); });
+  const ruta = `${url}/integracion/finanzas/partidas`;
+  assert.equal((await fetch(`${ruta}/estado`)).status, 401);
+  const headers = { Authorization: `Bearer ${process.env.BRIDGE_API_KEY}`, "Content-Type": "application/json" };
+  const entrada = { recorridoId: randomUUID(), empresa: "TEST", desde: "2026-01-01", ventana: "2026-01-01",
+    fuente: "a".repeat(64), modo: "completo", monedaLocal: "HNL", monedaSistema: "USD" };
+  const enviar = (accion, body) => fetch(`${ruta}/${accion}`, { method: "POST", headers, body: JSON.stringify(body) });
+  assert.equal((await enviar("iniciar", { ...entrada, empresa: "OTRA" })).status, 403);
+  assert.equal((await enviar("iniciar", entrada)).status, 200);
+  assert.equal((await enviar("finalizar", { recorridoId: entrada.recorridoId, secuencia: 1 })).status, 409);
+  assert.equal((await enviar("finalizar", { recorridoId: entrada.recorridoId, secuencia: 0 })).status, 200);
+});
+test("HTTP consultas: clave de scanner no obtiene finanzas; aplicación autorizada sí", async t => {
+  const originalBuscar = prisma.apiKey.findUnique, originalActualizar = prisma.apiKey.update;
+  t.after(() => { prisma.apiKey.findUnique = originalBuscar; prisma.apiKey.update = originalActualizar; });
+  prisma.apiKey.findUnique = async () => ({ id: 1, activa: true, nombre: "scanner", alcance: "completo" });
+  prisma.apiKey.update = async () => ({});
+  assert.equal((await fetch(`${url}/finanzas/estado`, { headers: { "X-API-Key": "ficticia" } })).status, 403);
+  prisma.apiKey.findUnique = async () => ({ id: 1, activa: true, nombre: "app-cartera", alcance: "completo" });
+  t.mock.method(repo, "controles", async () => []);
+  const r = await fetch(`${url}/finanzas/estado`, { headers: { "X-API-Key": "ficticia" } });
+  assert.equal(r.status, 200); assert.equal((await r.json()).validadoContraSap, false);
+  assert.equal((await fetch(`${url}/finanzas/estado-cuenta?cardCode=C1`, { headers: { "X-API-Key": "ficticia" } })).status, 400);
+});

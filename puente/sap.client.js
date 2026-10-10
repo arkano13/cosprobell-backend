@@ -20,12 +20,12 @@ export function crearClienteSap(config, fetchImpl = fetch) {
     cookie = cookies.join("; ");
   }
   // GET con la sesión vigente; ante 401 renueva la sesión una sola vez.
-  async function obtener(ruta, cabeceras = {}) {
+  async function obtener(ruta, cabeceras = {}, lector = leerJson) {
     if (!cookie) await login();
     for (let intento = 0; ; intento++) {
       try {
         await config.control?.antesDeConsultar();
-        return await leerJson(await solicitar(`${config.sapUrl}/${ruta}`, { headers: { Cookie: cookie, ...cabeceras } }, fetchImpl));
+        return await lector(await solicitar(`${config.sapUrl}/${ruta}`, { headers: { Cookie: cookie, ...cabeceras } }, fetchImpl));
       } catch (error) {
         if (error.code !== "HTTP_401" || intento === 1) throw error;
         cookie = null; await login();
@@ -33,6 +33,33 @@ export function crearClienteSap(config, fetchImpl = fetch) {
     }
   }
   return {
+    async prepararConsultaFinanciera(definicion, crear = false) {
+      if (!/^CP_FIN_[a-f0-9]{20}$/.test(definicion.SqlCode)) throw new ErrorPuente("CONSULTA_FINANCIERA_INVALIDA");
+      const ruta = `SQLQueries('${definicion.SqlCode}')`;
+      try {
+        validarConsultaExistencias((await obtener(ruta)).SqlText, definicion);
+        return "existente";
+      } catch (error) { if (error.code !== "HTTP_404" || !crear) throw error; }
+      await config.control?.antesDeConsultar();
+      const respuesta = await solicitar(`${config.sapUrl}/SQLQueries`, { method: "POST",
+        headers: { Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify(definicion) }, fetchImpl);
+      await respuesta.body?.cancel();
+      validarConsultaExistencias((await obtener(ruta)).SqlText, definicion);
+      return "creada";
+    },
+    async paginaFinanciera(definicion, parametros, lector, tamano = 50) {
+      if (!/^CP_FIN_[a-f0-9]{20}$/.test(definicion.SqlCode)) throw new ErrorPuente("CONSULTA_FINANCIERA_INVALIDA");
+      const valores = Object.entries(parametros).map(([k, v]) => {
+        if (!/^(k[01]|history|since)$/.test(k) || !(typeof v === "string" || Number.isSafeInteger(v))) throw new ErrorPuente("CURSOR_INVALIDO");
+        const literal = typeof v === "string" ? `'${v.replaceAll("'", "''")}'` : String(v);
+        return `${k}=${encodeURIComponent(literal).replaceAll("'", "%27")}`;
+      }).join("&");
+      const datos = await obtener(`SQLQueries('${definicion.SqlCode}')/List?${valores}`, { Prefer: `odata.maxpagesize=${tamano}` }, lector);
+      validarConsultaExistencias(datos.SqlText, definicion);
+      if (!Array.isArray(datos.value) || datos.value.length > tamano ||
+        (!datos.value.length && (datos["odata.nextLink"] || datos["@odata.nextLink"]))) throw new ErrorPuente("PAGINA_SAP_INVALIDA");
+      return datos.value;
+    },
     // Solo instalación manual explícita. La ejecución normal nunca crea consultas.
     async prepararConsultaExistencias(crear = false) {
       const ruta = `SQLQueries('${consulta.SqlCode}')`;

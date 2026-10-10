@@ -36,6 +36,7 @@ const envSchema = z.object({
   APP_JWT_SECRET: z.string().optional(),
   // Nombres de API keys (separados por coma) que pueden confirmar etiquetas como unidad individual.
   ETIQUETAS_APPS_AUTORIZADAS: z.string().optional(),
+  FINANZAS_APPS_AUTORIZADAS: z.string().optional(),
   INVENTARIO_SAP_MAX_AGE_MINUTES: z.string().regex(/^\d+$/).default("30")
     .pipe(z.coerce.number().int().min(5).max(240)),
   // Actualizaciones de la app de escritorio: token de GitHub de solo lectura del repositorio de la app (privado).
@@ -78,5 +79,7 @@ export function parseEnv(variables) {
     inventarioSapWarehouses: Object.freeze(datos.INVENTARIO_SAP_WAREHOUSES),
     etiquetasAppsAutorizadas: Object.freeze((datos.ETIQUETAS_APPS_AUTORIZADAS ?? "")
       .split(",").map((nombre) => nombre.trim()).filter(Boolean)),
+    finanzasAppsAutorizadas: Object.freeze((datos.FINANZAS_APPS_AUTORIZADAS ?? "")
+      .split(",").map(nombre => nombre.trim()).filter(Boolean)),
   });
 }
