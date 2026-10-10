@@ -25,6 +25,29 @@ test("finanzas: conserva el texto decimal exacto y rechaza valores ya redondeado
   assert.equal(importe(unidades("0.1") + unidades("0.2")), "0.300000");
   assert.equal(importe(unidades("-10.20") + unidades("1.10")), "-9.100000");
 });
+test("finanzas: notación científica exacta en JSON numérico y texto", async () => {
+  for (const [entrada, esperado] of [
+    ["1E-06", "0.000001"], ["-1.2300e+2", "-123"],
+    ["9.999999999999123456e12", "9999999999999.123456"],
+    ["10e-7", "0.000001"], ["1e+12", "1000000000000"], ["0e99999", "0"],
+  ]) {
+    for (const literal of [entrada, JSON.stringify(entrada)]) {
+      const texto = JSON.stringify(filaCliente).replace('"0.3"', literal);
+      const leido = await lectorFinanciero("clientes")(new Response(`{"value":[${texto}]}`));
+      assert.equal(transformarFinanzas("clientes", leido.value, null)[0].saldo, esperado);
+    }
+  }
+  const r = transformarFinanzas("clientes", [{ ...filaCliente, nombre: "1E-06", ruta: "1e3" }], null)[0];
+  assert.equal(r.nombre, "1E-06");
+  assert.equal(r.ruta, "1e3");
+});
+test("finanzas: científico fuera de rango no se redondea ni desborda", async () => {
+  for (const entrada of ["1e-7", "1e13", "1e99999", "1e-99999", "1.2345678e0"]) {
+    const texto = JSON.stringify(filaCliente).replace('"0.3"', entrada);
+    const leido = await lectorFinanciero("clientes")(new Response(`{"value":[${texto}]}`));
+    assert.throws(() => transformarFinanzas("clientes", leido.value, null), { code: "FINANZA_SAP_INVALIDA" });
+  }
+});
 test("finanzas: no inventa zona, ruta ni datos ausentes", () => {
   assert.match(defs.clientes.consulta.SqlText, /NULL AS \[zona\], NULL AS \[ruta\]/);
   const falta = { ...filaCliente }; delete falta.saldo;
