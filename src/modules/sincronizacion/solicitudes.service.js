@@ -4,6 +4,7 @@ import { prisma } from "../../infrastructure/database/prisma.js";
 import { AppError } from "../../shared/errors/AppError.js";
 
 const entidades = ["clientes", "productos", "unidades", "codigosBarras", "pedidos", "almacenes", "existencias"];
+const entidadesManuales = habilitadas => ["productos", "pedidos", "existencias"].filter(e => habilitadas?.includes(e));
 const nombres = z.array(z.enum(entidades)).min(1).max(entidades.length).refine(v => new Set(v).size === v.length);
 const consultaSchema = z.object({ entidades: nombres }).strict();
 const progresoSchema = z.object({
@@ -39,20 +40,21 @@ export function crearServicioSolicitudes({ repo = solicitudesRepository, ahora =
     async estado(empresa) {
       validarEmpresa(empresa);
       const d = await repo.leer(empresa);
-      return { solicitud: d.solicitud ?? null, ultimaConexion: d.ultimaConexion ?? null, entidades: d.entidades ?? [] };
+      return { solicitud: d.solicitud ?? null, ultimaConexion: d.ultimaConexion ?? null, entidades: entidadesManuales(d.entidades) };
     },
     async solicitar(empresa, operadorId) {
       validarEmpresa(empresa);
       return repo.cambiar(empresa, d => {
         if (activo(d.solicitud)) return { siguiente: d, resultado: d.solicitud };
-        if (!d.entidades?.length) throw fallo("PUENTE_PENDIENTE_ACTUALIZACION", "Actualice el puente y ejecute una vez para habilitar el botón", 409);
+        const seleccionadas = entidadesManuales(d.entidades);
+        if (!seleccionadas.length) throw fallo("PUENTE_PENDIENTE_ACTUALIZACION", "Actualice el puente y ejecute una vez para habilitar el botón", 409);
         const fecha = ahora();
         if (d.solicitud && fecha - new Date(d.solicitud.creadaEn) < 60000) {
           throw fallo("SINCRONIZACION_MUY_RECIENTE", "Espere un minuto antes de solicitar otra actualización", 429);
         }
         const solicitud = { id: uuid(), estado: "pendiente", creadaEn: fecha.toISOString(),
           iniciadaEn: null, finalizadaEn: null, actualizadoEn: fecha.toISOString(),
-          operadorId, entidades: [...d.entidades], completas: [], error: null };
+          operadorId, entidades: seleccionadas, completas: [], error: null };
         return { siguiente: { ...d, solicitud }, resultado: solicitud };
       });
     },

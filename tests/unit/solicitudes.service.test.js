@@ -21,6 +21,19 @@ function preparar() {
     avanzar: ms => { tiempo += ms; } };
 }
 const capacidades = { entidades: ["productos", "pedidos", "existencias"] };
+test("botón limita las nuevas solicitudes sin cambiar capacidades ni solicitudes anteriores", async () => {
+  const { s, repo } = preparar();
+  const todas = ["clientes", "productos", "unidades", "codigosBarras", "pedidos", "almacenes", "existencias"];
+  await s.consultar("SAP", { entidades: todas });
+  assert.deepEqual((await s.estado("SAP")).entidades, capacidades.entidades);
+  const nueva = await s.solicitar("SAP", 1);
+  assert.deepEqual(nueva.entidades, capacidades.entidades);
+  assert.deepEqual((await repo.leer("SAP")).entidades, todas);
+  await repo.cambiar("SAP", d => ({ siguiente: { ...d, solicitud: { ...nueva, entidades: todas } }, resultado: null }));
+  assert.deepEqual((await s.solicitar("SAP", 1)).entidades, todas);
+  await s.consultar("SOLO_CATALOGOS", { entidades: ["clientes", "unidades"] });
+  await assert.rejects(s.solicitar("SOLO_CATALOGOS", 1), { code: "PUENTE_PENDIENTE_ACTUALIZACION" });
+});
 
 test("requiere puente actualizado, agrupa clics concurrentes y persiste al recrear el servicio", async () => {
   const { s, repo } = preparar();
