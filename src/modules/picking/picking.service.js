@@ -8,7 +8,6 @@ import { conSesionBloqueada } from "./picking.transaction.js";
 import { AppError } from "../../shared/errors/AppError.js";
 import { descontarPorPicking } from "../inventario/inventario.service.js";
 
-
 function sesionNoEncontrada() {
   return new AppError({
     code: "PICKING_NO_ENCONTRADO",
