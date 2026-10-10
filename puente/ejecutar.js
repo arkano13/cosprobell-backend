@@ -6,6 +6,7 @@ import { sincronizar } from "./sincronizar.js";
 import { ErrorPuente } from "./http.js";
 import { entidadesHabilitadas } from "./entidades.js";
 import { crearControl, entidadPendiente, ordenarEntidades } from "./control.js";
+import { prepararSolicitud, confirmarSolicitudLocal, faltaSolicitud } from "./solicitud-manual.js";
 
 let parar = false, despertar;
 for (const senal of ["SIGINT", "SIGTERM"]) process.on(senal, () => { parar = true; despertar?.(); });
@@ -46,11 +47,22 @@ try {
   let fallos = 0;
   do {
     config.control = crearControl(config);
+    let solicitud = null;
+    try {
+      solicitud = await backend.solicitud(ENTIDADES);
+      if (solicitud) await confirmarSolicitudLocal(solicitud, ENTIDADES, almacenes, backend);
+    } catch (error) {
+      if (error.code !== "HTTP_404") throw error;
+      console.error(JSON.stringify({ evento: "solicitud_no_disponible", codigo: error.code }));
+    }
     // Un error de datos en una entidad no impide sincronizar las demás; sin conexión se corta el ciclo.
     let temporal = false, fallidas = 0;
-    for (const { i, entidad } of ordenarEntidades(ENTIDADES, almacenes)) {
+    const orden = ordenarEntidades(ENTIDADES, almacenes).sort((a, b) =>
+      Number(faltaSolicitud(solicitud, b.entidad.nombre)) - Number(faltaSolicitud(solicitud, a.entidad.nombre)));
+    for (const { i, entidad } of orden) {
       if (parar) break;
-      if (!entidadPendiente(almacenes[i].estado, entidad.nombre, config)) {
+      const manual = faltaSolicitud(solicitud, entidad.nombre);
+      if (!manual && !entidadPendiente(almacenes[i].estado, entidad.nombre, config)) {
         console.log(JSON.stringify({ evento: "omitida_por_frecuencia", entidad: entidad.nombre }));
         continue;
       }
@@ -61,6 +73,7 @@ try {
       const atendido = { ...almacenes[i].estado, ultimaAtencion: new Date().toISOString() };
       await almacenes[i].guardar(atendido); almacenes[i].estado = atendido;
       try {
+        if (manual) await prepararSolicitud(almacenes[i], solicitud.id);
         const resultado = await sincronizar({ config, almacen: almacenes[i], sap, backend, entidad, detenido: () => parar });
         console.log(JSON.stringify({ evento: "ciclo", entidad: entidad.nombre, ...resultado }));
       } catch (error) {
@@ -71,10 +84,17 @@ try {
         // No imprimir cuerpos HTTP, cookies, claves, URLs ni errores del driver.
         // El detalle solo viene de ErrorPuente: código del registro y campo, sin valores.
         const detalle = error instanceof ErrorPuente ? error.detalle : undefined;
+        if (manual) {
+          const codigo = /^[A-Z0-9_]{1,60}$/.test(error.code ?? "") ? error.code : "ERROR_LOCAL";
+          await backend.progresoSolicitud(solicitud.id, [], codigo).catch(() => {});
+          solicitud = null;
+        }
         console.error(JSON.stringify({ evento: "fallo", entidad: entidad.nombre, codigo: error.code ?? "ERROR_LOCAL", temporal: error.temporal === true, detalle }));
         if (error.temporal) { temporal = true; break; }
         fallidas++;
       }
+      // Si se pierde la confirmación, conservar el éxito local y reenviarlo al reiniciar.
+      if (solicitud) await confirmarSolicitudLocal(solicitud, ENTIDADES, almacenes, backend);
     }
     console.log(JSON.stringify({ evento: "resumen", ...config.control.resumen() }));
     if (!continuo || parar) { if (temporal || fallidas) process.exitCode = 1; break; }

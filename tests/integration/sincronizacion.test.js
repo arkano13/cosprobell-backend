@@ -21,6 +21,18 @@ after(async () => { await new Promise((resolve) => { server.close(resolve); serv
 const producto = { itemCode: "P1", itemName: "Champú", barCode: "001234", valid: true, frozen: false };
 const lote = (extra = {}) => ({ version: 1, empresa: "XPRUEBAS2026", secuencia: 1, productos: [{ ...producto }], ...extra });
 const empresa = "XPRUEBAS2026";
+test("solicitudes manuales HTTP: solo puente, empresa autenticada y progreso", async t => {
+  const { solicitudesService } = await import("../../src/modules/sincronizacion/solicitudes.service.js");
+  for (const accion of ["consultar", "progreso"]) {
+    const ruta = `${url}/integracion/solicitud/${accion}`;
+    assert.equal((await fetch(ruta, { method: "POST" })).status, 401);
+    t.mock.method(solicitudesService, accion, async (origen, cuerpo) => {
+      assert.equal(origen, empresa); assert.deepEqual(cuerpo, { entidades: ["productos"] }); return { id: "prueba" };
+    });
+    const r = await fetch(ruta, { method: "POST", headers: { Authorization: `Bearer ${process.env.BRIDGE_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ entidades: ["productos"] }) });
+    assert.equal(r.status, 200); assert.equal((await r.json()).data.id, "prueba");
+  }
+});
 
 test("HTTP recorridos de inventario: autenticación, contrato y fin confirmado", async t => {
   const recorridoId = "11111111-1111-4111-8111-111111111111";

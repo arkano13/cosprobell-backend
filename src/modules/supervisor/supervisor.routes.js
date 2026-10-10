@@ -5,10 +5,18 @@ import { confirmacionBodySchema } from "../etiquetas/etiquetas.schemas.js";
 import { activoSchema, confirmacionMasivaSchema, etiquetasQuerySchema, idParamsSchema, nuevoOperadorSchema, pinSchema } from "./supervisor.schemas.js";
 import { almacenesSchema, registroCodigoSchema } from "../inventario/inventario.schemas.js";
 import * as c from "./supervisor.controller.js";
+import env from "../../config/env.js";
+import { solicitudesService } from "../sincronizacion/solicitudes.service.js";
 
 // Panel del supervisor: solo operadores con rol supervisor y sesión iniciada con PIN. Se monta en /supervisor.
 const router = Router();
 router.use(soloSupervisor);
+router.get("/sincronizacion/solicitud", async (_req, res, next) => {
+  try { res.json({ data: await solicitudesService.estado(env.sapCompanyDb) }); } catch (error) { next(error); }
+});
+router.post("/sincronizacion/solicitud", async (req, res, next) => {
+  try { res.json({ data: await solicitudesService.solicitar(env.sapCompanyDb, req.operador.id) }); } catch (error) { next(error); }
+});
 router.get("/resumen", c.resumen);
 router.get("/etiquetas", validate({ query: etiquetasQuerySchema }), c.etiquetas);
 router.post("/etiquetas/confirmacion-manual", validate({ body: confirmacionMasivaSchema }), c.confirmarManual);
