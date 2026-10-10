@@ -1,4 +1,6 @@
 import { prisma } from "../../infrastructure/database/prisma.js";
+import { conCombos } from "../picking/picking.repository.js";
+import { articulosDelPedido } from "../picking/picking.combos.js";
 export const pedidosRepository = {
   // almacenes: si viene, solo pedidos con alguna línea en esos almacenes de SAP.
   listar({ cursor, limit, estado, almacenes = null }) {
@@ -27,10 +29,12 @@ export const pedidosRepository = {
       cliente: { select: { cardName: true } }, lineas: { orderBy: { lineNum: "asc" } },
     } });
     if (!pedido) return null;
-    // Las líneas no tienen relación con productos: el nombre se agrega para mostrarlo en la bodega.
+    await conCombos(pedido);
+    // Las líneas no tienen relación con productos: el nombre se agrega para mostrarlo en la bodega (también el de los
+    // productos de cada combo).
     const productos = await prisma.producto.findMany({
-      where: { itemCode: { in: [...new Set(pedido.lineas.map((l) => l.itemCode))] } }, select: { itemCode: true, itemName: true } });
+      where: { itemCode: { in: articulosDelPedido(pedido.lineas, pedido.combos) } }, select: { itemCode: true, itemName: true } });
     const nombres = new Map(productos.map((p) => [p.itemCode, p.itemName]));
-    return { ...pedido, lineas: pedido.lineas.map((l) => ({ ...l, itemName: nombres.get(l.itemCode) ?? null })) };
+    return { ...pedido, nombres, lineas: pedido.lineas.map((l) => ({ ...l, itemName: nombres.get(l.itemCode) ?? null })) };
   },
 };

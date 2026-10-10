@@ -1,4 +1,12 @@
 import { prisma } from "../../infrastructure/database/prisma.js";
+import { cargarCombos } from "./picking.combos.js";
+
+// Deja en el pedido sus combos (pedido.combos), para que lineasParaPreparar los cambie por sus productos.
+export async function conCombos(pedido, db = prisma) {
+  if (!pedido) return pedido;
+  pedido.combos = await cargarCombos(pedido.lineas.map((l) => l.itemCode), db);
+  return pedido;
+}
 
 export const pickingRepository = {
   // Bloquear la cabecera serializa inicios del mismo pedido, incluso sin sesiones.
@@ -22,8 +30,9 @@ export const pickingRepository = {
       where: { pedidoDocEntry }, include: { lineas: true }, orderBy: { id: "asc" },
     });
   },
-  buscarPedidoConLineas(pedidoDocEntry, db = prisma) {
-    return db.pedido.findUnique({
+  // Con sus combos (pedido.combos): lineasParaPreparar los cambia por sus productos.
+  async buscarPedidoConLineas(pedidoDocEntry, db = prisma) {
+    const pedido = await db.pedido.findUnique({
       where: {
         docEntry: pedidoDocEntry,
       },
@@ -31,6 +40,7 @@ export const pickingRepository = {
         lineas: true,
       },
     });
+    return conCombos(pedido, db);
   },
 
   crearSesion({ pedidoDocEntry, usuarioId, lineas }, db = prisma) {
@@ -46,6 +56,7 @@ export const pickingRepository = {
             cantidadPedida: linea.cantidadPedida,
             uomEntry: linea.uomEntry ?? null,
             uomCode: linea.uomCode ?? null,
+            ...(linea.comboItemCode ? { comboItemCode: linea.comboItemCode, comboFactor: linea.comboFactor } : {}),
           })),
         },
       },

@@ -8,6 +8,7 @@ import { loteUnidadesSchema } from "./unidades.schemas.js";
 import { loteCodigosBarrasSchema } from "./codigosBarras.schemas.js";
 import { loteAlmacenesSchema } from "./almacenes.schemas.js";
 import { loteExistenciasSchema } from "./existencias.schemas.js";
+import { loteListasMaterialesSchema } from "./listasMateriales.schemas.js";
 import { loteDocumentosSchema, TIPOS_DOCUMENTO } from "./documentos.schemas.js";
 import { sincronizacionRepository as repo } from "./sincronizacion.repository.js";
 const conflicto = (code, message) => new AppError({ code, message, statusCode: 409 });
@@ -23,6 +24,7 @@ const DEFINICIONES = {
   codigosBarras: { schema: loteCodigosBarrasSchema, clave: "absEntry", guardar: (r, tx) => repo.guardarCodigoBarras(r, tx) },
   almacenes: { schema: loteAlmacenesSchema, clave: "warehouseCode", guardar: (r, tx) => repo.guardarAlmacen(r, tx) },
   existencias: { schema: loteExistenciasSchema, clave: "itemCode", guardar: (r, tx) => repo.guardarExistencias(r, tx) },
+  listasMateriales: { schema: loteListasMaterialesSchema, clave: "itemCode", guardar: (r, tx) => repo.guardarListaMateriales(r, tx) },
   ...Object.fromEntries(Object.entries(TIPOS_DOCUMENTO).map(([entidad, tipo]) => [entidad,
     { schema: loteDocumentosSchema(entidad), clave: "docEntry", guardar: (r, tx) => repo.guardarDocumentoStock(tipo, r, tx) }])),
 };

@@ -90,6 +90,12 @@ export const sincronizacionRepository = {
       update: { ...cliente, sincronizadoEn: new Date() },
     });
   },
+  // Reemplaza la lista entera: si en SAP cambian los productos del combo, la bodega usa la nueva.
+  guardarListaMateriales(lista, db) {
+    const { itemCode, ...datos } = lista;
+    const fila = { ...datos, sincronizadoEn: new Date() };
+    return db.listaMateriales.upsert({ where: { itemCode }, create: { itemCode, ...fila }, update: fila });
+  },
   guardarUnidad(unidad, db) {
     const { absEntry, ...datos } = unidad;
     return db.unidadMedida.upsert({ where: { absEntry }, create: unidad, update: datos });

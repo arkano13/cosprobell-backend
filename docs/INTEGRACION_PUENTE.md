@@ -85,6 +85,12 @@ Los cuatro campos son obligatorios. Inserta o actualiza por cardCode y solo toca
 
 Códigos retirados: el puente pide `GET /integracion/hora` al empezar un recorrido completo de `BarCodes` y, al terminarlo, `POST /integracion/codigosBarras/retirados` con `{ "antesDe": "<hora de inicio>" }`. Los códigos de SAP no recibidos desde esa hora se marcan `retiradoEnSap = true`: no identifican productos ni sirven para picking, pero no se borran ni pierden su confirmación. Si vuelven a aparecer en SAP se reactivan. Repetir la llamada no cambia el resultado; `antesDe` no puede ser futura.
 
+## Contrato de listas de materiales v1 (combos)
+
+`POST /integracion/listasMateriales` recibe `ProductTrees` de SAP, una por artículo padre: `{ "itemCode": "ER10474", "tipo": "iAssemblyTree", "cantidad": 1, "lineas": [{ "itemCode": "ER10028", "cantidad": 1, "tipo": "pit_Item" }] }`. `tipo` es el `TreeType` de SAP tal cual; `cantidad` es la del padre ("X Cantidad"); cada línea trae su `ItemCode`, `Quantity` e `ItemType` (`tipo` null si SAP no lo informa). Inserta o reemplaza la lista entera en `listas_materiales`. No exige que los productos existan.
+
+Solo las de tipo Conjunto (`iAssemblyTree`) son combos: el pedido trae únicamente el combo y SAP descuenta sus productos al entregar. Al preparar, la línea del combo se cambia por sus productos (`comboItemCode`, `comboFactor` en la línea de preparación): cada uno se escanea con su código confirmado como unidad individual y sale de la 02. Por cada combo pendiente se piden `lineas.cantidad / cantidad` unidades de cada producto (tiene que dar entera: si no, `409 COMBO_CANTIDAD_NO_ENTERA`); se ignoran recursos y textos, y una lista sin productos da `409 COMBO_SIN_PRODUCTOS`. Si un combo cambia en SAP con una preparación abierta, esa preparación no coincide y queda para revisión. Una lista borrada en SAP no se borra acá.
+
 ## Contratos del inventario v1: almacenes, existencias y documentos de stock
 
 Solo lectura de SAP. Sirven para comparar el inventario de la bodega con SAP; el backend nunca escribe en SAP.
