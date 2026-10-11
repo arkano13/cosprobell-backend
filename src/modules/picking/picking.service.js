@@ -119,7 +119,7 @@ async function registrarUnidad(id, codigo, tx) {
     lineaId: pendiente.id,
     itemCode: etiqueta.itemCode,
     codigo: etiqueta.codigo,
-    uomEntry: etiqueta.uomEntry,
+    uomEntry: pendiente.uomEntry,
   }, tx);
 
   if (filas.length !== 1) {

@@ -33,5 +33,8 @@ export async function obtenerPedido(docEntry) {
     preparacion = { datosValidos: false, code: error.code, message: error.message };
   }
   // Es un diagnóstico de los datos locales; iniciarPicking comprueba además las sesiones.
-  return { data: pedido, preparacion };
+  // nombres: el de cada artículo del pedido y de los productos de sus combos (las líneas de preparación de un combo
+  // traen comboItemCode).
+  const { combos, nombres, ...datos } = pedido;
+  return { data: datos, preparacion, nombres: Object.fromEntries(nombres ?? []) };
 }

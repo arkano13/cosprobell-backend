@@ -26,6 +26,7 @@ No hay una función para reanudar automáticamente una sesión en revisión: el 
 - Unidad conocida: la unidad **Manual** de SAP (`UoMEntry` -1, factor 1) cuenta como la unidad del artículo; ausente u otro valor negativo bloquea la preparación.
 - Cantidad de venta e inventario deben coincidir, tanto total como pendiente. Una conversión diferente requiere una definición posterior; no se convierte automáticamente.
 - Cada etiqueta todavía debe estar confirmada localmente como unidad individual y coincidir con la unidad de la línea.
+- Combos (lista de materiales tipo Conjunto en SAP): la línea del combo se prepara como sus productos, cantidad de combos × lo que lleva cada uno. Cada producto se escanea con su código confirmado como unidad individual (sin comparar la unidad de la línea, que va en unidades de inventario) y sale de la 02. Sin la lista de materiales sincronizada, el combo queda como una línea más. Ver `INTEGRACION_PUENTE.md`.
 
 Cosprobell usa la unidad Manual en todos sus artículos y pedidos, así que la regla Manual = unidad es la que habilita el picking real. La conversión sigue sin hacerse: si la cantidad de inventario no coincide con la de venta, la línea se bloquea igual.
 

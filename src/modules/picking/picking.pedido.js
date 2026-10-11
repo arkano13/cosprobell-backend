@@ -1,5 +1,6 @@
 import { AppError } from "../../shared/errors/AppError.js";
-import { unidadConocida } from "./picking.cantidades.js";
+import { unidadConocida, UNIDAD_MANUAL } from "./picking.cantidades.js";
+import { productosDelCombo } from "./picking.combos.js";
 
 export function comprobarPedidoElegible(pedido) {
   if (!pedido) throw new AppError({
@@ -41,6 +42,16 @@ export function lineasParaPreparar(pedido) {
     if (linea.remainingOpenInventoryQuantity !== pendiente || linea.inventoryQuantity !== linea.quantity) {
       throw error("CONVERSION_NO_CONFIRMADA", "Las cantidades de venta e inventario requieren revisar su equivalencia");
     }
+    const combo = pedido.combos?.get(linea.itemCode);
+    if (combo) {
+      // El combo no se escanea: se preparan sus productos, en unidades de inventario (cada código de barras ya está
+      // confirmado como una unidad individual del producto).
+      for (const { itemCode, factor } of productosDelCombo(combo)) {
+        abiertas.push({ pedidoLineNum: linea.lineNum, itemCode, cantidadPedida: pendiente * factor,
+          uomEntry: UNIDAD_MANUAL, uomCode: null, comboItemCode: linea.itemCode, comboFactor: factor });
+      }
+      continue;
+    }
     abiertas.push({ pedidoLineNum: linea.lineNum, itemCode: linea.itemCode,
       cantidadPedida: pendiente, uomEntry: linea.uomEntry, uomCode: linea.uomCode ?? null });
   }
@@ -52,7 +63,8 @@ export function sesionCoincideConPedido(sesion, pedido) {
   let esperadas;
   try { esperadas = lineasParaPreparar(pedido); }
   catch (error) { if (error instanceof AppError) return false; throw error; }
-  const normalizar = lineas => [...lineas].sort((a, b) => a.pedidoLineNum - b.pedidoLineNum)
-    .map(l => [l.pedidoLineNum, l.itemCode, l.cantidadPedida, l.uomEntry, l.uomCode ?? null]);
+  const normalizar = lineas => lineas
+    .map(l => [l.pedidoLineNum, l.itemCode, l.cantidadPedida, l.uomEntry, l.uomCode ?? null, l.comboItemCode ?? null, l.comboFactor ?? null])
+    .sort((a, b) => a[0] - b[0] || (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
   return JSON.stringify(normalizar(sesion.lineas)) === JSON.stringify(normalizar(esperadas));
 }

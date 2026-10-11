@@ -86,3 +86,11 @@ test("informa configuración reducida y permite nueva solicitud después de la e
   avanzar(61000);
   assert.deepEqual((await s.solicitar("SAP", 1)).entidades, ["productos"]);
 });
+
+test("el puente con listas de materiales (combos) se acepta y el botón no las pide", async () => {
+  const { s } = preparar();
+  const conCombos = ["clientes", "productos", "unidades", "codigosBarras", "listasMateriales", "pedidos", "almacenes", "existencias"];
+  assert.equal(await s.consultar("SAP", { entidades: conCombos }), null);
+  assert.deepEqual((await s.estado("SAP")).entidades, capacidades.entidades);
+  assert.deepEqual((await s.solicitar("SAP", 1)).entidades, capacidades.entidades);
+});

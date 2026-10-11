@@ -18,10 +18,11 @@ const EN_SAP = Prisma.sql`
 
 // Unidades preparadas y finalizadas cuyo pedido sigue abierto en SAP y todavía no se entregaron: ya salieron
 // de la bodega pequeña, pero SAP las sigue contando. Lo entregado se deduce de lo que SAP dejó pendiente.
-// Solo cuentan las líneas de los almacenes de esta bodega.
+// Solo cuentan las líneas de los almacenes de esta bodega. En el producto de un combo, lo pendiente del pedido son
+// combos: cada uno lleva comboFactor unidades del producto.
 const SIN_ENTREGA = Prisma.sql`
   SELECT l."itemCode", SUM(GREATEST(0, l."cantidadEscaneada" - GREATEST(0, l."cantidadPedida"
-    - COALESCE(pl."remainingOpenInventoryQuantity", pl."remainingOpenQuantity", 0))))::int AS "sinEntrega"
+    - COALESCE(l."comboFactor", 1) * COALESCE(pl."remainingOpenInventoryQuantity", pl."remainingOpenQuantity", 0))))::int AS "sinEntrega"
   FROM picking_pedidos s
   JOIN pedidos p ON p."docEntry" = s."pedidoDocEntry" AND p."documentStatus" = 'bost_Open' AND p.cancelled = false
   JOIN picking_pedidos_lineas l ON l."pickingId" = s.id
