@@ -4,8 +4,13 @@ import { recibir, estado, pedidosAbiertos, hora, codigosRetirados } from "./sinc
 import { ENTIDADES_SINCRONIZABLES } from "./sincronizacion.service.js";
 import { observarRegistros } from "./observados.service.js";
 import { registrarRecorrido } from "./recorridos.service.js";
+import { solicitudesService } from "./solicitudes.service.js";
 const router = Router();
 router.use(requireBridgeAuth);
+for (const accion of ["consultar", "progreso"]) router.post(`/solicitud/${accion}`, async (req, res, next) => {
+  try { res.json({ data: await solicitudesService[accion](req.empresaSap, req.body) }); }
+  catch (error) { next(error); }
+});
 for (const entidad of ["almacenes", "existencias"]) {
   for (const accion of ["iniciar", "finalizar"]) router.post(`/${entidad}/recorrido/${accion}`, async (req, res, next) => {
     try { res.json({ data: await registrarRecorrido(entidad, accion, req.body, req.empresaSap) }); }

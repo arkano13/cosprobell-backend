@@ -27,6 +27,18 @@ function sustituir(t, objeto, nombre, implementacion) {
   const original = objeto[nombre]; objeto[nombre] = implementacion; t.after(() => { objeto[nombre] = original; });
 }
 const TOKEN = "b".repeat(64);
+test("actualización manual: solo supervisor y operador registrado como autor", async t => {
+  const { solicitudesService } = await import("../../src/modules/sincronizacion/solicitudes.service.js");
+  const ruta = "/supervisor/sincronizacion/solicitud";
+  assert.equal((await pedir(ruta)).status, 401);
+  assert.equal((await enviar(ruta, conSesion(t, "operador"), "POST", {})).status, 403);
+  t.mock.restoreAll();
+  const headers = conSesion(t, "supervisor");
+  t.mock.method(solicitudesService, "estado", async () => ({ solicitud: null, entidades: [] }));
+  t.mock.method(solicitudesService, "solicitar", async (_empresa, autor) => { assert.equal(autor, 9); return { id: "prueba", estado: "pendiente" }; });
+  assert.equal((await pedir(ruta, headers)).status, 200);
+  assert.equal((await (await enviar(ruta, headers, "POST", {})).json()).data.estado, "pendiente");
+});
 function conSesion(t, rol) {
   t.mock.method(repo, "buscarSesion", async (tokenHash) => (tokenHash === hashApiKey(TOKEN)
     ? { id: 5, cerradaEn: null, expiraEn: new Date(Date.now() + 3600000), operador: { id: 9, nombre: "Carmen Díaz", activo: true, rol } } : null));
