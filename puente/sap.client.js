@@ -155,6 +155,8 @@ export function crearClienteSap(config, fetchImpl = fetch) {
       try {
         const datos = await obtener(`${entidad.recurso}(${literal})?$select=${entidad.campos.join(",")}`);
         if (!datos || typeof datos !== "object" || Array.isArray(datos)) throw new ErrorPuente("PAGINA_SAP_INVALIDA");
+        // Una factura revisada sola también lleva sus notas de crédito (como en el recorrido).
+        if (entidad.creditosPreparacion) datos.CreditosPreparacion = await creditosDeFactura(datos.DocEntry);
         return datos;
       } catch (error) {
         if (error.code === "HTTP_404") throw new ErrorPuente("REGISTRO_NO_ENCONTRADO_EN_SAP", false, { [entidad.claveLocal]: clave });

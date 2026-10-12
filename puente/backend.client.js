@@ -52,8 +52,8 @@ export function crearClienteBackend(config, fetchImpl = fetch) {
     },
     // Pedidos que el backend tiene abiertos, con la hora de su última actualización y la hora actual,
     // ambas del reloj del backend: así la comparación no depende del reloj de este equipo.
-    async pedidosAbiertos() {
-      const respuesta = await pedir("pedidos/abiertos");
+    async pedidosAbiertos(ruta = "pedidos/abiertos") {
+      const respuesta = await pedir(ruta);
       const { data } = await leerJson(respuesta);
       const fecha = (v) => typeof v === "string" && Number.isFinite(Date.parse(v));
       if (!data || !fecha(data.ahora) || !Array.isArray(data.pedidos) || !data.pedidos.every((p) =>

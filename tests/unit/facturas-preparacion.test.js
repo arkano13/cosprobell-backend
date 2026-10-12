@@ -85,7 +85,8 @@ test("SAP lee facturas de la fecha fija sin filtrar por pago y obtiene créditos
   const config = configurar(variables); const entidades = entidadesHabilitadas(config);
   assert.equal(entidades.some(e => e.nombre === "pedidos"), false);
   const e = entidades.find(e => e.nombre === "facturasPreparacion");
-  assert.match(e.filtro, /2026-10-12/); assert.doesNotMatch(e.filtro, /DocumentStatus/);
+  assert.doesNotMatch(e.filtro, /DocumentStatus|DocDate/);
+  assert.equal(e.revisarCierres, true); assert.equal(e.rutaRevision, "facturasPreparacion/pendientes");
   assert.throws(() => configurar({ ...variables, BRIDGE_PICKING_INVOICE_SINCE: "2026-02-30" }));
   assert.equal(configurar({ ...variables, BRIDGE_FREQUENCIES_JSON: '{"pedidos":600}' }).frecuencias.facturasPreparacion, 600);
   let creditos = 0; const urls = [];
