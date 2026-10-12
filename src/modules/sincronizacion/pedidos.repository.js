@@ -20,7 +20,9 @@ export function contenidoPreparacion(pedido) {
 
 // El llamador proporciona la transacción que confirma también el checkpoint.
 export async function guardarPedido(pedido, db) {
-  const cliente = await db.cliente.findUnique({ where: { cardCode: pedido.cardCode }, select: { cardCode: true } });
+  // Un traslado puede no tener cliente (por ejemplo, el almacén de un vendedor).
+  const cliente = pedido.cardCode == null && pedido.fuenteDocumento === "traslado" ? true
+    : await db.cliente.findUnique({ where: { cardCode: pedido.cardCode }, select: { cardCode: true } });
   if (!cliente) throw new AppError({ code: "CLIENTE_NO_SINCRONIZADO",
     message: "Debe sincronizar el cliente antes de recibir su pedido", statusCode: 409 });
 
@@ -43,7 +45,7 @@ export async function guardarPedido(pedido, db) {
   const { lineas, ...cabecera } = pedido;
   const datos = { ...cabecera, docDate: new Date(`${pedido.docDate}T00:00:00.000Z`),
     docDueDate: pedido.docDueDate === null ? null : new Date(`${pedido.docDueDate}T00:00:00.000Z`), sincronizadoEn: new Date() };
-  if (pedido.fuenteDocumento !== "factura") Object.assign(datos, { fuenteDocumento: "pedido", sapDocEntry: pedido.docEntry });
+  if (!["factura", "traslado"].includes(pedido.fuenteDocumento)) Object.assign(datos, { fuenteDocumento: "pedido", sapDocEntry: pedido.docEntry });
   await db.pedido.upsert({ where: { docEntry: pedido.docEntry }, create: datos, update: datos });
   for (const linea of lineas) {
     await db.pedidoLinea.upsert({

@@ -241,8 +241,10 @@ model Factura {
   docEntry        Int       @id
   docNum          Int
   docType         String?
-  cardCode        String
-  cliente         Cliente   @relation(fields: [cardCode], references: [cardCode])
+  cardCode        String?
+  cliente         Cliente?  @relation(fields: [cardCode], references: [cardCode])
+  // Traslados: almacén de SAP al que va la mercadería (los traslados pueden no tener cliente).
+  almacenDestino  String?
   docDate         DateTime
   docDueDate      DateTime?
   taxDate         DateTime?
@@ -307,8 +309,10 @@ model Pedido {
   docEntry        Int       @id
   docNum          Int
   docType         String?
-  cardCode        String
-  cliente         Cliente   @relation(fields: [cardCode], references: [cardCode])
+  cardCode        String?
+  cliente         Cliente?  @relation(fields: [cardCode], references: [cardCode])
+  // Traslados: almacén de SAP al que va la mercadería (los traslados pueden no tener cliente).
+  almacenDestino  String?
   docDate         DateTime
   docDueDate      DateTime?
   taxDate         DateTime?
@@ -366,8 +370,10 @@ model Entrega {
   docEntry        Int       @id
   docNum          Int
   docType         String?
-  cardCode        String
-  cliente         Cliente   @relation(fields: [cardCode], references: [cardCode])
+  cardCode        String?
+  cliente         Cliente?  @relation(fields: [cardCode], references: [cardCode])
+  // Traslados: almacén de SAP al que va la mercadería (los traslados pueden no tener cliente).
+  almacenDestino  String?
   docDate         DateTime
   docDueDate      DateTime?
   taxDate         DateTime?

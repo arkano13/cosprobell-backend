@@ -19,12 +19,13 @@ export const sincronizacionEstadoRepository = {
       prisma.unidadMedida.count(),
       prisma.sincronizacionEstado.findMany({ select: { entidad: true, empresa: true, actualizadoEn: true } }),
     ]);
+    const traslados = fuenteDocumento === "factura" ? await sincronizacionRepository.contarTrasladosPendientes() : null;
     const [almacenes, [existencias], documentos] = await Promise.all([
       prisma.bodega.aggregate({ _count: { _all: true }, _max: { sincronizadoEn: true } }),
       prisma.$queryRaw`SELECT COUNT(DISTINCT "itemCode")::int AS productos, MAX("actualizadoEn") AS "actualizadoEn" FROM productos_existencias`,
       prisma.documentoStock.aggregate({ where: { cancelado: false }, _count: { _all: true }, _max: { sincronizadoEn: true } }),
     ]);
-    return { clientes, productos, pedidos, pedidosAbiertos, codigos, unidades, estados, almacenes, existencias, documentos };
+    return { clientes, productos, pedidos, pedidosAbiertos, traslados, codigos, unidades, estados, almacenes, existencias, documentos };
   },
 };
 
@@ -39,6 +40,9 @@ export async function estadoSincronizacion({ repo = sincronizacionEstadoReposito
       { entidad: "pedidos", nombre: fuentePreparacion() === "factura" ? "Facturas para preparar" : "Pedidos",
         registros: d.pedidosAbiertos, ultimaRecepcion: masReciente(d.pedidos._max.sincronizadoEn,
           lote.get(fuentePreparacion() === "factura" ? "facturasPreparacion" : "pedidos")) },
+      // Solo con facturas: los traslados de la 02 se preparan junto con ellas.
+      ...(d.traslados == null ? [] : [{ entidad: "trasladosPreparacion", nombre: "Traslados para preparar", registros: d.traslados,
+        ultimaRecepcion: lote.get("trasladosPreparacion") ?? null }]),
       { entidad: "clientes", registros: d.clientes._count._all, ultimaRecepcion: masReciente(d.clientes._max.sincronizadoEn, lote.get("clientes")) },
       { entidad: "productos", registros: d.productos._count._all, ultimaRecepcion: masReciente(d.productos._max.sincronizadoEn, lote.get("productos")) },
       { entidad: "unidades", registros: d.unidades, ultimaRecepcion: lote.get("unidades") ?? null },

@@ -120,7 +120,7 @@ test("listado de facturas incluye pagadas, filtra 02 y separa órdenes; cierre e
   sustituir(t, prisma.pedido, "findMany", async q => { consulta = q; return []; });
   await pedidosRepository.listar({ limit: 25, estado: "abiertos", almacenes: ["01", "02"] });
   // Facturas pagadas o no (sin documentStatus), solo líneas de la 02 con algo pendiente, y las ya preparadas solo 24 horas.
-  assert.match(sql, /"fuenteDocumento" = 'factura'/); assert.doesNotMatch(sql, /documentStatus/);
+  assert.match(sql, /"fuenteDocumento" IN \('factura', 'traslado'\)/); assert.doesNotMatch(sql, /documentStatus/);
   assert.match(sql, /"warehouseCode" = '02'/); assert.match(sql, /"fechaFin" </); assert.ok(valores.includes(24));
   assert.deepEqual(consulta.where, { docEntry: { in: [-10] } });
   sustituir(t, prisma, "$transaction", async fn => fn({ $queryRaw: async () => [{ id: 1, estado: "en_proceso", fuenteDocumento: "factura" }] }));

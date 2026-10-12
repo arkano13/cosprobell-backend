@@ -72,6 +72,16 @@ export const sincronizacionRepository = {
           AND s.estado IN ('completo', 'con_diferencias'))
       ORDER BY p."sapDocEntry"`;
   },
+  // Traslados de la 02 que faltan preparar (panel del supervisor).
+  async contarTrasladosPendientes(db = prisma) {
+    const [fila] = await db.$queryRaw`
+      SELECT COUNT(*)::int AS cantidad FROM pedidos p
+      WHERE p."fuenteDocumento" = 'traslado'
+        AND EXISTS (SELECT 1 FROM pedidos_lineas l WHERE l."pedidoDocEntry" = p."docEntry" AND l."remainingOpenQuantity" > 0)
+        AND NOT EXISTS (SELECT 1 FROM picking_pedidos s WHERE s."pedidoDocEntry" = p."docEntry"
+          AND s.estado IN ('completo', 'con_diferencias'))`;
+    return fila?.cantidad ?? 0;
+  },
   listarPedidosAbiertos(db = prisma) {
     return db.pedido.findMany({ where: { fuenteDocumento: "pedido", documentStatus: "bost_Open" }, select: { docEntry: true, sincronizadoEn: true }, orderBy: { docEntry: "asc" } });
   },

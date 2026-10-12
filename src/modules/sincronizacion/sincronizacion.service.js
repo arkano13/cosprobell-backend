@@ -6,6 +6,8 @@ import { loteClientesSchema } from "./clientes.schemas.js";
 import { lotePedidosSchema } from "./pedidos.schemas.js";
 import { loteFacturasPreparacionSchema } from "./facturasPreparacion.schemas.js";
 import { guardarFacturaPreparacion } from "./facturasPreparacion.repository.js";
+import { loteTrasladosPreparacionSchema } from "./trasladosPreparacion.schemas.js";
+import { guardarTrasladoPreparacion } from "./trasladosPreparacion.repository.js";
 import { loteUnidadesSchema } from "./unidades.schemas.js";
 import { loteCodigosBarrasSchema } from "./codigosBarras.schemas.js";
 import { loteAlmacenesSchema } from "./almacenes.schemas.js";
@@ -23,6 +25,7 @@ const DEFINICIONES = {
   clientes: { schema: loteClientesSchema, clave: "cardCode", guardar: (r, tx) => repo.guardarCliente(r, tx) },
   pedidos: { schema: lotePedidosSchema, clave: "docEntry", guardar: (r, tx) => repo.guardarPedido(r, tx) },
   facturasPreparacion: { schema: loteFacturasPreparacionSchema, clave: "docEntry", guardar: guardarFacturaPreparacion },
+  trasladosPreparacion: { schema: loteTrasladosPreparacionSchema, clave: "docEntry", guardar: guardarTrasladoPreparacion },
   unidades: { schema: loteUnidadesSchema, clave: "absEntry", guardar: (r, tx) => repo.guardarUnidad(r, tx) },
   codigosBarras: { schema: loteCodigosBarrasSchema, clave: "absEntry", guardar: (r, tx) => repo.guardarCodigoBarras(r, tx) },
   almacenes: { schema: loteAlmacenesSchema, clave: "warehouseCode", guardar: (r, tx) => repo.guardarAlmacen(r, tx) },

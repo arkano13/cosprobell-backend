@@ -97,7 +97,7 @@ export async function listarRevisiones({ repo = revisionesRepository, ahora = ne
     const fila = { pickingId: s.id, pedido: datosPedido(pedidos.get(s.pedidoDocEntry), s.pedidoDocEntry), estado: s.estado,
       operador: s.usuarioId, fechaFin: s.fechaFin, ...unidades(s.lineas) };
     const horas = s.fechaFin ? Math.floor((ahora - s.fechaFin) / 3_600_000) : 0;
-    if (fila.pedido.fuenteDocumento !== "factura" && horas >= HORAS_SIN_ENTREGA) sinEntrega.push({ ...fila, horasSinEntrega: horas });
+    if (fila.pedido.fuenteDocumento === "pedido" && horas >= HORAS_SIN_ENTREGA) sinEntrega.push({ ...fila, horasSinEntrega: horas });
     else if (s.estado === "con_diferencias") conDiferencias.push(fila);
   }
   return { enRevision: revisiones, conDiferencias: conDiferencias.slice(0, LIMITE), sinEntrega: sinEntrega.slice(0, LIMITE) };
