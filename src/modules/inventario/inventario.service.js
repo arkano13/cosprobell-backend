@@ -588,7 +588,7 @@ export async function editarConteoGrande(itemCode, entrada, { aplicacion }) {
 
 // Factura anulada en SAP después de prepararla: SAP vuelve a sumar la mercadería en su almacén y la bodega la vuelve a la
 // pequeña, al mismo lote del que salió (por eso se anula, no se hace una recepción). Una sola vez por preparación: el
-// movimiento "anulacion" queda con el pickingId.
+// movimiento "anulacion" queda con el pickingId (un grupo por producto, como la salida).
 export async function devolverPorAnulacion({ pickingId, docNum, hechoPor = "SAP" }, tx) {
   const movimientos = await repo.movimientosDePicking(pickingId, tx);
   if (movimientos.some((m) => m.tipo === "anulacion")) return [];
@@ -601,7 +601,7 @@ export async function devolverPorAnulacion({ pickingId, docNum, hechoPor = "SAP"
     const fila = m.pequenaLoteId ? await repo.cambiarLotePequena(m.pequenaLoteId, m.itemCode, unidades, tx)
       : await repo.sumarLotePequena(m.itemCode, m.lote, null, unidades, tx);
     await repo.cambiarPequena(m.itemCode, unidades, tx);
-    devueltos.push({ grupo: `anulacion-${pickingId}`, tipo: "anulacion", itemCode: m.itemCode, bodega: "pequena", cantidad: unidades,
+    devueltos.push({ grupo: `anulacion-${pickingId}-${m.itemCode}`, tipo: "anulacion", itemCode: m.itemCode, bodega: "pequena", cantidad: unidades,
       lote: m.lote, pequenaLoteId: fila?.id ?? m.pequenaLoteId ?? null, pickingId,
       hechoPor, observacion: `Devuelto por anulación de la factura ${docNum}` });
   }
