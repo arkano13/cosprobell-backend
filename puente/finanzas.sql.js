@@ -18,14 +18,12 @@ const cambiosPago = `(H.[DocDate] >= :history OR H.[UpdateDate] >= :since OR H.[
   AND (H.[UpdateDate] >= :since OR H.[CreateDate] >= :since OR H.[NoDocSum] <> 0)`;
 const cliente = "INNER JOIN [OCRD] C ON C.[CardCode] = L.[ShortName] AND C.[CardType] = 'C'";
 
-// Service Layer respondió HTTP 400 a la consulta SQL sobre OADM: las monedas se leen
-// con CompanyService_GetAdminInfo (una sola fila, sin SQLQueries que registrar).
-const EMPRESA = { servicio: true, columnas: { codigo: "codigo", monedaLocal: "LocalCurrency", monedaSistema: "SystemCurrency" } };
-
 export function definicionesSqlFinanzas(config) {
   // Sin campo configurado la columna no se pide (sin constantes en SQLQueries); el lector la deja en null.
   const udf = nombre => nombre ? `H.[${nombre}]` : null;
   const d = {
+    // Sin constantes: Service Layer respondió 400 a 'empresa' como columna, filtro y orden.
+    empresa: { from: "[OADM] H", columnas: columnas("H", "CompnyName:codigo MainCurncy:monedaLocal SysCurrncy:monedaSistema") },
     clientes: { from: "[OCRD] H", filtro: "H.[CardType] = 'C'", columnas: {
       ...columnas("H", `CardCode:cardCode CardName:nombre validFor:activo frozenFor:bloqueado Currency:moneda Balance:saldo BalanceFC:saldoFC BalanceSys:saldoSC
         CreditLine:limiteCredito SlpCode:vendedor GroupNum:condicionPago`), zona: udf(config.campoZona), ruta: udf(config.campoRuta) } },
@@ -55,13 +53,12 @@ export function definicionesSqlFinanzas(config) {
         BalScDeb:pendienteDebeSC BalScCred:pendienteHaberSC`) },
       filtro: "(L.[BalDueDeb] <> 0 OR L.[BalDueCred] <> 0 OR L.[BalFcDeb] <> 0 OR L.[BalFcCred] <> 0 OR L.[BalScDeb] <> 0 OR L.[BalScCred] <> 0)" },
   };
-  const empresa = { ...EMPRESA, nombre: "empresa", hash: createHash("sha256").update("CompanyService_GetAdminInfo").digest("hex") };
-  return Object.fromEntries([["empresa", empresa], ...Object.entries(d).map(([nombre, valor]) => {
+  return Object.fromEntries(Object.entries(d).map(([nombre, valor]) => {
     const claves = FINANZAS[nombre].claves.map(k => valor.columnas[k]);
     const cursor = claves.map((k, i) => `(${[...claves.slice(0, i).map((p, j) => `${p} = :k${j}`), `${k} > :k${i}`].join(" AND ")})`).join(" OR ");
     const sql = `SELECT TOP 50 ${Object.entries(valor.columnas).filter(([, expr]) => expr).map(([campo, expr]) => `${expr} AS [${campo}]`).join(", ")} FROM ${valor.from}
       WHERE (${cursor})${valor.filtro ? ` AND (${valor.filtro})` : ""} ORDER BY ${claves.join(", ")}`;
     const hash = createHash("sha256").update(sql).digest("hex");
     return [nombre, { ...valor, nombre, hash, consulta: { SqlCode: `CP_FIN_${hash.slice(0, 20)}`, SqlName: `Cosprobell finanzas ${nombre}`, SqlText: sql } }];
-  })]);
+  }));
 }

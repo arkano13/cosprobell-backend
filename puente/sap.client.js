@@ -65,21 +65,6 @@ export function crearClienteSap(config, fetchImpl = fetch) {
     }
   }
   return {
-    // GetAdminInfo es una lectura aunque Service Layer la invoque con POST.
-    async monedasEmpresa() {
-      if (!cookie) await login();
-      for (let intento = 0; ; intento++) {
-        try {
-          await config.control?.antesDeConsultar();
-          const datos = await leerJson(await solicitar(`${config.sapUrl}/CompanyService_GetAdminInfo`,
-            { method: "POST", headers: { Cookie: cookie } }, fetchImpl, leerErrorSap));
-          return { monedaLocal: datos?.LocalCurrency, monedaSistema: datos?.SystemCurrency };
-        } catch (error) {
-          if (error.code !== "HTTP_401" || intento === 1) throw error;
-          cookie = null; await login();
-        }
-      }
-    },
     async prepararConsultaFinanciera(definicion, crear = false) {
       if (!/^CP_FIN_[a-f0-9]{20}$/.test(definicion.SqlCode)) throw new ErrorPuente("CONSULTA_FINANCIERA_INVALIDA");
       const ruta = `SQLQueries('${definicion.SqlCode}')`;

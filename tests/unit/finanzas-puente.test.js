@@ -5,7 +5,7 @@ import { FINANZAS } from "../../src/shared/finanzas/contratos.js";
 import { unidades, importe } from "../../src/shared/finanzas/decimal.js";
 import { definicionesSqlFinanzas } from "../../puente/finanzas.sql.js";
 import { lectorFinanciero, transformarFinanzas } from "../../puente/finanzas.transformar.js";
-import { sincronizarPaginaFinanzas, parametrosFinanzas, paginaFinanzas } from "../../puente/finanzas.sincronizar.js";
+import { sincronizarPaginaFinanzas, parametrosFinanzas } from "../../puente/finanzas.sincronizar.js";
 import { configurarFinanzas } from "../../puente/finanzas.config.js";
 import { crearClienteSap } from "../../puente/sap.client.js";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -60,7 +60,6 @@ test("finanzas: no inventa zona, ruta ni datos ausentes", () => {
 test("finanzas: todas las consultas compilan y tienen contratos de columnas completos", () => {
   for (const [nombre, def] of Object.entries(defs)) {
     assert.deepEqual(Object.keys(def.columnas).sort(), Object.keys(FINANZAS[nombre].campos).sort());
-    if (def.servicio) continue;
     // Sin constantes en columnas ni orden: Service Layer respondió 400 a 'empresa' AS [codigo].
     const [, seleccion, orden] = /^SELECT TOP 50 ([\s\S]*?) FROM [\s\S]* ORDER BY ([\s\S]*)$/.exec(def.consulta.SqlText);
     assert.doesNotMatch(seleccion + orden, /'|\bNULL\b/);
@@ -120,20 +119,18 @@ function sapSimulado(respuesta) {
   });
   return { sap, llamadas };
 }
-test("finanzas: monedas de empresa por GetAdminInfo, sin SQLQueries sobre OADM", async () => {
-  assert.equal(defs.empresa.servicio, true);
-  assert.equal(defs.empresa.consulta, undefined);
-  const { sap, llamadas } = sapSimulado(() => Response.json({ CompanyName: "X", LocalCurrency: "HNL", SystemCurrency: "USD" }));
-  const filas = await paginaFinanzas(sap, defs.empresa, parametrosFinanzas(defs.empresa, config, {}, null));
-  assert.deepEqual(transformarFinanzas("empresa", filas, null), [{ codigo: "empresa", monedaLocal: "HNL", monedaSistema: "USD" }]);
-  assert.deepEqual(await paginaFinanzas(sap, defs.empresa, parametrosFinanzas(defs.empresa, config, {}, ["empresa"])), []);
-  assert.deepEqual(llamadas.filter(c => !c.url.endsWith("Login")), [{ url: "https://sap.test/b1s/v1/CompanyService_GetAdminInfo", metodo: "POST" }]);
-  assert.ok(llamadas.every(c => !c.url.includes("SQLQueries")));
-});
-test("finanzas: monedas ausentes en SAP no se suponen", async () => {
-  const { sap } = sapSimulado(() => Response.json({ CompanyName: "X" }));
-  const filas = await paginaFinanzas(sap, defs.empresa, { k0: "" });
-  assert.throws(() => transformarFinanzas("empresa", filas, null), { code: "FINANZA_SAP_INVALIDA" });
+test("finanzas: empresa lee OADM con columnas reales y una sola página", () => {
+  const d = defs.empresa;
+  const db = new DatabaseSync(":memory:");
+  try {
+    db.exec("CREATE TABLE OADM ([CompnyName] TEXT, [MainCurncy] TEXT, [SysCurrncy] TEXT)");
+    db.prepare("INSERT INTO OADM VALUES (?, ?, ?)").run("Empresa O'Prueba", "HNL", "USD");
+    const pagina = k0 => db.prepare(d.consulta.SqlText.replace("TOP 50 ", "") + " LIMIT 50").all({ k0 });
+    const filas = pagina(parametrosFinanzas(d, config, {}, null).k0);
+    const [registro] = transformarFinanzas("empresa", filas.map(f => ({ ...f })), null);
+    assert.deepEqual(registro, { codigo: "Empresa O'Prueba", monedaLocal: "HNL", monedaSistema: "USD" });
+    assert.deepEqual(pagina(registro.codigo), []);
+  } finally { db.close(); }
 });
 test("finanzas: el rechazo de SAP muestra su mensaje sin credenciales", async () => {
   const { sap } = sapSimulado(url => url.includes("SQLQueries('") ? new Response("{}", { status: 404 })

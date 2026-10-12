@@ -148,12 +148,9 @@ node --env-file=.env.puente puente/ejecutar-finanzas.js --registrar --entidad=em
 $LASTEXITCODE
 ```
 
-Esperado: `consulta_financiera` con `servicio_sap`, `sondeo_financiero` con un
-registro y salida `0`. La empresa no usa SQLQueries: las monedas se leen con
-`CompanyService_GetAdminInfo` (`LocalCurrency` y `SystemCurrency`), porque Service
-Layer respondió 400 a la consulta SQL sobre OADM. `MONEDA_EMPRESA_DISTINTA`
-requiere corregir la configuración; no se envía información monetaria con moneda
-supuesta.
+Esperado: `consulta_financiera` con `creada` o `existente`, `sondeo_financiero`
+con un registro y salida `0`. `MONEDA_EMPRESA_DISTINTA` requiere corregir la
+configuración; no se envía información monetaria con moneda supuesta.
 
 Después ejecutar el registro y sondeo de las otras entidades. Este bloque se
 detiene al primer error y deja dos segundos entre procesos:
@@ -172,7 +169,7 @@ foreach ($entidadFinanciera in $entidadesFinancieras) {
 ```
 
 `--registrar` sondea un registro y no escribe datos en Railway. Las consultas
-requieren que Service Layer autorice las tablas/columnas: OCRD, OSLP, OCTG,
+requieren que Service Layer autorice las tablas/columnas: OADM, OCRD, OSLP, OCTG,
 OINV/INV1/INV6, ORIN/RIN1, ORCT/RCT2, OITR/ITR1, OJDT/JDT1 y los UDF elegidos.
 Si devuelve 400/403 o un campo incompatible, detener esta etapa y revisar ese
 resultado con sistemas. El error trae `detalle.mensajeSap` con el texto de SAP

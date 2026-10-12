@@ -9,11 +9,6 @@ export function parametrosFinanzas(def, config, recorrido, cursor) {
     ...(def.incremental ? { since: recorrido.ventana } : {}),
     ...(def.incremental && !def.historialContable ? { history: config.desde } : {}) };
 }
-// empresa no usa SQLQueries: una fila de GetAdminInfo y ninguna después del cursor.
-export async function paginaFinanzas(sap, def, parametros, tamano) {
-  if (!def.servicio) return await sap.paginaFinanciera(def.consulta, parametros, lectorFinanciero(def.nombre), tamano);
-  return parametros.k0 ? [] : [{ codigo: "empresa", ...await sap.monedasEmpresa() }];
-}
 export function fuenteFinanzas(def, config) {
   return createHash("sha256").update(JSON.stringify([def.hash, config.desde, config.monedaLocal, config.monedaSistema])).digest("hex");
 }
@@ -46,7 +41,7 @@ export async function sincronizarPaginaFinanzas({ config, def, almacen, sap, bac
   almacen.nuevo = false;
   if (!s.finalizando) {
     if (!s.pendiente) {
-      const filas = await paginaFinanzas(sap, def, parametrosFinanzas(def, config, s.recorrido, s.cursor));
+      const filas = await sap.paginaFinanciera(def.consulta, parametrosFinanzas(def, config, s.recorrido, s.cursor), lectorFinanciero(entidad));
       const registros = transformarFinanzas(entidad, filas, s.cursor);
       if (entidad === "empresa" && (registros.length !== (s.cursor ? 0 : 1) || registros.some(r =>
         r.monedaLocal !== config.monedaLocal || r.monedaSistema !== config.monedaSistema))) throw new ErrorPuente("MONEDA_EMPRESA_DISTINTA");
