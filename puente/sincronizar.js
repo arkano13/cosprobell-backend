@@ -2,6 +2,14 @@ import { ErrorPuente } from "./http.js";
 import { PRODUCTOS } from "./entidades.js";
 import { separarCambios, claveHuella } from "./huellas.js";
 import { randomUUID } from "node:crypto";
+// Facturas a leer en un recorrido: la primera carga, todas desde la fecha de inicio; después, los últimos días
+// (sin ir antes de la fecha de inicio). Fechas del equipo del puente.
+export function desdeFacturas(config, estado, ahora = new Date()) {
+  if (!estado.ultimoCompleto) return config.facturasDesde;
+  const d = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() - (config.facturasDias - 1));
+  const fecha = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return fecha > config.facturasDesde ? fecha : config.facturasDesde;
+}
 export async function sincronizar({ config, almacen, sap, backend, entidad = PRODUCTOS, detenido = () => false }) {
   let estado = almacen.estado;
   const guardar = async (siguiente) => { await almacen.guardar(siguiente); almacen.estado = estado = siguiente; };
@@ -36,8 +44,12 @@ export async function sincronizar({ config, almacen, sap, backend, entidad = PRO
   // - códigos de barras: el backend marca como retirados los que no se recibieron desde entonces.
   const conInicio = entidad.revisarCierres || entidad.depurarRetirados;
   if (conInicio && estado.cursor === null && !estado.pendiente && !estado.porRevisar && !estado.inicioRecorrido) {
-    await guardar({ ...estado, inicioRecorrido: await backend.hora() });
+    await guardar({ ...estado, inicioRecorrido: await backend.hora(),
+      ...(entidad.ventanaFacturas ? { desdeRecorrido: desdeFacturas(config, estado) } : {}) });
   }
+  // Las facturas del recorrido: la fecha queda fija hasta terminarlo.
+  const consulta = entidad.ventanaFacturas
+    ? { ...entidad, filtro: `${entidad.filtro} and DocDate ge '${estado.desdeRecorrido ?? config.facturasDesde}'` } : entidad;
   while (!detenido() && !terminado) {
     if (estado.pendiente) {
       await backend.enviar(estado.pendiente.lote, entidad);
@@ -66,11 +78,11 @@ export async function sincronizar({ config, almacen, sap, backend, entidad = PRO
       await guardar({ ...estado, porRevisar: resto, pendiente: { lote, cursor: clave } });
       continue;
     }
-    const filas = await sap.pagina(estado.cursor, entidad);
+    const filas = await sap.pagina(estado.cursor, consulta);
     if (!filas.length) {
       if (entidad.depurarRetirados && estado.inicioRecorrido) await backend.marcarRetirados(estado.inicioRecorrido);
       if (!entidad.revisarCierres) { terminado = true; break; }
-      const { pedidos } = await backend.pedidosAbiertos();
+      const { pedidos } = await backend.pedidosAbiertos(entidad.rutaRevision);
       // Sin hora de inicio (recorrido empezado por una versión anterior) la revisión queda para el próximo recorrido.
       const inicio = estado.inicioRecorrido ? Date.parse(estado.inicioRecorrido) : null;
       await guardar({ ...estado, porRevisar: inicio === null ? [] : pedidos.filter((p) => Date.parse(p.sincronizadoEn) < inicio).map((p) => p.docEntry) });
@@ -103,6 +115,6 @@ export async function sincronizar({ config, almacen, sap, backend, entidad = PRO
   await guardar({ ...estado, cursor: null, ultimoCompleto: new Date().toISOString(),
     ...(estado.solicitudManualId ? { solicitudManualCompletaId: estado.solicitudManualId, solicitudManualId: null } : {}),
     ...(entidad.confirmarRecorrido ? { recorridoId: null, finalizando: false } : {}),
-    ...(conInicio ? { porRevisar: null, inicioRecorrido: null } : {}) });
+    ...(conInicio ? { porRevisar: null, inicioRecorrido: null, desdeRecorrido: null } : {}) });
   return { completo: true, lotes, ultimaSecuencia: estado.secuencia };
 }

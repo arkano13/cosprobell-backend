@@ -30,6 +30,10 @@ export function configurar(v) {
       !Number.isFinite(Date.parse(facturasDesde)) || new Date(facturasDesde).toISOString().slice(0, 10) !== facturasDesde)) {
     throw new Error("Defina BRIDGE_PICKING_INVOICE_SINCE=AAAA-MM-DD");
   }
+  // Después de la primera carga, cada recorrido lee solo las facturas de los últimos días; las que siguen sin preparar
+  // se vuelven a pedir una por una (las que informa el backend), aunque sean más viejas.
+  const facturasDias = Number(v.BRIDGE_PICKING_INVOICE_DAYS ?? 2);
+  if (!Number.isSafeInteger(facturasDias) || facturasDias < 1 || facturasDias > 60) throw new Error("BRIDGE_PICKING_INVOICE_DAYS inválido (1 a 60)");
   const activarInventario = v.BRIDGE_INVENTORY_ENABLED ?? "false";
   const activarCombos = v.BRIDGE_BOM_ENABLED ?? "false";
   if (!["true", "false"].includes(activarCombos)) throw new Error("BRIDGE_BOM_ENABLED inválido");
@@ -66,7 +70,7 @@ export function configurar(v) {
     frecuencias.facturasPreparacion = frecuencias.pedidos;
   }
   return { sapUrl, backendUrl, empresa, usuario: v.SAP_USER, password: v.SAP_PASSWORD,
-    fuentePreparacion, facturasDesde,
+    fuentePreparacion, facturasDesde, facturasDias,
     frecuencias, soloCambios: true, huellaSap, combosHabilitados: activarCombos === "true", inventarioHabilitado: activarInventario === "true", modoExistencias, almacenesSap,
     maxConsultas: numero("BRIDGE_MAX_REQUESTS", 25, 1, 10000),
     maxDuracionMs: numero("BRIDGE_MAX_SECONDS", 120, 10, 3600) * 1000,

@@ -62,13 +62,15 @@ export const LISTAS_MATERIALES = { nombre: "listasMateriales", recurso: "Product
   schema: loteListasMaterialesSchema, construirLote: construirLoteListasMateriales };
 export const FACTURAS_PREPARACION = { ...PEDIDOS, nombre: "facturasPreparacion", recurso: "Invoices",
   campos: [...PEDIDOS.campos, "ReserveInvoice"],
-  revisarCierres: false, creditosPreparacion: true,
+  // Las facturas sin preparar que quedan fuera de los días del recorrido se piden una por una (anulación, crédito).
+  revisarCierres: true, rutaRevision: "facturasPreparacion/pendientes", ventanaFacturas: true, creditosPreparacion: true,
   schema: loteFacturasPreparacionSchema, construirLote: construirLoteFacturasPreparacion };
 export const ENTIDADES = [CLIENTES, PRODUCTOS, UNIDADES, CODIGOS_BARRAS, LISTAS_MATERIALES, PEDIDOS, FACTURAS_PREPARACION, ALMACENES, EXISTENCIAS];
 export const entidadesHabilitadas = config => ENTIDADES.filter(e => (!e.inventario || config.inventarioHabilitado) && (!e.combos || config.combosHabilitados))
   .filter(e => e.nombre !== (config.fuentePreparacion === "facturas" ? "pedidos" : "facturasPreparacion"))
   .map(e => e.nombre === "facturasPreparacion" ? { ...e,
-    filtro: `DocType eq 'dDocument_Items' and ReserveInvoice eq 'tNO' and DocDate ge '${config.facturasDesde}'`,
+    // La fecha la agrega cada recorrido (ver desdeFacturas en sincronizar.js).
+    filtro: "DocType eq 'dDocument_Items' and ReserveInvoice eq 'tNO'",
     dependencias: [...e.dependencias, ...(config.combosHabilitados ? ["listasMateriales"] : [])] }
     : e.nombre === "pedidos" && config.combosHabilitados ? { ...e, dependencias: [...e.dependencias, "listasMateriales"] } : e.nombre === "existencias" ? { ...e, fuente: fuenteExistencias(config),
     ...(["sql-01-02", "sql-almacenes"].includes(config.modoExistencias) ? { consultaExistenciasSql: true, tamanoPagina: 20 } : {}) } : e);
