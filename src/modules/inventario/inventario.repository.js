@@ -131,7 +131,14 @@ export const inventarioRepository = {
       SELECT pr."itemCode", pr."itemName", COALESCE(s.sap, 0) AS sap, (ip."itemCode" IS NOT NULL) AS activo,
              COALESCE(ip.pequena, 0) AS pequena, COALESCE(ip.adelantado, 0) AS adelantado, ip."sapCambioEn",
              COALESCE(g.grande, 0) AS grande, COALESCE(g.cajas, 0) AS cajas, COALESCE(se."sinEntrega", 0) AS "sinEntrega",
-             COALESCE(se."porPreparar", 0) AS "porPreparar"
+             COALESCE(se."porPreparar", 0) AS "porPreparar",
+             -- Última lectura de SAP para el producto: su existencia actualizada (el puente solo manda lo que cambió) o
+             -- un recorrido completo de existencias que empezó después.
+             GREATEST((SELECT MAX(e."actualizadoEn") FROM productos_existencias e
+                         JOIN bodegas b ON b."warehouseCode" = e."warehouseCode" AND b."deEstaBodega"
+                         WHERE e."itemCode" = pr."itemCode"),
+                      (SELECT r."iniciadoEn" FROM sincronizacion_recorridos r
+                         WHERE r.entidad = 'existencias' AND r."finalizadoEn" IS NOT NULL)) AS "sapConfirmadoEn"
       FROM productos pr
       LEFT JOIN inventario_productos ip ON ip."itemCode" = pr."itemCode"
       LEFT JOIN g ON g."itemCode" = pr."itemCode"

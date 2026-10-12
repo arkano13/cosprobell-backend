@@ -155,3 +155,17 @@ test("facturado sin preparar: SAP ya lo descontó, la pequeña todavía lo tiene
   assert.equal(porPasar({ sapGrande: 80, sapPequena: 15, grande: 100, pequena: 20, porPreparar: 5 }), 0);
   assert.equal(porPasar({ sapGrande: 80, sapPequena: 35, grande: 100, pequena: 20, porPreparar: 5 }), 20);
 });
+
+test("factura reciente: no avisa diferencia hasta que SAP vuelva a leer las existencias", () => {
+  // Bodega 32, SAP todavía 32 (sin descontar la factura de 2): sobran justo las 2 facturadas.
+  const f = { ...base, sap: 32, pequena: 32, porPreparar: 2, sapCambioEn: hace(40) };
+  assert.equal(clasificar({ ...f, sapConfirmadoEn: hace(60) }, ahora).estado, "actualizando");
+  assert.equal(clasificar({ ...f, sapConfirmadoEn: null }, ahora).estado, "actualizando");
+  // SAP releído después de la factura: ya descontó, cuadra.
+  assert.equal(clasificar({ ...f, sap: 30, sapConfirmadoEn: hace(10) }, ahora).estado, "al_dia");
+  // Releído y sigue sobrando: diferencia real, se avisa pasados los 15 minutos.
+  assert.equal(clasificar({ ...f, sapConfirmadoEn: hace(10) }, ahora).estado, "por_ubicar");
+  assert.equal(clasificar({ ...f, sapCambioEn: hace(5), sapConfirmadoEn: hace(1) }, ahora).estado, "actualizando");
+  // Sin el dato (otros usos), sigue la regla de los 15 minutos.
+  assert.equal(clasificar(f, ahora).estado, "por_ubicar");
+});
