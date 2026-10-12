@@ -283,6 +283,16 @@ test("HTTP informa los pedidos abiertos con la hora del backend y exige la crede
   assert.equal((await fetch(`${url}/integracion/pedidos/abiertos`, { headers: { Authorization: `Bearer ${process.env.BRIDGE_API_KEY}` } })).status, 409);
 });
 
+test("HTTP facturas pendientes: las que falta preparar, con el DocEntry de SAP, solo para el puente", async (t) => {
+  const en = new Date("2026-10-12T15:00:00.000Z");
+  t.mock.method(repo, "existeOtraEmpresa", async () => false);
+  t.mock.method(repo, "listarFacturasPendientes", async () => [{ docEntry: 9, sincronizadoEn: en }]);
+  const r = await fetch(`${url}/integracion/facturasPreparacion/pendientes`, { headers: { Authorization: `Bearer ${process.env.BRIDGE_API_KEY}` } });
+  assert.equal(r.status, 200);
+  assert.deepEqual((await r.json()).data.pedidos, [{ docEntry: 9, sincronizadoEn: en.toISOString() }]);
+  assert.equal((await fetch(`${url}/integracion/facturasPreparacion/pendientes`)).status, 401);
+});
+
 const autorizado = { Authorization: `Bearer ${process.env.BRIDGE_API_KEY}` };
 test("HTTP recibe unidades y códigos de barras con sus propias secuencias", async (t) => {
   const f = preparar(t); const unidades = [], codigos = [];

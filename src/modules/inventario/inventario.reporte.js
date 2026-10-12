@@ -25,7 +25,8 @@ export function armarCuadre({ filas, porBodega, ahora = Date.now() }) {
     (diferencia < 0 ? menos : mas).push({
       itemCode: f.itemCode, itemName: f.itemName, diferencia,
       grande: { contado: f.grande, sap: b.sapGrande, diferencia: f.grande - b.sapGrande },
-      pequena: { contado: f.pequena, sinEntrega: f.sinEntrega, sap: b.sapPequena, diferencia: f.pequena + f.sinEntrega - b.sapPequena },
+      pequena: { contado: f.pequena, sinEntrega: f.sinEntrega, porPreparar: f.porPreparar ?? 0, sap: b.sapPequena,
+        diferencia: f.pequena + f.sinEntrega - (f.porPreparar ?? 0) - b.sapPequena },
     });
   }
   menos.sort((a, b) => a.diferencia - b.diferencia || porNombre(a, b));

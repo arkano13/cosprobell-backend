@@ -16,6 +16,8 @@ const { pedidosRepository } = await import("../../src/modules/pedidos/pedidos.re
 const { iniciarBodySchema } = await import("../../src/modules/picking/picking.schemas.js");
 const { finalizarPicking } = await import("../../src/modules/picking/picking.service.js");
 const { pickingRepository } = await import("../../src/modules/picking/picking.repository.js");
+const { inventarioRepository } = await import("../../src/modules/inventario/inventario.repository.js");
+const { devolverPorAnulacion } = await import("../../src/modules/inventario/inventario.service.js");
 
 const linea = (n = 0, almacen = "02") => ({ LineNum: n, ItemCode: `P${n}`, Quantity: 5, LineStatus: "bost_Close",
   WarehouseCode: almacen, UoMEntry: -1, UoMCode: "Manual", RemainingOpenQuantity: 0,
@@ -69,7 +71,7 @@ test("combos en factura: el crédito descuenta combos antes de multiplicar compo
 test("recibir crédito nuevo exige revisión solo a sesiones activas y conserva las finalizadas", async () => {
   const f = construirLoteFacturasPreparacion([facturaSap()], "TEST", 1).facturasPreparacion[0];
   const anterior = proyectarFactura({ ...f, creditos: [] }); const cambios = []; const guardadas = [];
-  const tx = { cliente: { findUnique: async () => ({ cardCode: "C1" }) }, $queryRaw: async () => [{ hay: false }],
+  const tx = { cliente: { findUnique: async () => ({ cardCode: "C1" }) }, $queryRaw: async () => [{ hay: false }], $executeRaw: async () => 1,
     listaMateriales: { findMany: async () => [] },
     pedido: { findUnique: async () => anterior, upsert: async q => guardadas.push(q) },
     pickingPedido: { updateMany: async q => cambios.push(q), findMany: async () => [] },
@@ -112,12 +114,43 @@ test("botón manual pide facturas en lugar de pedidos cuando el puente anuncia e
 });
 test("listado de facturas incluye pagadas, filtra 02 y separa órdenes; cierre exige todas las unidades", async t => {
   fuenteFacturas(t);
-  let consulta;
+  let sql, valores, consulta;
+  sustituir(t, prisma, "$queryRaw", async (partes, ...v) => { sql = partes.join("?"); valores = v; return [{ docEntry: -10 }]; });
   sustituir(t, prisma.pedido, "findMany", async q => { consulta = q; return []; });
   await pedidosRepository.listar({ limit: 25, estado: "abiertos", almacenes: ["01", "02"] });
-  assert.equal(consulta.where.fuenteDocumento, "factura"); assert.equal(consulta.where.documentStatus, undefined);
-  assert.equal(consulta.where.lineas.some.warehouseCode, "02");
+  // Facturas pagadas o no (sin documentStatus), solo líneas de la 02 con algo pendiente, y las ya preparadas solo 24 horas.
+  assert.match(sql, /"fuenteDocumento" = 'factura'/); assert.doesNotMatch(sql, /documentStatus/);
+  assert.match(sql, /"warehouseCode" = '02'/); assert.match(sql, /"fechaFin" </); assert.ok(valores.includes(24));
+  assert.deepEqual(consulta.where, { docEntry: { in: [-10] } });
   sustituir(t, prisma, "$transaction", async fn => fn({ $queryRaw: async () => [{ id: 1, estado: "en_proceso", fuenteDocumento: "factura" }] }));
   t.mock.method(pickingRepository, "buscarSesionConLineas", async () => ({ id: 1, lineas: [{ cantidadEscaneada: 1, cantidadPedida: 2 }] }));
   await assert.rejects(finalizarPicking(1), e => e.code === "FACTURA_PREPARACION_INCOMPLETA");
 });
+
+test("factura anulada después de prepararla: la mercadería vuelve a la pequeña, a sus lotes, una sola vez", async t => {
+  const f = construirLoteFacturasPreparacion([{ ...facturaSap(), Cancelled: "tYES", CancelStatus: "csYes" }], "TEST", 1).facturasPreparacion[0];
+  const anterior = proyectarFactura(construirLoteFacturasPreparacion([facturaSap()], "TEST", 1).facturasPreparacion[0]);
+  const movimientos = [{ id: 1, tipo: "picking", bodega: "pequena", itemCode: "P0", cantidad: -2, lote: "L1", pequenaLoteId: 71, pickingId: 5 },
+    { id: 2, tipo: "picking", bodega: "pequena", itemCode: "P0", cantidad: -1, lote: "L2", pequenaLoteId: 72, pickingId: 5 }];
+  const hecho = { lotes: [], pequena: [], registrados: [] };
+  t.mock.method(inventarioRepository, "movimientosDePicking", async () => movimientos);
+  t.mock.method(inventarioRepository, "bloquearProductos", async () => {});
+  t.mock.method(inventarioRepository, "cambiarLotePequena", async (id, item, delta) => { hecho.lotes.push([id, delta]); return { id }; });
+  t.mock.method(inventarioRepository, "cambiarPequena", async (item, delta) => hecho.pequena.push(delta));
+  t.mock.method(inventarioRepository, "registrarMovimientos", async (lista) => { hecho.registrados.push(...lista); movimientos.push(...lista); });
+  const tx = { cliente: { findUnique: async () => ({ cardCode: "C1" }) }, $queryRaw: async () => [], $executeRaw: async () => 1,
+    listaMateriales: { findMany: async () => [] },
+    pedido: { findUnique: async () => anterior, upsert: async () => {} },
+    pickingPedido: { updateMany: async () => {}, findMany: async (q) => (q.where.estado?.in ? [{ id: 5 }] : []) },
+    pedidoLinea: { upsert: async () => {}, deleteMany: async () => {} } };
+  await guardarFacturaPreparacion(f, tx);
+  assert.deepEqual(hecho.lotes, [[71, 2], [72, 1]]);
+  assert.deepEqual(hecho.pequena, [2, 1]);
+  assert.deepEqual(hecho.registrados.map((m) => [m.tipo, m.itemCode, m.cantidad, m.lote, m.pickingId, m.observacion]),
+    [["anulacion", "P0", 2, "L1", 5, "Devuelto por anulación de la factura 100"], ["anulacion", "P0", 1, "L2", 5, "Devuelto por anulación de la factura 100"]]);
+  // La anulación vuelve a llegar (otro recorrido): no se devuelve dos veces.
+  await guardarFacturaPreparacion(f, tx);
+  assert.equal(hecho.registrados.length, 2);
+  assert.deepEqual(await devolverPorAnulacion({ pickingId: 5, docNum: 100 }, tx), []);
+});
+

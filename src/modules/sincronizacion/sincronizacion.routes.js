@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { requireBridgeAuth } from "../../middleware/bridgeAuth.js";
-import { recibir, estado, pedidosAbiertos, hora, codigosRetirados } from "./sincronizacion.controller.js";
+import { recibir, estado, pedidosAbiertos, facturasPendientes, hora, codigosRetirados } from "./sincronizacion.controller.js";
 import { ENTIDADES_SINCRONIZABLES } from "./sincronizacion.service.js";
 import { observarRegistros } from "./observados.service.js";
 import { registrarRecorrido } from "./recorridos.service.js";
@@ -27,6 +27,7 @@ for (const entidad of ENTIDADES_SINCRONIZABLES) {
   router.get(`/${entidad}/estado`, estado(entidad));
 }
 router.get("/pedidos/abiertos", pedidosAbiertos);
+router.get("/facturasPreparacion/pendientes", facturasPendientes);
 router.get("/hora", hora);
 router.post("/codigosBarras/retirados", codigosRetirados);
 router.use((_req, res) => res.status(404).json({ error: "Recurso no encontrado" }));

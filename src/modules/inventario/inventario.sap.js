@@ -8,13 +8,16 @@ export async function registrarCambioExistencias(itemCode, delta, db) {
     WHERE "itemCode" = ${itemCode}`;
 }
 
-// Cambió un pedido ya preparado (por ejemplo, SAP registró su entrega). Hasta que lleguen también las
-// existencias nuevas, la diferencia de esos productos puede no cuadrar por unos minutos.
+// Cambió un pedido ya preparado (por ejemplo, SAP registró su entrega) o una factura (SAP descuenta al facturar y
+// devuelve al anular). Hasta que lleguen también las existencias nuevas, la diferencia de esos productos puede no
+// cuadrar por unos minutos. Las facturas tienen clave negativa (ver facturasPreparacion.repository.js).
 export async function registrarCambioPedido(docEntry, itemCodes, db) {
   if (!itemCodes.length) return;
-  const [fila] = await db.$queryRaw`
-    SELECT EXISTS (SELECT 1 FROM picking_pedidos WHERE "pedidoDocEntry" = ${docEntry} AND estado IN ('completo', 'con_diferencias')) AS hay`;
-  if (!fila?.hay) return;
+  if (docEntry >= 0) {
+    const [fila] = await db.$queryRaw`
+      SELECT EXISTS (SELECT 1 FROM picking_pedidos WHERE "pedidoDocEntry" = ${docEntry} AND estado IN ('completo', 'con_diferencias')) AS hay`;
+    if (!fila?.hay) return;
+  }
   await db.$executeRaw`
     UPDATE inventario_productos SET "sapCambioEn" = now(), "actualizadoEn" = now() WHERE "itemCode" = ANY(${[...new Set(itemCodes)]})`;
 }

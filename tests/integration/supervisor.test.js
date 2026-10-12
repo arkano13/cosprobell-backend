@@ -285,5 +285,5 @@ test("reporte de cuadre: solo el supervisor, con la bodega de cada almacén y si
   assert.deepEqual(data.resumen, { contados: 1, cuadran: 0, menos: { productos: 1, unidades: -18 }, mas: { productos: 0, unidades: 0 },
     pendientes: 1, actualizando: 0 });
   assert.deepEqual(data.menos, [{ itemCode: "Z12", itemName: "Z12P Purify Shampoo 750ml", diferencia: -18,
-    grande: { contado: 42, sap: 60, diferencia: -18 }, pequena: { contado: 6, sinEntrega: 0, sap: 6, diferencia: 0 } }]);
+    grande: { contado: 42, sap: 60, diferencia: -18 }, pequena: { contado: 6, sinEntrega: 0, porPreparar: 0, sap: 6, diferencia: 0 } }]);
 });

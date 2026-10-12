@@ -149,7 +149,7 @@ test("lista de productos: todo lo de las bodegas, con búsqueda, filtros y pági
   // Lo que no tiene nada en ninguna bodega ni en SAP no aparece.
   assert.deepEqual(todo.data.map((v) => v.itemCode), ["A1", "C1", "J1", "N1", "S1"]);
   assert.deepEqual(todo.conteos, { todos: 5, grande: 2, pequena: 3, solo_sap: 1, diferencia: 3, por_vencer: 1 });
-  assert.deepEqual(todo.data[4], { itemCode: "S1", itemName: "Shampoo", grande: 60, cajas: 3, pequena: 10, sinEntrega: 0, sap: 80,
+  assert.deepEqual(todo.data[4], { itemCode: "S1", itemName: "Shampoo", grande: 60, cajas: 3, pequena: 10, sinEntrega: 0, porPreparar: 0, sap: 80,
     estado: "por_ubicar", diferencia: 10, porVencer: false });
   assert.deepEqual((await (await pedir("/inventario/existencias?filtro=por_vencer", headers)).json()).data.map((v) => v.itemCode), ["C1"]);
   assert.equal(todo.data[0].estado, "conteo_inicial");

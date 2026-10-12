@@ -1,4 +1,4 @@
-import { recibirLote, consultarEstadoLote, consultarPedidosAbiertos, consultarHora, retirarCodigosNoListados } from "./sincronizacion.service.js";
+import { recibirLote, consultarEstadoLote, consultarPedidosAbiertos, consultarFacturasPendientes, consultarHora, retirarCodigosNoListados } from "./sincronizacion.service.js";
 export const recibir = (entidad) => async (req, res, next) => {
   try { res.json({ data: await recibirLote(entidad, req.body, req.empresaSap) }); }
   catch (error) { next(error); }
@@ -9,6 +9,10 @@ export const estado = (entidad) => async (req, res, next) => {
 };
 export async function pedidosAbiertos(req, res, next) {
   try { res.json({ data: await consultarPedidosAbiertos(req.empresaSap) }); }
+  catch (error) { next(error); }
+}
+export async function facturasPendientes(req, res, next) {
+  try { res.json({ data: await consultarFacturasPendientes(req.empresaSap) }); }
   catch (error) { next(error); }
 }
 export async function hora(req, res, next) {

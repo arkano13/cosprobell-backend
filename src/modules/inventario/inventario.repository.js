@@ -31,6 +31,30 @@ const SIN_ENTREGA = Prisma.sql`
   WHERE s.estado IN ('completo', 'con_diferencias')
   GROUP BY l."itemCode"`;
 
+// Facturado sin preparar: con una factura normal SAP descuenta la mercadería al facturar, pero sigue en la bodega
+// pequeña hasta que se termina su preparación. Facturas no anuladas, solo las líneas de los almacenes de esta bodega,
+// con lo pendiente (ya sin las notas de crédito vinculadas) y los combos cambiados por sus productos (como al preparar).
+const POR_PREPARAR = Prisma.sql`
+  SELECT x."itemCode", ROUND(SUM(x.unidades))::int AS "porPreparar" FROM (
+    SELECT CASE WHEN lm."itemCode" IS NULL THEN pl."itemCode" ELSE c->>'itemCode' END AS "itemCode",
+      COALESCE(pl."remainingOpenInventoryQuantity", pl."remainingOpenQuantity", 0)
+        * CASE WHEN lm."itemCode" IS NULL THEN 1 ELSE (c->>'cantidad')::float / lm.cantidad END AS unidades
+    FROM pedidos p
+    JOIN pedidos_lineas pl ON pl."pedidoDocEntry" = p."docEntry"
+    JOIN bodegas b ON b."warehouseCode" = pl."warehouseCode" AND b."deEstaBodega"
+    LEFT JOIN listas_materiales lm ON lm."itemCode" = pl."itemCode" AND lm.tipo = 'iAssemblyTree' AND NOT lm."retiradoEnSap"
+    CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN lm."itemCode" IS NULL THEN '[null]'::jsonb ELSE lm.lineas END) c
+    WHERE p."fuenteDocumento" = 'factura' AND p.cancelled = false AND COALESCE(p."cancelStatus", 'csNo') = 'csNo'
+      AND (lm."itemCode" IS NULL OR c->>'tipo' IS NULL OR c->>'tipo' = 'pit_Item')
+      AND NOT EXISTS (SELECT 1 FROM picking_pedidos s WHERE s."pedidoDocEntry" = p."docEntry" AND s.estado IN ('completo', 'con_diferencias'))
+  ) x GROUP BY x."itemCode" HAVING ROUND(SUM(x.unidades)) <> 0`;
+
+// Lo que separa a SAP de la bodega por documentos: preparado sin entregar (pedidos) y facturado sin preparar (facturas).
+const DIFERIDO = Prisma.sql`
+  SELECT COALESCE(a."itemCode", b."itemCode") AS "itemCode", COALESCE(a."sinEntrega", 0) AS "sinEntrega",
+         COALESCE(b."porPreparar", 0) AS "porPreparar"
+  FROM (${SIN_ENTREGA}) a FULL JOIN (${POR_PREPARAR}) b ON b."itemCode" = a."itemCode"`;
+
 export const inventarioRepository = {
   lotesPequena(itemCode, db = prisma) {
     return db.$queryRaw`SELECT * FROM inventario_pequena_lotes WHERE "itemCode" = ${itemCode} AND unidades > 0
@@ -99,14 +123,15 @@ export const inventarioRepository = {
   // Datos para la diferencia con SAP, de todos los productos con existencia o en el inventario, o de algunos.
   estados({ itemCodes = null } = {}, db = prisma) {
     const filtro = itemCodes ? Prisma.sql`pr."itemCode" = ANY(${itemCodes})`
-      : Prisma.sql`(ip."itemCode" IS NOT NULL OR COALESCE(s.sap, 0) <> 0 OR g.grande IS NOT NULL)`;
+      : Prisma.sql`(ip."itemCode" IS NOT NULL OR COALESCE(s.sap, 0) <> 0 OR g.grande IS NOT NULL OR se."itemCode" IS NOT NULL)`;
     return db.$queryRaw`
       WITH g AS (SELECT "itemCode", SUM(unidades)::int AS grande, (COUNT(*) FILTER (WHERE unidades > 0))::int AS cajas
                  FROM inventario_cajas GROUP BY "itemCode"),
-           s AS (${EN_SAP}), se AS (${SIN_ENTREGA})
+           s AS (${EN_SAP}), se AS (${DIFERIDO})
       SELECT pr."itemCode", pr."itemName", COALESCE(s.sap, 0) AS sap, (ip."itemCode" IS NOT NULL) AS activo,
              COALESCE(ip.pequena, 0) AS pequena, COALESCE(ip.adelantado, 0) AS adelantado, ip."sapCambioEn",
-             COALESCE(g.grande, 0) AS grande, COALESCE(g.cajas, 0) AS cajas, COALESCE(se."sinEntrega", 0) AS "sinEntrega"
+             COALESCE(g.grande, 0) AS grande, COALESCE(g.cajas, 0) AS cajas, COALESCE(se."sinEntrega", 0) AS "sinEntrega",
+             COALESCE(se."porPreparar", 0) AS "porPreparar"
       FROM productos pr
       LEFT JOIN inventario_productos ip ON ip."itemCode" = pr."itemCode"
       LEFT JOIN g ON g."itemCode" = pr."itemCode"
@@ -125,9 +150,10 @@ export const inventarioRepository = {
     return db.$queryRaw`
       WITH g AS (SELECT "itemCode", SUM(unidades)::int AS grande, (COUNT(*) FILTER (WHERE unidades > 0))::int AS cajas
                  FROM inventario_cajas GROUP BY "itemCode"),
-           s1 AS (${sap(almacenGrande)}), s2 AS (${sap(almacenPequena)}), se AS (${SIN_ENTREGA})
+           s1 AS (${sap(almacenGrande)}), s2 AS (${sap(almacenPequena)}), se AS (${DIFERIDO})
       SELECT pr."itemCode", pr."itemName", COALESCE(s1.sap, 0) AS "sapGrande", COALESCE(s2.sap, 0) AS "sapPequena",
-             COALESCE(g.grande, 0) AS grande, COALESCE(g.cajas, 0) AS cajas, ip.pequena, COALESCE(se."sinEntrega", 0) AS "sinEntrega"
+             COALESCE(g.grande, 0) AS grande, COALESCE(g.cajas, 0) AS cajas, ip.pequena, COALESCE(se."sinEntrega", 0) AS "sinEntrega",
+             COALESCE(se."porPreparar", 0) AS "porPreparar"
       FROM productos pr
       JOIN inventario_productos ip ON ip."itemCode" = pr."itemCode"
       LEFT JOIN g ON g."itemCode" = pr."itemCode"
@@ -251,7 +277,7 @@ export const inventarioRepository = {
       ? Prisma.sql`(SELECT COALESCE(SUM(unidades), 0) FROM inventario_cajas WHERE "itemCode" = ${itemCode})::int`
       : Prisma.sql`COALESCE((SELECT pequena FROM inventario_productos WHERE "itemCode" = ${itemCode}), 0)`;
     const sinEntrega = bodega === "pequena"
-      ? Prisma.sql`COALESCE((SELECT se."sinEntrega" FROM (${SIN_ENTREGA}) se WHERE se."itemCode" = ${itemCode}), 0)`
+      ? Prisma.sql`COALESCE((SELECT se."sinEntrega" - se."porPreparar" FROM (${DIFERIDO}) se WHERE se."itemCode" = ${itemCode}), 0)`
       : Prisma.sql`0`;
     const [fila] = await db.$queryRaw`
       WITH al AS (SELECT GREATEST(
@@ -416,6 +442,9 @@ export const inventarioRepository = {
   activar(itemCode, tx) {
     return tx.$executeRaw`
       INSERT INTO inventario_productos ("itemCode", "actualizadoEn") VALUES (${itemCode}, now()) ON CONFLICT ("itemCode") DO NOTHING`;
+  },
+  movimientosDePicking(pickingId, db = prisma) {
+    return db.inventarioMovimiento.findMany({ where: { pickingId }, orderBy: { id: "asc" } });
   },
   cambiarPequena(itemCode, delta, tx) {
     return tx.$executeRaw`UPDATE inventario_productos SET pequena = pequena + ${delta}, "actualizadoEn" = now() WHERE "itemCode" = ${itemCode}`;

@@ -7,13 +7,14 @@ export const MINUTOS_PARA_ESTABILIZAR = 15;
 
 export const codigoCaja = (id) => `CJ-${String(id).padStart(6, "0")}`;
 
-// SAP = grande + pequeña + preparado sin entrega en SAP + diferencia. La diferencia positiva es mercadería
-// que SAP tiene y la bodega todavía no ubicó; negativa, lo que SAP ya descontó y la bodega no asignó a un
-// lote. Lo recibido en la app antes que SAP ("adelantado") cubre una diferencia negativa hasta que SAP lo registre.
-export function clasificar({ sap, grande, pequena, sinEntrega, adelantado = 0, activo, sapCambioEn = null },
+// SAP + facturado sin preparar = grande + pequeña + preparado sin entrega en SAP + diferencia. La diferencia positiva es
+// mercadería que SAP tiene y la bodega todavía no ubicó; negativa, lo que SAP ya descontó y la bodega no asignó a un
+// lote. Lo facturado sin preparar SAP ya lo descontó, pero sigue en la pequeña hasta terminar su preparación.
+// Lo recibido en la app antes que SAP ("adelantado") cubre una diferencia negativa hasta que SAP lo registre.
+export function clasificar({ sap, grande, pequena, sinEntrega, porPreparar = 0, adelantado = 0, activo, sapCambioEn = null },
   ahora = Date.now(), minutos = MINUTOS_PARA_ESTABILIZAR) {
   const enSap = Math.round(sap ?? 0);
-  const base = enSap - grande - pequena - sinEntrega;
+  const base = enSap + porPreparar - grande - pequena - sinEntrega;
   const faltaEnSap = Math.min(adelantado, Math.max(0, -base));
   const diferencia = base + faltaEnSap;
   const cambio = sapCambioEn ? new Date(sapCambioEn).getTime() : null;
@@ -27,9 +28,9 @@ export function clasificar({ sap, grande, pequena, sinEntrega, adelantado = 0, a
 // Traspaso de la 01 a la 02 que SAP ya registró y la bodega todavía no marcó: SAP tiene en el almacén de la 02 más
 // que lo que hay en la 02 (más lo preparado sin entregar, que SAP todavía cuenta ahí) y, a la vez, en la 01 menos de
 // lo que hay en sus cajas. Es lo menor de las dos diferencias, para no confundirlo con una entrada o una salida.
-export function porPasar({ sapGrande, sapPequena, grande, pequena, sinEntrega = 0 }) {
+export function porPasar({ sapGrande, sapPequena, grande, pequena, sinEntrega = 0, porPreparar = 0 }) {
   if (sapGrande === null || sapGrande === undefined || sapPequena === null || sapPequena === undefined) return 0;
-  const sobraEnPequena = Math.round(sapPequena) - pequena - sinEntrega;
+  const sobraEnPequena = Math.round(sapPequena) + porPreparar - pequena - sinEntrega;
   const faltaEnGrande = grande - Math.round(sapGrande);
   return Math.max(0, Math.min(sobraEnPequena, faltaEnGrande));
 }
