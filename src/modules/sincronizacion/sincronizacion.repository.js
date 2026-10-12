@@ -61,7 +61,7 @@ export const sincronizacionRepository = {
     }, { isolationLevel: "ReadCommitted", maxWait: 10000, timeout: 30000 });
   },
   listarPedidosAbiertos(db = prisma) {
-    return db.pedido.findMany({ where: { documentStatus: "bost_Open" }, select: { docEntry: true, sincronizadoEn: true }, orderBy: { docEntry: "asc" } });
+    return db.pedido.findMany({ where: { fuenteDocumento: "pedido", documentStatus: "bost_Open" }, select: { docEntry: true, sincronizadoEn: true }, orderBy: { docEntry: "asc" } });
   },
   async existeOtraEmpresa(empresa, db = prisma) {
     const filas = await db.$queryRaw`SELECT 1 FROM (
@@ -89,6 +89,20 @@ export const sincronizacionRepository = {
       create: { ...cliente, sincronizadoEn: new Date() },
       update: { ...cliente, sincronizadoEn: new Date() },
     });
+  },
+  // Reemplaza la lista entera: si en SAP cambian los productos del combo, la bodega usa la nueva.
+  async guardarListaMateriales(lista, db) {
+    const { itemCode, ...datos } = lista;
+    const anterior = await db.listaMateriales.findUnique({ where: { itemCode } });
+    const fila = { ...datos, retiradoEnSap: false, sincronizadoEn: new Date() };
+    const guardada = await db.listaMateriales.upsert({ where: { itemCode }, create: { itemCode, ...fila }, update: fila });
+    if (!anterior || anterior.retiradoEnSap || anterior.tipo !== lista.tipo || anterior.cantidad !== lista.cantidad ||
+        JSON.stringify(anterior.lineas) !== JSON.stringify(lista.lineas)) {
+      await db.pickingPedido.updateMany({ where: { estado: "en_proceso", lineas: { some: {
+        OR: [{ comboItemCode: itemCode }, { itemCode }],
+      } } }, data: { estado: "requiere_revision" } });
+    }
+    return guardada;
   },
   guardarUnidad(unidad, db) {
     const { absEntry, ...datos } = unidad;

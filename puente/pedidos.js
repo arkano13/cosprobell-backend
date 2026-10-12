@@ -21,6 +21,7 @@ export const construirLotePedidos = crearConstructorLote({
     cancelled: booleano(p, "Cancelled"), cancelStatus: p.CancelStatus,
     lineas: Array.isArray(p.DocumentLines) ? p.DocumentLines.map((l) => ({
       lineNum: l.LineNum, itemCode: l.ItemCode, quantity: l.Quantity,
+      ...(l.TreeType !== undefined ? { treeType: l.TreeType } : {}),
       lineStatus: l.LineStatus, warehouseCode: l.WarehouseCode,
       uomEntry: l.UoMEntry, uomCode: l.UoMCode,
       remainingOpenQuantity: l.RemainingOpenQuantity,

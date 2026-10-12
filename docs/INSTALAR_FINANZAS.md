@@ -7,6 +7,13 @@ aplicado la migración en Railway desde esta entrega.
 
 ## Qué trae
 
+El paquete completo también incluye listas de materiales para preparar combos.
+Su instalación y activación se describen en `INSTALAR_COMBOS.md`: requieren las
+migraciones de combos, el backend actualizado y `BRIDGE_BOM_ENABLED=true`.
+Las recetas se leen con el puente operativo; la carga financiera conserva su
+ejecutable independiente. Incluir ambos en el paquete no activa ninguna carga
+nueva automáticamente ni sustituye la configuración existente del servidor.
+
 | Entidad financiera | Datos |
 |---|---|
 | empresa | Moneda local y moneda del sistema |

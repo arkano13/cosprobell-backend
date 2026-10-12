@@ -4,7 +4,7 @@ import { sincronizacionRepository as repo } from "./sincronizacion.repository.js
 
 const fallo = (code, message, statusCode = 409) => new AppError({ code, message, statusCode });
 export async function registrarRecorrido(entidad, accion, entrada, empresa) {
-  if (!["almacenes", "existencias"].includes(entidad) || !["iniciar", "finalizar"].includes(accion)) {
+  if (!["almacenes", "existencias", "listasMateriales"].includes(entidad) || !["iniciar", "finalizar"].includes(accion)) {
     throw fallo("RECURSO_NO_ENCONTRADO", "Recorrido desconocido", 404);
   }
   if (!empresa) throw fallo("EMPRESA_NO_AUTORIZADA", "Empresa no autorizada", 403);
@@ -27,7 +27,19 @@ export async function registrarRecorrido(entidad, accion, entrada, empresa) {
     if ((estado?.secuencia ?? 0) !== secuencia || (anterior.finalizadoEn && anterior.secuencia !== secuencia)) {
       throw fallo("SECUENCIA_INVALIDA", "El recorrido no coincide con la última secuencia confirmada");
     }
-    if (!anterior.finalizadoEn) await repo.finalizarRecorrido(entidad, secuencia, tx);
+    if (!anterior.finalizadoEn) {
+      if (entidad === "listasMateriales") {
+        const where = { sincronizadoEn: { lt: anterior.iniciadoEn }, retiradoEnSap: false };
+        const retiradas = await tx.listaMateriales.findMany({ where, select: { itemCode: true } });
+        if (retiradas.length) {
+          await tx.listaMateriales.updateMany({ where, data: { retiradoEnSap: true } });
+          await tx.pickingPedido.updateMany({ where: { estado: "en_proceso", lineas: { some: {
+            comboItemCode: { in: retiradas.map(r => r.itemCode) },
+          } } }, data: { estado: "requiere_revision" } });
+        }
+      }
+      await repo.finalizarRecorrido(entidad, secuencia, tx);
+    }
     return { recorridoId, completo: true };
   });
 }

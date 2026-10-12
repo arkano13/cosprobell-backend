@@ -302,6 +302,8 @@ model FacturaLinea {
 }
 
 model Pedido {
+  fuenteDocumento String @default("pedido")
+  sapDocEntry     Int?
   docEntry        Int       @id
   docNum          Int
   docType         String?
@@ -330,9 +332,12 @@ model Pedido {
   lineas PedidoLinea[]
 
   @@map("pedidos")
+  @@unique([fuenteDocumento, sapDocEntry])
 }
 
 model PedidoLinea {
+  cantidadCredito Float @default(0)
+  treeType        String?
   id              Int     @id @default(autoincrement())
   pedido          Pedido  @relation(fields: [pedidoDocEntry], references: [docEntry])
   pedidoDocEntry  Int
@@ -652,6 +657,11 @@ model PickingPedidoLinea {
 
   uomEntry Int?
   uomCode  String?
+
+  // Producto de un combo (lista de materiales tipo Conjunto): la línea del pedido es el combo y esta línea es uno de sus
+  // productos. comboFactor es cuántas unidades del producto lleva cada combo.
+  comboItemCode String?
+  comboFactor   Int?
 
   escaneos PickingEscaneo[]
 
@@ -1023,4 +1033,17 @@ model FinanzaRegistro {
   @@id([entidad, version, clave])
   @@index([entidad, version, cardCode, fecha])
   @@map("finanzas_registros")
+}
+
+// Listas de materiales de SAP (ProductTrees), por artículo padre. tipo es el TreeType de SAP; los de tipo Conjunto
+// (iAssemblyTree) son los combos que la bodega prepara producto por producto. lineas: [{ itemCode, cantidad, tipo }].
+model ListaMateriales {
+  retiradoEnSap Boolean @default(false)
+  itemCode       String   @id
+  tipo           String
+  cantidad       Float
+  lineas         Json
+  sincronizadoEn DateTime @default(now())
+
+  @@map("listas_materiales")
 }

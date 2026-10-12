@@ -4,10 +4,13 @@ import { AppError } from "../../shared/errors/AppError.js";
 import { loteProductosSchema } from "./productos.schemas.js";
 import { loteClientesSchema } from "./clientes.schemas.js";
 import { lotePedidosSchema } from "./pedidos.schemas.js";
+import { loteFacturasPreparacionSchema } from "./facturasPreparacion.schemas.js";
+import { guardarFacturaPreparacion } from "./facturasPreparacion.repository.js";
 import { loteUnidadesSchema } from "./unidades.schemas.js";
 import { loteCodigosBarrasSchema } from "./codigosBarras.schemas.js";
 import { loteAlmacenesSchema } from "./almacenes.schemas.js";
 import { loteExistenciasSchema } from "./existencias.schemas.js";
+import { loteListasMaterialesSchema } from "./listasMateriales.schemas.js";
 import { loteDocumentosSchema, TIPOS_DOCUMENTO } from "./documentos.schemas.js";
 import { sincronizacionRepository as repo } from "./sincronizacion.repository.js";
 const conflicto = (code, message) => new AppError({ code, message, statusCode: 409 });
@@ -19,10 +22,12 @@ const DEFINICIONES = {
   productos: { schema: loteProductosSchema, clave: "itemCode", guardar: (r, tx) => repo.guardarProducto(r, tx) },
   clientes: { schema: loteClientesSchema, clave: "cardCode", guardar: (r, tx) => repo.guardarCliente(r, tx) },
   pedidos: { schema: lotePedidosSchema, clave: "docEntry", guardar: (r, tx) => repo.guardarPedido(r, tx) },
+  facturasPreparacion: { schema: loteFacturasPreparacionSchema, clave: "docEntry", guardar: guardarFacturaPreparacion },
   unidades: { schema: loteUnidadesSchema, clave: "absEntry", guardar: (r, tx) => repo.guardarUnidad(r, tx) },
   codigosBarras: { schema: loteCodigosBarrasSchema, clave: "absEntry", guardar: (r, tx) => repo.guardarCodigoBarras(r, tx) },
   almacenes: { schema: loteAlmacenesSchema, clave: "warehouseCode", guardar: (r, tx) => repo.guardarAlmacen(r, tx) },
   existencias: { schema: loteExistenciasSchema, clave: "itemCode", guardar: (r, tx) => repo.guardarExistencias(r, tx) },
+  listasMateriales: { schema: loteListasMaterialesSchema, clave: "itemCode", guardar: (r, tx) => repo.guardarListaMateriales(r, tx) },
   ...Object.fromEntries(Object.entries(TIPOS_DOCUMENTO).map(([entidad, tipo]) => [entidad,
     { schema: loteDocumentosSchema(entidad), clave: "docEntry", guardar: (r, tx) => repo.guardarDocumentoStock(tipo, r, tx) }])),
 };

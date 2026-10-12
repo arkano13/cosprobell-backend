@@ -2,6 +2,7 @@ import { solicitar, leerJson, ErrorPuente } from "./http.js";
 import { PRODUCTOS } from "./entidades.js";
 import { crearTransporteSap } from "./sap-tls.js";
 import { consultaParaConfig, validarConsultaExistencias, convertirExistenciaAlmacenes } from "./existencias.sql.js";
+import { consultaCreditosPreparacion } from "./facturasPreparacion.sql.js";
 export function crearClienteSap(config, fetchImpl = fetch) {
   const { consulta, codigos } = consultaParaConfig(config);
   if (config.huellaSap) fetchImpl = crearTransporteSap(config.sapUrl, config.huellaSap);
@@ -30,6 +31,27 @@ export function crearClienteSap(config, fetchImpl = fetch) {
         if (error.code !== "HTTP_401" || intento === 1) throw error;
         cookie = null; await login();
       }
+    }
+  }
+  async function creditosDeFactura(entry) {
+    const filas = []; let after = -1;
+    for (;;) {
+      const datos = await obtener(`SQLQueries('${consultaCreditosPreparacion.SqlCode}')/List?entry=${entry}&after=${after}`,
+        { Prefer: "odata.maxpagesize=50" });
+      validarConsultaExistencias(datos.SqlText, consultaCreditosPreparacion);
+      if (!Array.isArray(datos.value) || datos.value.length > 50 ||
+          (!datos.value.length && (datos["odata.nextLink"] || datos["@odata.nextLink"]))) throw new ErrorPuente("PAGINA_SAP_INVALIDA");
+      if (!datos.value.length) return filas;
+      for (const f of datos.value) {
+        if (!Number.isInteger(f.lineNum) || f.lineNum <= after) throw new ErrorPuente("PAGINACION_SIN_AVANCE");
+        // SQLQueries puede devolver DECIMAL como texto. Solo se convierten cantidades;
+        // el contrato confirma el rango y la preparación exige unidades enteras.
+        const cantidad = valor => typeof valor === "string" && /^[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/.test(valor) ? Number(valor) : valor;
+        filas.push({ ...f, quantity: cantidad(f.quantity), inventoryQuantity: cantidad(f.inventoryQuantity) });
+        after = f.lineNum;
+      }
+      if (filas.length > 1000) throw new ErrorPuente("FACTURA_PREPARACION_INVALIDA");
+      if (!datos["odata.nextLink"] && !datos["@odata.nextLink"]) return filas;
     }
   }
   return {
@@ -116,6 +138,12 @@ export function crearClienteSap(config, fetchImpl = fetch) {
       const datos = await obtener(`${entidad.recurso}?${parametros}`, { Prefer: `odata.maxpagesize=${tamano}` });
       if (!Array.isArray(datos.value) || datos.value.length > tamano) throw new ErrorPuente("PAGINA_SAP_INVALIDA");
       if (!datos.value.length && (datos["odata.nextLink"] || datos["@odata.nextLink"])) throw new ErrorPuente("PAGINA_SAP_INVALIDA");
+      if (entidad.creditosPreparacion) {
+        for (const factura of datos.value) {
+          if (!Number.isInteger(factura.DocEntry) || factura.DocEntry < 0) throw new ErrorPuente("FACTURA_PREPARACION_INVALIDA");
+          factura.CreditosPreparacion = await creditosDeFactura(factura.DocEntry);
+        }
+      }
       return datos.value;
     },
     // Un registro por su clave, con los mismos campos que el recorrido. Lo usa la revisión de pedidos cerrados.

@@ -2,9 +2,11 @@ import { pedidosRepository as repo } from "./pedidos.repository.js";
 import { comprobarPedidoElegible, lineasParaPreparar } from "../picking/picking.pedido.js";
 import { AppError } from "../../shared/errors/AppError.js";
 import { almacenesParaPedidos } from "../inventario/inventario.service.js";
+import { fuentePreparacion } from "./preparacion.fuente.js";
 export async function listarPedidos(query) {
   // El supervisor puede dejar en la lista solo los pedidos de los almacenes de esta bodega.
-  const almacenes = await almacenesParaPedidos();
+  const fuente = fuentePreparacion();
+  const almacenes = fuente === "factura" ? ["02"] : await almacenesParaPedidos();
   const filas = await repo.listar({ ...query, almacenes });
   const pagina = filas.slice(0, query.limit);
   // Un pedido preparado sigue abierto hasta que SAP registra la entrega; la bodega lo ve como "Preparado".
@@ -14,7 +16,7 @@ export async function listarPedidos(query) {
     if (!ultima.has(preparacion.pedidoDocEntry)) ultima.set(preparacion.pedidoDocEntry, resumirPreparacion(preparacion));
   }
   const data = pagina.map((pedido) => ({ ...pedido, preparado: ultima.get(pedido.docEntry) ?? null }));
-  return { data, siguienteCursor: filas.length > query.limit ? pagina.at(-1).docEntry : null };
+  return { data, fuente, siguienteCursor: filas.length > query.limit ? pagina.at(-1).docEntry : null };
 }
 function resumirPreparacion({ id, estado, usuarioId, fechaFin, lineas }) {
   const sumar = (valor) => lineas.reduce((total, linea) => total + valor(linea), 0);
@@ -33,5 +35,8 @@ export async function obtenerPedido(docEntry) {
     preparacion = { datosValidos: false, code: error.code, message: error.message };
   }
   // Es un diagnóstico de los datos locales; iniciarPicking comprueba además las sesiones.
-  return { data: pedido, preparacion };
+  // nombres: el de cada artículo del pedido y de los productos de sus combos (las líneas de preparación de un combo
+  // traen comboItemCode).
+  const { combos, nombres, ...datos } = pedido;
+  return { data: datos, preparacion, nombres: Object.fromEntries(nombres ?? []) };
 }

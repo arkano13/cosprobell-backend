@@ -19,7 +19,7 @@ test("acepta un pedido válido y convierte su identificador", () => {
 });
 
 test("rechaza identificadores de pedido inválidos", () => {
-  for (const valor of [undefined, null, "", 0, -1, 1.5, "abc"]) {
+  for (const valor of [undefined, null, "", 0, -2147483649, 2147483648, 1.5, "abc"]) {
     const resultado = iniciarBodySchema.safeParse({
       pedidoDocEntry: valor,
     });

@@ -23,7 +23,16 @@ export function configurar(v) {
   const segundos = Number(v.BRIDGE_INTERVAL_SECONDS ?? 900);
   if (!Number.isSafeInteger(segundos) || segundos < 60 || segundos > 86400) throw new Error("BRIDGE_INTERVAL_SECONDS debe estar entre 60 y 86400");
   const empresa = v.SAP_COMPANY_DB.trim();
+  const fuentePreparacion = v.BRIDGE_PICKING_SOURCE ?? "pedidos";
+  if (!["pedidos", "facturas"].includes(fuentePreparacion)) throw new Error("BRIDGE_PICKING_SOURCE inválido");
+  const facturasDesde = v.BRIDGE_PICKING_INVOICE_SINCE;
+  if (fuentePreparacion === "facturas" && (!/^\d{4}-\d{2}-\d{2}$/.test(facturasDesde ?? "") ||
+      !Number.isFinite(Date.parse(facturasDesde)) || new Date(facturasDesde).toISOString().slice(0, 10) !== facturasDesde)) {
+    throw new Error("Defina BRIDGE_PICKING_INVOICE_SINCE=AAAA-MM-DD");
+  }
   const activarInventario = v.BRIDGE_INVENTORY_ENABLED ?? "false";
+  const activarCombos = v.BRIDGE_BOM_ENABLED ?? "false";
+  if (!["true", "false"].includes(activarCombos)) throw new Error("BRIDGE_BOM_ENABLED inválido");
   if (!["true", "false"].includes(activarInventario)) throw new Error("BRIDGE_INVENTORY_ENABLED inválido");
   const modoExistencias = v.BRIDGE_STOCK_MODE ?? "items";
   if (!["items", "sql-01-02", "sql-almacenes"].includes(modoExistencias)) throw new Error("BRIDGE_STOCK_MODE inválido");
@@ -53,8 +62,12 @@ export function configurar(v) {
     !ENTIDADES.some(e => e.nombre === nombre) || !Number.isSafeInteger(n) || n < 60 || n > 2592000)) {
     throw new Error("Configuración inválida: BRIDGE_FREQUENCIES_JSON");
   }
+  if (fuentePreparacion === "facturas" && frecuencias.facturasPreparacion == null && frecuencias.pedidos != null) {
+    frecuencias.facturasPreparacion = frecuencias.pedidos;
+  }
   return { sapUrl, backendUrl, empresa, usuario: v.SAP_USER, password: v.SAP_PASSWORD,
-    frecuencias, soloCambios: true, huellaSap, inventarioHabilitado: activarInventario === "true", modoExistencias, almacenesSap,
+    fuentePreparacion, facturasDesde,
+    frecuencias, soloCambios: true, huellaSap, combosHabilitados: activarCombos === "true", inventarioHabilitado: activarInventario === "true", modoExistencias, almacenesSap,
     maxConsultas: numero("BRIDGE_MAX_REQUESTS", 25, 1, 10000),
     maxDuracionMs: numero("BRIDGE_MAX_SECONDS", 120, 10, 3600) * 1000,
     pausaMs: numero("BRIDGE_REQUEST_DELAY_MS", 500, 100, 60000),

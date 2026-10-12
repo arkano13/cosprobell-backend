@@ -1,14 +1,17 @@
 import { AppError } from "../../shared/errors/AppError.js";
 import { sesionCoincideConPedido } from "../picking/picking.pedido.js";
 import { registrarCambioPedido } from "../inventario/inventario.sap.js";
+import { articulosDelPedido, cargarCombos } from "../picking/picking.combos.js";
 
 // Solo campos que afectan a la preparación. Fechas y precios no invalidan escaneos.
 export function contenidoPreparacion(pedido) {
   if (!pedido) return null;
   return JSON.stringify({ cardCode: pedido.cardCode, docType: pedido.docType,
-    documentStatus: pedido.documentStatus, cancelled: pedido.cancelled, cancelStatus: pedido.cancelStatus,
+    documentStatus: pedido.fuenteDocumento === "factura" ? null : pedido.documentStatus,
+    cancelled: pedido.cancelled, cancelStatus: pedido.cancelStatus,
     lineas: [...pedido.lineas].sort((a, b) => a.lineNum - b.lineNum).map(l => ({
-      lineNum: l.lineNum, itemCode: l.itemCode, quantity: l.quantity, lineStatus: l.lineStatus,
+      lineNum: l.lineNum, itemCode: l.itemCode, quantity: l.quantity,
+      lineStatus: pedido.fuenteDocumento === "factura" ? null : l.lineStatus,
       warehouseCode: l.warehouseCode, uomEntry: l.uomEntry, uomCode: l.uomCode,
       remainingOpenQuantity: l.remainingOpenQuantity, inventoryQuantity: l.inventoryQuantity,
       remainingOpenInventoryQuantity: l.remainingOpenInventoryQuantity,
@@ -26,18 +29,21 @@ export async function guardarPedido(pedido, db) {
   await db.$queryRaw`SELECT "docEntry" FROM pedidos WHERE "docEntry" = ${pedido.docEntry} FOR UPDATE`;
   const anterior = await db.pedido.findUnique({ where: { docEntry: pedido.docEntry }, include: { lineas: true } });
   await db.$queryRaw`SELECT id FROM picking_pedidos WHERE "pedidoDocEntry" = ${pedido.docEntry} ORDER BY id FOR UPDATE`;
+  const lineasAntes = anterior?.lineas ?? [];
+  const combos = await cargarCombos([...lineasAntes, ...pedido.lineas].map((l) => l.itemCode), db);
   if (contenidoPreparacion(anterior) !== contenidoPreparacion(pedido)) {
     await db.pickingPedido.updateMany({ where: { pedidoDocEntry: pedido.docEntry, estado: "en_proceso" },
       data: { estado: "requiere_revision" } });
   } else {
     // También detecta sesiones creadas por versiones anteriores que usaban el total.
     const activas = await db.pickingPedido.findMany({ where: { pedidoDocEntry: pedido.docEntry, estado: "en_proceso" }, include: { lineas: true } });
-    const ids = activas.filter(s => !sesionCoincideConPedido(s, pedido)).map(s => s.id);
+    const ids = activas.filter(s => !sesionCoincideConPedido(s, { ...pedido, combos })).map(s => s.id);
     if (ids.length) await db.pickingPedido.updateMany({ where: { id: { in: ids }, estado: "en_proceso" }, data: { estado: "requiere_revision" } });
   }
   const { lineas, ...cabecera } = pedido;
   const datos = { ...cabecera, docDate: new Date(`${pedido.docDate}T00:00:00.000Z`),
     docDueDate: pedido.docDueDate === null ? null : new Date(`${pedido.docDueDate}T00:00:00.000Z`), sincronizadoEn: new Date() };
+  if (pedido.fuenteDocumento !== "factura") Object.assign(datos, { fuenteDocumento: "pedido", sapDocEntry: pedido.docEntry });
   await db.pedido.upsert({ where: { docEntry: pedido.docEntry }, create: datos, update: datos });
   for (const linea of lineas) {
     await db.pedidoLinea.upsert({
@@ -47,5 +53,6 @@ export async function guardarPedido(pedido, db) {
   }
   // Retira únicamente líneas del espejo SAP. Las de picking y su historial son independientes.
   await db.pedidoLinea.deleteMany({ where: { pedidoDocEntry: pedido.docEntry, lineNum: { notIn: lineas.map(l => l.lineNum) } } });
-  await registrarCambioPedido(pedido.docEntry, [...(anterior?.lineas ?? []), ...lineas].map((l) => l.itemCode), db);
+  // También los productos de los combos: SAP los descuenta a ellos al entregar.
+  await registrarCambioPedido(pedido.docEntry, articulosDelPedido([...lineasAntes, ...lineas], combos), db);
 }

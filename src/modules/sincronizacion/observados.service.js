@@ -9,8 +9,10 @@ import { TIPOS_DOCUMENTO } from "./documentos.schemas.js";
 // que deja constancia del recorrido (las existencias sin cambios no tocan la fecha del producto).
 const modelos = {
   clientes: { modelo: "cliente", clave: "cardCode" },
+  listasMateriales: { modelo: "listaMateriales", clave: "itemCode" },
   productos: { modelo: "producto", clave: "itemCode" },
   pedidos: { modelo: "pedido", clave: "docEntry", numerica: true },
+  facturasPreparacion: { modelo: "pedido", clave: "sapDocEntry", numerica: true, filtro: { fuenteDocumento: "factura" } },
   unidades: { modelo: "unidadMedida", clave: "absEntry", numerica: true, actualizar: false },
   codigosBarras: { modelo: "productoCodigoBarras", clave: "sapAbsEntry", numerica: true },
   almacenes: { modelo: "bodega", clave: "warehouseCode" },
@@ -38,7 +40,7 @@ export async function observarRegistros(entidad, entrada, empresa) {
     const cuenta = await tx[def.modelo].count({ where });
     if (cuenta !== claves.length) throw new AppError({ code: "REQUIERE_RECONCILIACION", message: "Faltan registros recibidos anteriormente", statusCode: 409 });
     if (def.actualizar !== false) await tx[def.modelo].updateMany({ where, data: {
-      sincronizadoEn: new Date(), ...(entidad === "codigosBarras" ? { retiradoEnSap: false } : {}),
+      sincronizadoEn: new Date(), ...(["codigosBarras", "listasMateriales"].includes(entidad) ? { retiradoEnSap: false } : {}),
     } });
     if (def.marcar) await def.marcar(tx, claves);
     return { observados: claves.length };

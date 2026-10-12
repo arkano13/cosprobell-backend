@@ -2,14 +2,17 @@
 // sincronizadoEn (el puente confirma su presencia), así que la fecha refleja el último recorrido.
 import { prisma } from "../../infrastructure/database/prisma.js";
 import { TIPOS_DOCUMENTO } from "../sincronizacion/documentos.schemas.js";
+import { fuentePreparacion } from "../pedidos/preparacion.fuente.js";
 
 export const sincronizacionEstadoRepository = {
   async leer() {
+    const fuenteDocumento = fuentePreparacion();
     const [clientes, productos, pedidos, pedidosAbiertos, codigos, unidades, estados] = await Promise.all([
       prisma.cliente.aggregate({ _count: { _all: true }, _max: { sincronizadoEn: true } }),
       prisma.producto.aggregate({ _count: { _all: true }, _max: { sincronizadoEn: true } }),
-      prisma.pedido.aggregate({ _max: { sincronizadoEn: true } }),
-      prisma.pedido.count({ where: { documentStatus: "bost_Open", cancelled: false } }),
+      prisma.pedido.aggregate({ where: { fuenteDocumento }, _max: { sincronizadoEn: true } }),
+      prisma.pedido.count({ where: { fuenteDocumento, cancelled: false,
+        ...(fuenteDocumento === "pedido" ? { documentStatus: "bost_Open" } : { lineas: { some: { warehouseCode: "02", remainingOpenQuantity: { gt: 0 } } } }) } }),
       prisma.productoCodigoBarras.aggregate({ where: { retiradoEnSap: false }, _count: { _all: true }, _max: { sincronizadoEn: true } }),
       prisma.unidadMedida.count(),
       prisma.sincronizacionEstado.findMany({ select: { entidad: true, empresa: true, actualizadoEn: true } }),
@@ -29,9 +32,11 @@ export async function estadoSincronizacion({ repo = sincronizacionEstadoReposito
   const d = await repo.leer();
   const lote = new Map(d.estados.map((e) => [e.entidad, e.actualizadoEn]));
   return {
-    empresa: d.estados[0]?.empresa ?? null,
+    empresa: d.estados[0]?.empresa ?? null, fuentePreparacion: fuentePreparacion(),
     entidades: [
-      { entidad: "pedidos", registros: d.pedidosAbiertos, ultimaRecepcion: masReciente(d.pedidos._max.sincronizadoEn, lote.get("pedidos")) },
+      { entidad: "pedidos", nombre: fuentePreparacion() === "factura" ? "Facturas para preparar" : "Pedidos",
+        registros: d.pedidosAbiertos, ultimaRecepcion: masReciente(d.pedidos._max.sincronizadoEn,
+          lote.get(fuentePreparacion() === "factura" ? "facturasPreparacion" : "pedidos")) },
       { entidad: "clientes", registros: d.clientes._count._all, ultimaRecepcion: masReciente(d.clientes._max.sincronizadoEn, lote.get("clientes")) },
       { entidad: "productos", registros: d.productos._count._all, ultimaRecepcion: masReciente(d.productos._max.sincronizadoEn, lote.get("productos")) },
       { entidad: "unidades", registros: d.unidades, ultimaRecepcion: lote.get("unidades") ?? null },

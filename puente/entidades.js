@@ -13,6 +13,10 @@ import { loteExistenciasSchema } from "../src/modules/sincronizacion/existencias
 import { construirLoteAlmacenes } from "./almacenes.js";
 import { construirLoteExistencias } from "./existencias.js";
 import { fuenteExistencias } from "./existencias.sql.js";
+import { loteListasMaterialesSchema } from "../src/modules/sincronizacion/listasMateriales.schemas.js";
+import { construirLoteListasMateriales } from "./listasMateriales.js";
+import { construirLoteFacturasPreparacion } from "./facturasPreparacion.js";
+import { loteFacturasPreparacionSchema } from "../src/modules/sincronizacion/facturasPreparacion.schemas.js";
 // recurso, campos, claveSap y filtro describen la consulta a Service Layer (recorrido por clave ascendente).
 // nombre es a la vez la ruta del backend, el campo del lote y el archivo de estado local.
 export const PRODUCTOS = { nombre: "productos", recurso: "Items", claveSap: "ItemCode", claveLocal: "itemCode",
@@ -52,7 +56,19 @@ export const EXISTENCIAS = { nombre: "existencias", recurso: "Items", claveSap: 
   campos: ["ItemCode", "InventoryItem", "ItemWarehouseInfoCollection"], filtro: null, tamanoPagina: 5,
   dependencias: ["productos", "almacenes"], inventario: true, confirmarRecorrido: true,
   schema: loteExistenciasSchema, construirLote: construirLoteExistencias };
-export const ENTIDADES = [CLIENTES, PRODUCTOS, UNIDADES, CODIGOS_BARRAS, PEDIDOS, ALMACENES, EXISTENCIAS];
-export const entidadesHabilitadas = config => ENTIDADES.filter(e => !e.inventario || config.inventarioHabilitado)
-  .map(e => e.nombre === "existencias" ? { ...e, fuente: fuenteExistencias(config),
+export const LISTAS_MATERIALES = { nombre: "listasMateriales", recurso: "ProductTrees", claveSap: "TreeCode", claveLocal: "itemCode",
+  campos: ["TreeCode", "TreeType", "Quantity", "ProductTreeLines"], filtro: null, tamanoPagina: 20,
+  dependencias: ["productos"], combos: true, confirmarRecorrido: true,
+  schema: loteListasMaterialesSchema, construirLote: construirLoteListasMateriales };
+export const FACTURAS_PREPARACION = { ...PEDIDOS, nombre: "facturasPreparacion", recurso: "Invoices",
+  campos: [...PEDIDOS.campos, "ReserveInvoice"],
+  revisarCierres: false, creditosPreparacion: true,
+  schema: loteFacturasPreparacionSchema, construirLote: construirLoteFacturasPreparacion };
+export const ENTIDADES = [CLIENTES, PRODUCTOS, UNIDADES, CODIGOS_BARRAS, LISTAS_MATERIALES, PEDIDOS, FACTURAS_PREPARACION, ALMACENES, EXISTENCIAS];
+export const entidadesHabilitadas = config => ENTIDADES.filter(e => (!e.inventario || config.inventarioHabilitado) && (!e.combos || config.combosHabilitados))
+  .filter(e => e.nombre !== (config.fuentePreparacion === "facturas" ? "pedidos" : "facturasPreparacion"))
+  .map(e => e.nombre === "facturasPreparacion" ? { ...e,
+    filtro: `DocType eq 'dDocument_Items' and ReserveInvoice eq 'tNO' and DocDate ge '${config.facturasDesde}'`,
+    dependencias: [...e.dependencias, ...(config.combosHabilitados ? ["listasMateriales"] : [])] }
+    : e.nombre === "pedidos" && config.combosHabilitados ? { ...e, dependencias: [...e.dependencias, "listasMateriales"] } : e.nombre === "existencias" ? { ...e, fuente: fuenteExistencias(config),
     ...(["sql-01-02", "sql-almacenes"].includes(config.modoExistencias) ? { consultaExistenciasSql: true, tamanoPagina: 20 } : {}) } : e);

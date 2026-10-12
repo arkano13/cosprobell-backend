@@ -42,7 +42,8 @@ export function validarCompatibilidadLinea(linea, etiqueta) {
     });
   }
 
-  if (linea.uomEntry !== etiqueta.uomEntry) {
+  // El producto de un combo se pide en unidades de inventario: alcanza con que la etiqueta sea una unidad individual.
+  if (!linea.comboItemCode && linea.uomEntry !== etiqueta.uomEntry) {
     throw new AppError({
       code: "UNIDAD_INCOMPATIBLE",
       message: "La etiqueta y la línea del pedido utilizan unidades diferentes",

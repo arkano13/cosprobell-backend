@@ -11,7 +11,7 @@ for (const accion of ["consultar", "progreso"]) router.post(`/solicitud/${accion
   try { res.json({ data: await solicitudesService[accion](req.empresaSap, req.body) }); }
   catch (error) { next(error); }
 });
-for (const entidad of ["almacenes", "existencias"]) {
+for (const entidad of ["almacenes", "existencias", "listasMateriales"]) {
   for (const accion of ["iniciar", "finalizar"]) router.post(`/${entidad}/recorrido/${accion}`, async (req, res, next) => {
     try { res.json({ data: await registrarRecorrido(entidad, accion, req.body, req.empresaSap) }); }
     catch (error) { next(error); }

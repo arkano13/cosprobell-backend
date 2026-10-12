@@ -13,6 +13,7 @@ function sustituir(t, objeto, nombre, implementacion) {
 
 test("el detalle del pedido agrega el nombre de cada producto", async (t) => {
   sustituir(t, prisma.pedido, "findUnique", async () => ({ docEntry: 9, lineas: [{ lineNum: 0, itemCode: "P1" }, { lineNum: 1, itemCode: "P2" }] }));
+  sustituir(t, prisma.listaMateriales, "findMany", async () => []);
   let consulta;
   sustituir(t, prisma.producto, "findMany", async (args) => { consulta = args; return [{ itemCode: "P1", itemName: "Shampoo" }]; });
   const pedido = await pedidosRepository.obtener(9);

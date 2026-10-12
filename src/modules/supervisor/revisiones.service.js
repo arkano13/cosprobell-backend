@@ -2,7 +2,7 @@
 import { prisma } from "../../infrastructure/database/prisma.js";
 import { AppError } from "../../shared/errors/AppError.js";
 import { comprobarPedidoElegible, lineasParaPreparar } from "../picking/picking.pedido.js";
-import { pickingRepository } from "../picking/picking.repository.js";
+import { pickingRepository, conCombos } from "../picking/picking.repository.js";
 
 export const HORAS_SIN_ENTREGA = 24;
 const LIMITE = 100;
@@ -16,14 +16,17 @@ export const revisionesRepository = {
     const filas = await prisma.$queryRaw`
       SELECT pp.id FROM picking_pedidos pp
       JOIN pedidos p ON p."docEntry" = pp."pedidoDocEntry"
-      WHERE pp.estado IN ('completo', 'con_diferencias') AND p."documentStatus" = 'bost_Open' AND p.cancelled = false
+      WHERE pp.estado IN ('completo', 'con_diferencias') AND p.cancelled = false
+        AND (p."fuenteDocumento" = 'factura' OR p."documentStatus" = 'bost_Open')
       ORDER BY pp."fechaFin" ASC NULLS LAST, pp.id ASC LIMIT ${LIMITE * 2}`;
     if (!filas.length) return [];
     return prisma.pickingPedido.findMany({ where: { id: { in: filas.map((f) => f.id) } }, include: { lineas: true } });
   },
-  pedidos(docEntries) {
-    return prisma.pedido.findMany({ where: { docEntry: { in: docEntries } },
+  async pedidos(docEntries) {
+    const pedidos = await prisma.pedido.findMany({ where: { docEntry: { in: docEntries } },
       include: { cliente: { select: { cardName: true } }, lineas: true } });
+    for (const pedido of pedidos) await conCombos(pedido);
+    return pedidos;
   },
   nombresProductos(itemCodes) {
     return prisma.producto.findMany({ where: { itemCode: { in: itemCodes } }, select: { itemCode: true, itemName: true } });
@@ -36,13 +39,18 @@ const unidades = (lineas) => ({
   unidadesPedidas: sumar(lineas, (l) => l.cantidadPedida),
 });
 
-// Qué cambió entre lo que se estaba preparando y lo que hoy pide el pedido, línea por línea.
+// Qué cambió entre lo que se estaba preparando y lo que hoy pide el pedido, línea por línea. Un combo tiene una línea por
+// producto con el mismo número de línea del pedido: se comparan por línea y producto.
 function diferencias(lineasSesion, lineasActuales) {
-  const antes = new Map(lineasSesion.map((l) => [l.pedidoLineNum, l]));
-  const ahora = new Map(lineasActuales.map((l) => [l.pedidoLineNum, l]));
+  const clave = (l) => `${l.pedidoLineNum}|${l.comboItemCode ? l.itemCode : ""}`;
+  const antes = new Map(lineasSesion.map((l) => [clave(l), l]));
+  const ahora = new Map(lineasActuales.map((l) => [clave(l), l]));
+  const orden = (k) => { const [n, item] = k.split("|"); return [Number(n), item]; };
   const cambios = [];
-  for (const lineNum of [...new Set([...antes.keys(), ...ahora.keys()])].sort((a, b) => a - b)) {
-    const a = antes.get(lineNum), b = ahora.get(lineNum);
+  for (const k of [...new Set([...antes.keys(), ...ahora.keys()])].sort((x, y) => {
+    const [a, ai] = orden(x), [b, bi] = orden(y); return a - b || (ai < bi ? -1 : ai > bi ? 1 : 0);
+  })) {
+    const a = antes.get(k), b = ahora.get(k);
     if (a && b && a.itemCode === b.itemCode && a.cantidadPedida === b.cantidadPedida && a.uomEntry === b.uomEntry) continue;
     if (a && b && a.itemCode !== b.itemCode) {
       cambios.push({ itemCode: a.itemCode, antes: a.cantidadPedida, ahora: null });
@@ -68,7 +76,9 @@ function revisar(sesion, pedido) {
   }
 }
 
-const datosPedido = (pedido, docEntry) => ({ docEntry, docNum: pedido?.docNum ?? null, cliente: pedido?.cliente?.cardName ?? pedido?.cardCode ?? null });
+const datosPedido = (pedido, docEntry) => ({ docEntry, docNum: pedido?.docNum ?? null,
+  fuenteDocumento: pedido?.fuenteDocumento ?? "pedido", sapDocEntry: pedido?.sapDocEntry ?? docEntry,
+  cliente: pedido?.cliente?.cardName ?? pedido?.cardCode ?? null });
 
 export async function listarRevisiones({ repo = revisionesRepository, ahora = new Date() } = {}) {
   const [enRevision, finalizadas] = await Promise.all([repo.enRevision(), repo.finalizadasAbiertas()]);
@@ -86,7 +96,7 @@ export async function listarRevisiones({ repo = revisionesRepository, ahora = ne
     const fila = { pickingId: s.id, pedido: datosPedido(pedidos.get(s.pedidoDocEntry), s.pedidoDocEntry), estado: s.estado,
       operador: s.usuarioId, fechaFin: s.fechaFin, ...unidades(s.lineas) };
     const horas = s.fechaFin ? Math.floor((ahora - s.fechaFin) / 3_600_000) : 0;
-    if (horas >= HORAS_SIN_ENTREGA) sinEntrega.push({ ...fila, horasSinEntrega: horas });
+    if (fila.pedido.fuenteDocumento !== "factura" && horas >= HORAS_SIN_ENTREGA) sinEntrega.push({ ...fila, horasSinEntrega: horas });
     else if (s.estado === "con_diferencias") conDiferencias.push(fila);
   }
   return { enRevision: revisiones, conDiferencias: conDiferencias.slice(0, LIMITE), sinEntrega: sinEntrega.slice(0, LIMITE) };

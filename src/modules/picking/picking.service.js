@@ -7,6 +7,7 @@ import { pickingRepository } from "./picking.repository.js";
 import { conSesionBloqueada } from "./picking.transaction.js";
 import { AppError } from "../../shared/errors/AppError.js";
 import { descontarPorPicking } from "../inventario/inventario.service.js";
+import { fuentePreparacion } from "../pedidos/preparacion.fuente.js";
 
 function sesionNoEncontrada() {
   return new AppError({
@@ -20,6 +21,8 @@ function comprobarSesionActiva(sesion) {
   if (!sesion) {
     throw sesionNoEncontrada();
   }
+  if (sesion.fuenteDocumento && sesion.fuenteDocumento !== fuentePreparacion()) throw new AppError({
+    code: "FUENTE_PREPARACION_INCORRECTA", message: "Esta preparación pertenece a la fuente anterior; solicite revisión al supervisor", statusCode: 409 });
 
   if (sesion.estado !== "en_proceso") {
     if (sesion.estado === "requiere_revision") throw new AppError({ code: "PEDIDO_REQUIERE_REVISION",
@@ -119,7 +122,7 @@ async function registrarUnidad(id, codigo, tx) {
     lineaId: pendiente.id,
     itemCode: etiqueta.itemCode,
     codigo: etiqueta.codigo,
-    uomEntry: etiqueta.uomEntry,
+    uomEntry: pendiente.uomEntry,
   }, tx);
 
   if (filas.length !== 1) {
@@ -252,6 +255,8 @@ export async function finalizarPicking(id, { lotes = [] } = {}) {
     const estado = hayDiferencias
       ? "con_diferencias"
       : "completo";
+    if (sesion.fuenteDocumento === "factura" && hayDiferencias) throw new AppError({
+      code: "FACTURA_PREPARACION_INCOMPLETA", message: "Debe preparar toda la factura antes de finalizar", statusCode: 409 });
 
     // Lo preparado sale de la bodega pequeña junto con el cierre: si algo falla, no se cierra.
     await descontarPorPicking({ pickingId: id, lineas: picking.lineas, lotes, hechoPor: picking.usuarioId ?? null }, tx);

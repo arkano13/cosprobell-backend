@@ -8,7 +8,7 @@ export const finalizarBodySchema = z.object({
 }).strict().default({ lotes: [] });
 
 export const iniciarBodySchema = z.object({
-  pedidoDocEntry: z.coerce.number().int().positive(),
+  pedidoDocEntry: z.coerce.number().int().min(-2147483648).max(2147483647).refine(n => n !== 0),
   usuarioId: safeString(1).optional(),
 });
 

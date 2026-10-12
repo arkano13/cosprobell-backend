@@ -10,6 +10,7 @@ const fecha = z.iso.date();
 // cantidad ausente se sustituye por el total ni implica una unidad individual.
 const linea = z.object({
   lineNum: entero,
+  treeType: z.string().max(40).nullable().optional(),
   itemCode: identificador(50),
   quantity: cantidad,
   lineStatus: estado,

@@ -857,7 +857,7 @@ test("HTTP pedidos lista con cursor sin perder la fila siguiente", async (t) => 
   });
   const preparaciones = t.mock.method(pedidosRepository, "preparaciones", async () => []);
   const r = await fetch(`${baseUrl}/pedidos?limit=1&cursor=8`, { headers: autenticar(t) });
-  assert.equal(r.status, 200); assert.deepEqual(await r.json(), { data: [{ docEntry: 9, preparado: null }], siguienteCursor: 9 });
+  assert.equal(r.status, 200); assert.deepEqual(await r.json(), { data: [{ docEntry: 9, preparado: null }], fuente: "pedido", siguienteCursor: 9 });
   assert.deepEqual(preparaciones.mock.calls[0].arguments, [[9]]);
 });
 test("HTTP pedidos: con el filtro del supervisor solo pide los de los almacenes de esta bodega", async (t) => {
@@ -892,7 +892,7 @@ test("HTTP pedidos sin resultados no consulta preparaciones", async (t) => {
   t.mock.method(pedidosRepository, "listar", async () => []);
   const preparaciones = t.mock.method(pedidosRepository, "preparaciones", async () => assert.fail("No debe consultar"));
   const r = await fetch(`${baseUrl}/pedidos`, { headers: autenticar(t) });
-  assert.deepEqual(await r.json(), { data: [], siguienteCursor: null });
+  assert.deepEqual(await r.json(), { data: [], fuente: "pedido", siguienteCursor: null });
   assert.equal(preparaciones.mock.callCount(), 0);
 });
 test("HTTP detalle de pedido informa pendientes y bloqueos locales", async (t) => {

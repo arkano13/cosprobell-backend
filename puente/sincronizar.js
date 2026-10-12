@@ -5,6 +5,10 @@ import { randomUUID } from "node:crypto";
 export async function sincronizar({ config, almacen, sap, backend, entidad = PRODUCTOS, detenido = () => false }) {
   let estado = almacen.estado;
   const guardar = async (siguiente) => { await almacen.guardar(siguiente); almacen.estado = estado = siguiente; };
+  if (entidad.nombre === "facturasPreparacion") {
+    if (estado.facturasDesde && estado.facturasDesde !== config.facturasDesde) throw new ErrorPuente("CAMBIO_ALCANCE_FACTURAS");
+    if (!estado.facturasDesde) await guardar({ ...estado, facturasDesde: config.facturasDesde });
+  }
   const comparar = async registros => separarCambios(registros, entidad, config.reconciliar ? {} :
     await almacen.leerHuellas(registros.map(r => claveHuella(r[entidad.claveLocal]))));
   const remoto = await backend.estado(entidad);
