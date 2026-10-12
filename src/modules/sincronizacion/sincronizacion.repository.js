@@ -60,6 +60,18 @@ export const sincronizacionRepository = {
       return operacion(tx);
     }, { isolationLevel: "ReadCommitted", maxWait: 10000, timeout: 30000 });
   },
+  // Facturas que la bodega todavía tiene que preparar: no anuladas, con algo pendiente en la 02 y sin una preparación
+  // terminada. El puente las vuelve a pedir a SAP aunque queden fuera de su ventana de días (anulación, nota de crédito).
+  listarFacturasPendientes(db = prisma) {
+    return db.$queryRaw`
+      SELECT p."sapDocEntry" AS "docEntry", p."sincronizadoEn" FROM pedidos p
+      WHERE p."fuenteDocumento" = 'factura' AND p.cancelled = false AND COALESCE(p."cancelStatus", 'csNo') = 'csNo'
+        AND EXISTS (SELECT 1 FROM pedidos_lineas l WHERE l."pedidoDocEntry" = p."docEntry" AND l."warehouseCode" = '02'
+          AND l."remainingOpenQuantity" > 0)
+        AND NOT EXISTS (SELECT 1 FROM picking_pedidos s WHERE s."pedidoDocEntry" = p."docEntry"
+          AND s.estado IN ('completo', 'con_diferencias'))
+      ORDER BY p."sapDocEntry"`;
+  },
   listarPedidosAbiertos(db = prisma) {
     return db.pedido.findMany({ where: { fuenteDocumento: "pedido", documentStatus: "bost_Open" }, select: { docEntry: true, sincronizadoEn: true }, orderBy: { docEntry: "asc" } });
   },

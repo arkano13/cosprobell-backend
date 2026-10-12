@@ -11,13 +11,14 @@ export const revisionesRepository = {
   enRevision() {
     return prisma.pickingPedido.findMany({ where: { estado: "requiere_revision" }, include: { lineas: true }, orderBy: { id: "asc" }, take: LIMITE });
   },
-  // Preparaciones terminadas de pedidos que SAP todavía tiene abiertos (aún no se registró la entrega).
+  // Preparaciones terminadas de pedidos que SAP todavía tiene abiertos (aún no se registró la entrega). Las facturas no
+  // entran: no esperan una entrega en SAP y no se pueden terminar con diferencias.
   async finalizadasAbiertas() {
     const filas = await prisma.$queryRaw`
       SELECT pp.id FROM picking_pedidos pp
       JOIN pedidos p ON p."docEntry" = pp."pedidoDocEntry"
       WHERE pp.estado IN ('completo', 'con_diferencias') AND p.cancelled = false
-        AND (p."fuenteDocumento" = 'factura' OR p."documentStatus" = 'bost_Open')
+        AND p."fuenteDocumento" = 'pedido' AND p."documentStatus" = 'bost_Open'
       ORDER BY pp."fechaFin" ASC NULLS LAST, pp.id ASC LIMIT ${LIMITE * 2}`;
     if (!filas.length) return [];
     return prisma.pickingPedido.findMany({ where: { id: { in: filas.map((f) => f.id) } }, include: { lineas: true } });

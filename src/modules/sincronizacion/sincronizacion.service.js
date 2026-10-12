@@ -94,6 +94,15 @@ export async function consultarPedidosAbiertos(empresaAutorizada) {
   return { ahora, pedidos: pedidos.map((p) => ({ docEntry: p.docEntry, sincronizadoEn: p.sincronizadoEn.toISOString() })) };
 }
 
+// Mismo formato que los pedidos abiertos: el puente revisa en SAP las que no vio en el último recorrido.
+export async function consultarFacturasPendientes(empresaAutorizada) {
+  exigirEmpresa(empresaAutorizada);
+  const ahora = new Date().toISOString();
+  if (await repo.existeOtraEmpresa(empresaAutorizada)) throw origenIncompatible();
+  const facturas = await repo.listarFacturasPendientes();
+  return { ahora, pedidos: facturas.map((f) => ({ docEntry: f.docEntry, sincronizadoEn: f.sincronizadoEn.toISOString() })) };
+}
+
 // Hora del backend: el puente la usa como inicio de un recorrido completo.
 export async function consultarHora(empresaAutorizada) {
   exigirEmpresa(empresaAutorizada);

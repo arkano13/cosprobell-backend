@@ -33,7 +33,8 @@ function vistaEstado(f, ahora = Date.now(), comparacionDisponible = true) {
     estado: "sin_comparacion_sap" };
   const c = clasificar(f, ahora);
   return { itemCode: f.itemCode, itemName: f.itemName, activo: f.activo, grande: f.grande, pequena: f.pequena,
-    sinEntrega: f.sinEntrega, enSap: c.enSap, diferencia: c.diferencia, faltaEnSap: c.faltaEnSap, estado: c.estado };
+    sinEntrega: f.sinEntrega, porPreparar: f.porPreparar ?? 0, enSap: c.enSap, diferencia: c.diferencia, faltaEnSap: c.faltaEnSap,
+    estado: c.estado };
 }
 const vistaCaja = (c) => ({ id: c.id, codigo: c.codigo, itemCode: c.itemCode, itemName: c.producto?.itemName ?? c.itemName ?? undefined,
   lote: c.lote, vencimiento: fechaIso(c.vencimiento), suelto: c.suelto, unidadesIniciales: c.unidadesIniciales, unidades: c.unidades,
@@ -201,9 +202,9 @@ export async function listarExistencias({ buscar, filtro, pagina, limit }) {
   const vistas = filas.map((f) => {
     const e = conSap && comparacionDisponible ? vistaEstado(f) : null;
     return { itemCode: f.itemCode, itemName: f.itemName, grande: f.grande, cajas: f.cajas ?? 0, pequena: f.pequena,
-      sinEntrega: f.sinEntrega, sap: conSap ? Math.round(f.sap ?? 0) : null, estado: e?.estado ?? null, diferencia: e?.diferencia ?? null,
-      porVencer: vencen.has(f.itemCode), activo: f.activo === true };
-  }).filter((v) => v.grande !== 0 || v.pequena !== 0 || v.sinEntrega !== 0 || (v.sap ?? 0) !== 0)
+      sinEntrega: f.sinEntrega, porPreparar: f.porPreparar ?? 0, sap: conSap ? Math.round(f.sap ?? 0) : null, estado: e?.estado ?? null,
+      diferencia: e?.diferencia ?? null, porVencer: vencen.has(f.itemCode), activo: f.activo === true };
+  }).filter((v) => v.grande !== 0 || v.pequena !== 0 || v.sinEntrega !== 0 || v.porPreparar !== 0 || (v.sap ?? 0) !== 0)
     .filter(coincide(texto));
   const conteos = Object.fromEntries(Object.entries(FILTRAR).map(([nombre, cumple]) => [nombre, vistas.filter(cumple).length]));
   const elegidas = vistas.filter(FILTRAR[filtro]);
@@ -583,6 +584,29 @@ export async function editarConteoGrande(itemCode, entrada, { aplicacion }) {
     await fotoCuadre(tx, { itemCode, bodega: "grande", accion: "edicion", cantidad: delta, primero: false, hechoPor: aplicacion });
     return { data: { itemCode, antes, unidades: despues, cajas: creadas.map(vistaCaja), anuladas: anular.map((c) => c.codigo) } };
   }, { operacionId: entrada.operacionId, tipo: "editarConteoGrande", entrada, aplicacion, itemCode });
+}
+
+// Factura anulada en SAP después de prepararla: SAP vuelve a sumar la mercadería en su almacén y la bodega la vuelve a la
+// pequeña, al mismo lote del que salió (por eso se anula, no se hace una recepción). Una sola vez por preparación: el
+// movimiento "anulacion" queda con el pickingId (un grupo por producto, como la salida).
+export async function devolverPorAnulacion({ pickingId, docNum, hechoPor = "SAP" }, tx) {
+  const movimientos = await repo.movimientosDePicking(pickingId, tx);
+  if (movimientos.some((m) => m.tipo === "anulacion")) return [];
+  const salidas = movimientos.filter((m) => m.tipo === "picking" && m.bodega === "pequena" && m.cantidad < 0);
+  if (!salidas.length) return [];
+  await repo.bloquearProductos(salidas.map((m) => m.itemCode), tx);
+  const devueltos = [];
+  for (const m of salidas) {
+    const unidades = -m.cantidad;
+    const fila = m.pequenaLoteId ? await repo.cambiarLotePequena(m.pequenaLoteId, m.itemCode, unidades, tx)
+      : await repo.sumarLotePequena(m.itemCode, m.lote, null, unidades, tx);
+    await repo.cambiarPequena(m.itemCode, unidades, tx);
+    devueltos.push({ grupo: `anulacion-${pickingId}-${m.itemCode}`, tipo: "anulacion", itemCode: m.itemCode, bodega: "pequena", cantidad: unidades,
+      lote: m.lote, pequenaLoteId: fila?.id ?? m.pequenaLoteId ?? null, pickingId,
+      hechoPor, observacion: `Devuelto por anulación de la factura ${docNum}` });
+  }
+  await repo.registrarMovimientos(devueltos, tx);
+  return devueltos;
 }
 
 // Al finalizar: exigir existencias físicas registradas y descontar los lotes elegidos en la misma transacción.

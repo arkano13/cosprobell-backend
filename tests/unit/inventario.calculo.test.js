@@ -145,3 +145,13 @@ test("elegirCajas: una caja por escaneo, del lote y fecha que dice; primero las 
   assert.deepEqual(ids([{ lote: "L1", vencimiento: "2027-01-31" }, { lote: "L1", vencimiento: "2027-01-31" }, { lote: "L1", vencimiento: "2027-01-31" }]), [2, 1, null]);
   assert.deepEqual(ids([{ lote: "L1", vencimiento: "2027-02-28" }, { lote: null, vencimiento: null }]), [3, 4]);
 });
+
+test("facturado sin preparar: SAP ya lo descontó, la pequeña todavía lo tiene; no es 'Falta marcar salida'", () => {
+  // Factura de 5: SAP 02 bajó a 15 y la pequeña sigue en 20 hasta terminar la preparación.
+  assert.deepEqual(clasificar({ ...base, sap: 15, pequena: 20, porPreparar: 5 }, ahora),
+    { enSap: 15, diferencia: 0, faltaEnSap: 0, estable: true, estado: "al_dia" });
+  assert.equal(clasificar({ ...base, sap: 15, pequena: 20 }, ahora).estado, "por_descontar", "sin contarlo sería una diferencia falsa");
+  // Traspaso de la 01: lo facturado sin preparar no se confunde con unidades que llegaron a la 02.
+  assert.equal(porPasar({ sapGrande: 80, sapPequena: 15, grande: 100, pequena: 20, porPreparar: 5 }), 0);
+  assert.equal(porPasar({ sapGrande: 80, sapPequena: 35, grande: 100, pequena: 20, porPreparar: 5 }), 20);
+});

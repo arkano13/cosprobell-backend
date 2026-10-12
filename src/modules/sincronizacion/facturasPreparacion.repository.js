@@ -1,4 +1,5 @@
 import { guardarPedido } from "./pedidos.repository.js";
+import { devolverPorAnulacion } from "../inventario/inventario.service.js";
 
 // Claves negativas reservadas a facturas; órdenes SAP conservan las positivas.
 // El DocEntry real se conserva aparte: nunca se envía la clave interna a SAP.
@@ -15,6 +16,13 @@ export function proyectarFactura(factura) {
         remainingOpenInventoryQuantity: l.inventoryQuantity == null ? null : l.inventoryQuantity - (c?.inventoryQuantity ?? 0) };
     }) };
 }
+const anulada = (f) => f.cancelled === true || ["csYes", "csCancellation"].includes(f.cancelStatus);
+// Una factura anulada que ya se preparó devuelve su mercadería a la pequeña (una sola vez, ver devolverPorAnulacion).
 export async function guardarFacturaPreparacion(factura, tx) {
-  return guardarPedido(proyectarFactura(factura), tx);
+  const proyectada = proyectarFactura(factura);
+  await guardarPedido(proyectada, tx);
+  if (!anulada(proyectada)) return;
+  const terminadas = await tx.pickingPedido.findMany({ where: { pedidoDocEntry: proyectada.docEntry,
+    estado: { in: ["completo", "con_diferencias"] } }, select: { id: true } });
+  for (const { id } of terminadas) await devolverPorAnulacion({ pickingId: id, docNum: proyectada.docNum }, tx);
 }

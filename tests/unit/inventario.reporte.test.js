@@ -20,7 +20,7 @@ test("separa lo que cuadra, lo que tiene menos y lo que tiene más, con la difer
     pendientes: 0, actualizando: 0 });
   assert.deepEqual(r.menos.map((x) => [x.itemCode, x.diferencia]), [["B", -129], ["C", -18]]);
   assert.deepEqual(r.menos[1].grande, { contado: 42, sap: 60, diferencia: -18 });
-  assert.deepEqual(r.menos[1].pequena, { contado: 6, sinEntrega: 0, sap: 6, diferencia: 0 });
+  assert.deepEqual(r.menos[1].pequena, { contado: 6, sinEntrega: 0, porPreparar: 0, sap: 6, diferencia: 0 });
   assert.deepEqual(r.mas.map((x) => [x.itemCode, x.diferencia]), [["D", 15]]);
 });
 
@@ -73,4 +73,13 @@ test("almacén solo conteo: compara lo contado con SAP de ahora; lo no contado e
   assert.deepEqual(r.menos.map((x) => [x.itemCode, x.diferencia]), [["B", -10], ["F", -7]]);
   assert.deepEqual(r.mas, [{ itemCode: "E", itemName: "Producto E", contado: 36, cajas: 3, sap: 12, diferencia: 24 },
     { itemCode: "C", itemName: "Producto C", contado: 5, cajas: 0, sap: 0, diferencia: 5 }]);
+});
+
+test("facturado sin preparar: SAP ya lo descontó pero sigue en la pequeña, así que cuadra", () => {
+  // SAP 02 bajó de 20 a 15 al facturar 5; la pequeña sigue con 20 hasta terminar la preparación.
+  const r = armar([fila("F", { sap: 15, pequena: 20, porPreparar: 5 })], [bodega("F", { sapPequena: 15, contadoGrande: false })]);
+  assert.equal(r.resumen.cuadran, 1);
+  // Si en la pequeña hay 2 menos de lo que debería, es un faltante real.
+  const m = armar([fila("F", { sap: 15, pequena: 18, porPreparar: 5 })], [bodega("F", { sapPequena: 15, contadoGrande: false })]);
+  assert.deepEqual(m.menos.map((x) => [x.itemCode, x.diferencia, x.pequena.diferencia]), [["F", -2, -2]]);
 });

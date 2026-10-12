@@ -3,6 +3,7 @@
 import { prisma } from "../../infrastructure/database/prisma.js";
 import { TIPOS_DOCUMENTO } from "../sincronizacion/documentos.schemas.js";
 import { fuentePreparacion } from "../pedidos/preparacion.fuente.js";
+import { sincronizacionRepository } from "../sincronizacion/sincronizacion.repository.js";
 
 export const sincronizacionEstadoRepository = {
   async leer() {
@@ -11,8 +12,9 @@ export const sincronizacionEstadoRepository = {
       prisma.cliente.aggregate({ _count: { _all: true }, _max: { sincronizadoEn: true } }),
       prisma.producto.aggregate({ _count: { _all: true }, _max: { sincronizadoEn: true } }),
       prisma.pedido.aggregate({ where: { fuenteDocumento }, _max: { sincronizadoEn: true } }),
-      prisma.pedido.count({ where: { fuenteDocumento, cancelled: false,
-        ...(fuenteDocumento === "pedido" ? { documentStatus: "bost_Open" } : { lineas: { some: { warehouseCode: "02", remainingOpenQuantity: { gt: 0 } } } }) } }),
+      fuenteDocumento === "pedido" ? prisma.pedido.count({ where: { fuenteDocumento, cancelled: false, documentStatus: "bost_Open" } })
+        // Facturas: las que faltan preparar (las mismas que el puente vuelve a revisar).
+        : sincronizacionRepository.listarFacturasPendientes().then((f) => f.length),
       prisma.productoCodigoBarras.aggregate({ where: { retiradoEnSap: false }, _count: { _all: true }, _max: { sincronizadoEn: true } }),
       prisma.unidadMedida.count(),
       prisma.sincronizacionEstado.findMany({ select: { entidad: true, empresa: true, actualizadoEn: true } }),
