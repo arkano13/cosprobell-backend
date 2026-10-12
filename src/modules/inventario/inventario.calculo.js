@@ -11,14 +11,17 @@ export const codigoCaja = (id) => `CJ-${String(id).padStart(6, "0")}`;
 // mercadería que SAP tiene y la bodega todavía no ubicó; negativa, lo que SAP ya descontó y la bodega no asignó a un
 // lote. Lo facturado sin preparar SAP ya lo descontó, pero sigue en la pequeña hasta terminar su preparación.
 // Lo recibido en la app antes que SAP ("adelantado") cubre una diferencia negativa hasta que SAP lo registre.
-export function clasificar({ sap, grande, pequena, sinEntrega, porPreparar = 0, adelantado = 0, activo, sapCambioEn = null },
-  ahora = Date.now(), minutos = MINUTOS_PARA_ESTABILIZAR) {
+// sapConfirmadoEn: cuándo se leyó por última vez la existencia de SAP de este producto (ver repo.estados). Una factura
+// llega antes que las existencias que SAP ya descontó: hasta que se vuelvan a leer, sobra justo lo facturado.
+export function clasificar({ sap, grande, pequena, sinEntrega, porPreparar = 0, adelantado = 0, activo, sapCambioEn = null,
+  sapConfirmadoEn }, ahora = Date.now(), minutos = MINUTOS_PARA_ESTABILIZAR) {
   const enSap = Math.round(sap ?? 0);
   const base = enSap + porPreparar - grande - pequena - sinEntrega;
   const faltaEnSap = Math.min(adelantado, Math.max(0, -base));
   const diferencia = base + faltaEnSap;
   const cambio = sapCambioEn ? new Date(sapCambioEn).getTime() : null;
-  const estable = cambio === null || ahora - cambio >= minutos * 60_000;
+  const releido = sapConfirmadoEn === undefined || (sapConfirmadoEn !== null && new Date(sapConfirmadoEn).getTime() >= cambio);
+  const estable = cambio === null || (ahora - cambio >= minutos * 60_000 && releido);
   let estado = "al_dia";
   if (diferencia > 0) estado = !activo ? "conteo_inicial" : estable ? "por_ubicar" : "actualizando";
   else if (diferencia < 0) estado = estable ? "por_descontar" : "actualizando";
