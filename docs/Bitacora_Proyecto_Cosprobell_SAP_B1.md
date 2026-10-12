@@ -773,3 +773,14 @@ Revisión del commit 06c264b (preparación desde facturas). Arreglos en el backe
 - **`PREPARACION_FUENTE`:** se valida al arrancar (`pedidos` o `facturas`); un valor mal escrito no deja caer cada pedido con 500.
 
 Verificado: 566 pruebas y contra PostgreSQL local (facturado sin preparar con crédito, línea de la 01, anulada y combo; lista y pendientes; preparar y terminar; 24 horas; anulación devuelta una sola vez aunque llegue dos veces).
+
+## Traslados que salen de la 02 (13/10/2026)
+
+- Los traslados de SAP (StockTransfers) con origen 02 se preparan en la bodega igual que las facturas: aparecen en la
+  misma lista, se escanean unidad por unidad y, al terminar, se descuentan de la pequeña.
+- Solo cuentan las líneas que salen de la 02 hacia un almacén que no es de esta bodega (lo que va de la 02 a la 01 no
+  sale). Mientras no se preparan, cuentan como "por preparar" en el inventario (SAP ya los descontó).
+- Puente: `BRIDGE_PICKING_TRANSFERS=true` (requiere `BRIDGE_PICKING_SOURCE=facturas`). Usa la misma fecha de inicio y
+  los mismos días que las facturas, y la frecuencia de `facturasPreparacion` si `trasladosPreparacion` no tiene una.
+- Base: migración `20261013090000_traslados_preparacion` (cliente opcional solo en traslados, `almacenDestino` y rango
+  de claves propio: desde −1.000.000.001).

@@ -4,6 +4,8 @@ import { construirLote } from "./productos.js";
 import { construirLoteClientes } from "./clientes.js";
 import { lotePedidosSchema } from "../src/modules/sincronizacion/pedidos.schemas.js";
 import { construirLotePedidos } from "./pedidos.js";
+import { loteTrasladosPreparacionSchema } from "../src/modules/sincronizacion/trasladosPreparacion.schemas.js";
+import { construirLoteTrasladosPreparacion } from "./trasladosPreparacion.js";
 import { loteUnidadesSchema } from "../src/modules/sincronizacion/unidades.schemas.js";
 import { construirLoteUnidades } from "./unidades.js";
 import { loteCodigosBarrasSchema } from "../src/modules/sincronizacion/codigosBarras.schemas.js";
@@ -65,9 +67,17 @@ export const FACTURAS_PREPARACION = { ...PEDIDOS, nombre: "facturasPreparacion",
   // Las facturas sin preparar que quedan fuera de los días del recorrido se piden una por una (anulación, crédito).
   revisarCierres: true, rutaRevision: "facturasPreparacion/pendientes", ventanaFacturas: true, creditosPreparacion: true,
   schema: loteFacturasPreparacionSchema, construirLote: construirLoteFacturasPreparacion };
-export const ENTIDADES = [CLIENTES, PRODUCTOS, UNIDADES, CODIGOS_BARRAS, LISTAS_MATERIALES, PEDIDOS, FACTURAS_PREPARACION, ALMACENES, EXISTENCIAS];
+// Traslados que salen de la 02 (a consigna, a vendedores, etc.): se preparan como las facturas. Mismos días que las
+// facturas (BRIDGE_PICKING_INVOICE_SINCE y _DAYS). Un traslado no cambia después de creado: no hay revisión de pendientes.
+export const TRASLADOS_PREPARACION = { nombre: "trasladosPreparacion", recurso: "StockTransfers", claveSap: "DocEntry",
+  claveLocal: "docEntry", dependencias: ["clientes", "productos"], claveNumerica: true, tamanoPagina: 10,
+  campos: ["DocEntry", "DocNum", "DocDate", "CardCode", "FromWarehouse", "ToWarehouse", "StockTransferLines"],
+  filtro: "FromWarehouse eq '02'", ventanaFacturas: true,
+  schema: loteTrasladosPreparacionSchema, construirLote: construirLoteTrasladosPreparacion };
+export const ENTIDADES = [CLIENTES, PRODUCTOS, UNIDADES, CODIGOS_BARRAS, LISTAS_MATERIALES, PEDIDOS, FACTURAS_PREPARACION, TRASLADOS_PREPARACION, ALMACENES, EXISTENCIAS];
 export const entidadesHabilitadas = config => ENTIDADES.filter(e => (!e.inventario || config.inventarioHabilitado) && (!e.combos || config.combosHabilitados))
   .filter(e => e.nombre !== (config.fuentePreparacion === "facturas" ? "pedidos" : "facturasPreparacion"))
+  .filter(e => e.nombre !== "trasladosPreparacion" || (config.trasladosHabilitados && config.fuentePreparacion === "facturas"))
   .map(e => e.nombre === "facturasPreparacion" ? { ...e,
     // La fecha la agrega cada recorrido (ver desdeFacturas en sincronizar.js).
     filtro: "DocType eq 'dDocument_Items' and ReserveInvoice eq 'tNO'",

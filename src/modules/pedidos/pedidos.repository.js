@@ -5,7 +5,7 @@ import { fuentePreparacion } from "./preparacion.fuente.js";
 // Cuánto quedan en la sección Preparados las facturas terminadas (como en la app).
 export const HORAS_PREPARADAS = 24;
 const SELECCION_LISTA = { docEntry: true, docNum: true, cardCode: true, docDate: true, docDueDate: true,
-  fuenteDocumento: true, sapDocEntry: true, documentStatus: true, cancelled: true, sincronizadoEn: true,
+  fuenteDocumento: true, sapDocEntry: true, almacenDestino: true, documentStatus: true, cancelled: true, sincronizadoEn: true,
   cliente: { select: { cardName: true } } };
 export const pedidosRepository = {
   // almacenes: si viene, solo pedidos con alguna línea en esos almacenes de SAP.
@@ -20,14 +20,14 @@ export const pedidosRepository = {
       select: SELECCION_LISTA, orderBy: { docEntry: "asc" }, take: limit + 1,
     });
   },
-  // Facturas para preparar: las que tienen algo pendiente en la 02 y no se terminaron de preparar, más las terminadas en
+  // Facturas y traslados de la 02 para preparar: los que tienen algo pendiente en la 02 y no se terminaron de preparar, más las terminadas en
   // las últimas HORAS_PREPARADAS (la sección Preparados). Una factura no se cierra al despacharla: sin este límite la lista
   // crecería todos los días y las pendientes quedarían detrás de las ya preparadas. Las más nuevas primero (clave negativa).
   async listarFacturas({ cursor, limit }) {
     const desde = cursor ?? null;
     const filas = await prisma.$queryRaw`
       SELECT p."docEntry" FROM pedidos p
-      WHERE p."fuenteDocumento" = 'factura' AND p."docType" = 'dDocument_Items'
+      WHERE p."fuenteDocumento" IN ('factura', 'traslado') AND p."docType" = 'dDocument_Items'
         AND p.cancelled = false AND COALESCE(p."cancelStatus", 'csNo') = 'csNo'
         AND (${desde}::int IS NULL OR p."docEntry" > ${desde}::int)
         AND EXISTS (SELECT 1 FROM pedidos_lineas l WHERE l."pedidoDocEntry" = p."docEntry" AND l."warehouseCode" = '02'

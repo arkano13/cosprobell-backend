@@ -31,7 +31,7 @@ const SIN_ENTREGA = Prisma.sql`
   WHERE s.estado IN ('completo', 'con_diferencias')
   GROUP BY l."itemCode"`;
 
-// Facturado sin preparar: con una factura normal SAP descuenta la mercadería al facturar, pero sigue en la bodega
+// Facturado (o trasladado desde la 02) sin preparar: con una factura normal o un traslado SAP descuenta la mercadería al facturar, pero sigue en la bodega
 // pequeña hasta que se termina su preparación. Facturas no anuladas, solo las líneas de los almacenes de esta bodega,
 // con lo pendiente (ya sin las notas de crédito vinculadas) y los combos cambiados por sus productos (como al preparar).
 const POR_PREPARAR = Prisma.sql`
@@ -44,7 +44,7 @@ const POR_PREPARAR = Prisma.sql`
     JOIN bodegas b ON b."warehouseCode" = pl."warehouseCode" AND b."deEstaBodega"
     LEFT JOIN listas_materiales lm ON lm."itemCode" = pl."itemCode" AND lm.tipo = 'iAssemblyTree' AND NOT lm."retiradoEnSap"
     CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN lm."itemCode" IS NULL THEN '[null]'::jsonb ELSE lm.lineas END) c
-    WHERE p."fuenteDocumento" = 'factura' AND p.cancelled = false AND COALESCE(p."cancelStatus", 'csNo') = 'csNo'
+    WHERE p."fuenteDocumento" IN ('factura', 'traslado') AND p.cancelled = false AND COALESCE(p."cancelStatus", 'csNo') = 'csNo'
       AND (lm."itemCode" IS NULL OR c->>'tipo' IS NULL OR c->>'tipo' = 'pit_Item')
       AND NOT EXISTS (SELECT 1 FROM picking_pedidos s WHERE s."pedidoDocEntry" = p."docEntry" AND s.estado IN ('completo', 'con_diferencias'))
   ) x GROUP BY x."itemCode" HAVING ROUND(SUM(x.unidades)) <> 0`;

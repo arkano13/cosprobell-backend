@@ -47,6 +47,10 @@ export async function sincronizar({ config, almacen, sap, backend, entidad = PRO
     await guardar({ ...estado, inicioRecorrido: await backend.hora(),
       ...(entidad.ventanaFacturas ? { desdeRecorrido: desdeFacturas(config, estado) } : {}) });
   }
+  // Traslados: sin revisión de pendientes, pero con la misma ventana de días que las facturas.
+  if (entidad.ventanaFacturas && !conInicio && estado.cursor === null && !estado.pendiente && !estado.desdeRecorrido) {
+    await guardar({ ...estado, desdeRecorrido: desdeFacturas(config, estado) });
+  }
   // Las facturas del recorrido: la fecha queda fija hasta terminarlo.
   const consulta = entidad.ventanaFacturas
     ? { ...entidad, filtro: `${entidad.filtro} and DocDate ge '${estado.desdeRecorrido ?? config.facturasDesde}'` } : entidad;
@@ -115,6 +119,7 @@ export async function sincronizar({ config, almacen, sap, backend, entidad = PRO
   await guardar({ ...estado, cursor: null, ultimoCompleto: new Date().toISOString(),
     ...(estado.solicitudManualId ? { solicitudManualCompletaId: estado.solicitudManualId, solicitudManualId: null } : {}),
     ...(entidad.confirmarRecorrido ? { recorridoId: null, finalizando: false } : {}),
-    ...(conInicio ? { porRevisar: null, inicioRecorrido: null, desdeRecorrido: null } : {}) });
+    ...(conInicio ? { porRevisar: null, inicioRecorrido: null, desdeRecorrido: null } : {}),
+    ...(entidad.ventanaFacturas ? { desdeRecorrido: null } : {}) });
   return { completo: true, lotes, ultimaSecuencia: estado.secuencia };
 }

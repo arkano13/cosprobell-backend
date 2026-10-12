@@ -4,8 +4,10 @@ import { prisma } from "../../infrastructure/database/prisma.js";
 import { AppError } from "../../shared/errors/AppError.js";
 
 // listasMateriales (combos): el puente la manda entre sus entidades; el botón no la pide.
-const entidades = ["clientes", "productos", "unidades", "codigosBarras", "listasMateriales", "pedidos", "facturasPreparacion", "almacenes", "existencias"];
-const entidadesManuales = habilitadas => ["productos", habilitadas?.includes("facturasPreparacion") ? "facturasPreparacion" : "pedidos", "existencias"].filter(e => habilitadas?.includes(e));
+const entidades = ["clientes", "productos", "unidades", "codigosBarras", "listasMateriales", "pedidos", "facturasPreparacion",
+  "trasladosPreparacion", "almacenes", "existencias"];
+const entidadesManuales = habilitadas => ["productos", habilitadas?.includes("facturasPreparacion") ? "facturasPreparacion" : "pedidos",
+  "trasladosPreparacion", "existencias"].filter(e => habilitadas?.includes(e));
 const nombres = z.array(z.enum(entidades)).min(1).max(entidades.length).refine(v => new Set(v).size === v.length);
 const consultaSchema = z.object({ entidades: nombres }).strict();
 const progresoSchema = z.object({

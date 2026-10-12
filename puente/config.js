@@ -32,6 +32,9 @@ export function configurar(v) {
   }
   // Después de la primera carga, cada recorrido lee solo las facturas de los últimos días; las que siguen sin preparar
   // se vuelven a pedir una por una (las que informa el backend), aunque sean más viejas.
+  const traslados = v.BRIDGE_PICKING_TRANSFERS ?? "false";
+  if (!["true", "false"].includes(traslados)) throw new Error("BRIDGE_PICKING_TRANSFERS inválido");
+  if (traslados === "true" && fuentePreparacion !== "facturas") throw new Error("BRIDGE_PICKING_TRANSFERS requiere BRIDGE_PICKING_SOURCE=facturas");
   const facturasDias = Number(v.BRIDGE_PICKING_INVOICE_DAYS ?? 2);
   if (!Number.isSafeInteger(facturasDias) || facturasDias < 1 || facturasDias > 60) throw new Error("BRIDGE_PICKING_INVOICE_DAYS inválido (1 a 60)");
   const activarInventario = v.BRIDGE_INVENTORY_ENABLED ?? "false";
@@ -69,8 +72,12 @@ export function configurar(v) {
   if (fuentePreparacion === "facturas" && frecuencias.facturasPreparacion == null && frecuencias.pedidos != null) {
     frecuencias.facturasPreparacion = frecuencias.pedidos;
   }
+  // Los traslados se leen con la misma frecuencia que las facturas si no tienen una propia.
+  if (traslados === "true" && frecuencias.trasladosPreparacion == null && frecuencias.facturasPreparacion != null) {
+    frecuencias.trasladosPreparacion = frecuencias.facturasPreparacion;
+  }
   return { sapUrl, backendUrl, empresa, usuario: v.SAP_USER, password: v.SAP_PASSWORD,
-    fuentePreparacion, facturasDesde, facturasDias,
+    fuentePreparacion, facturasDesde, facturasDias, trasladosHabilitados: traslados === "true",
     frecuencias, soloCambios: true, huellaSap, combosHabilitados: activarCombos === "true", inventarioHabilitado: activarInventario === "true", modoExistencias, almacenesSap,
     maxConsultas: numero("BRIDGE_MAX_REQUESTS", 25, 1, 10000),
     maxDuracionMs: numero("BRIDGE_MAX_SECONDS", 120, 10, 3600) * 1000,

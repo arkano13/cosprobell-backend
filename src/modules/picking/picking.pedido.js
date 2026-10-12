@@ -1,13 +1,13 @@
 import { AppError } from "../../shared/errors/AppError.js";
 import { unidadConocida, UNIDAD_MANUAL } from "./picking.cantidades.js";
 import { productosDelCombo } from "./picking.combos.js";
-import { fuentePreparacion } from "../pedidos/preparacion.fuente.js";
+import { fuentesDocumento, esSalidaSap } from "../pedidos/preparacion.fuente.js";
 
 export function comprobarPedidoElegible(pedido) {
   if (!pedido) throw new AppError({
     code: "PEDIDO_NO_ENCONTRADO", message: "Pedido no encontrado", statusCode: 404,
   });
-  if ((pedido.fuenteDocumento ?? "pedido") !== fuentePreparacion()) throw new AppError({
+  if (!fuentesDocumento().includes(pedido.fuenteDocumento ?? "pedido")) throw new AppError({
     code: "FUENTE_PREPARACION_INCORRECTA", message: "Este documento pertenece a la fuente anterior de preparación", statusCode: 409 });
   if (pedido.cancelled === true || ["csYes", "csCancellation"].includes(pedido.cancelStatus)) {
     throw new AppError({ code: "PEDIDO_CANCELADO", message: "El pedido está cancelado", statusCode: 409 });
@@ -17,10 +17,10 @@ export function comprobarPedidoElegible(pedido) {
   if (pedido.cancelled !== false || (pedido.cancelStatus != null && pedido.cancelStatus !== "csNo")) {
     throw new AppError({ code: "ESTADO_PEDIDO_DESCONOCIDO", message: "No se puede confirmar el estado de cancelación del pedido", statusCode: 409 });
   }
-  if (pedido.fuenteDocumento !== "factura" && pedido.documentStatus === "bost_Close") {
+  if (!esSalidaSap(pedido.fuenteDocumento) && pedido.documentStatus === "bost_Close") {
     throw new AppError({ code: "PEDIDO_CERRADO", message: "El pedido está cerrado", statusCode: 409 });
   }
-  if (!["bost_Open", ...(pedido.fuenteDocumento === "factura" ? ["bost_Close"] : [])].includes(pedido.documentStatus)) {
+  if (!["bost_Open", ...(esSalidaSap(pedido.fuenteDocumento) ? ["bost_Close"] : [])].includes(pedido.documentStatus)) {
     throw new AppError({ code: "ESTADO_PEDIDO_DESCONOCIDO", message: "No se puede confirmar que el pedido esté abierto", statusCode: 409 });
   }
   if (pedido.docType !== "dDocument_Items") {
@@ -32,9 +32,9 @@ export function lineasParaPreparar(pedido) {
   const error = (code, message) => new AppError({ code, message, statusCode: 409 });
   const abiertas = [];
   for (const linea of pedido.lineas) {
-    if (pedido.fuenteDocumento === "factura" && linea.warehouseCode !== "02") continue;
-    if (pedido.fuenteDocumento !== "factura" && linea.lineStatus === "bost_Close") continue;
-    if (!["bost_Open", ...(pedido.fuenteDocumento === "factura" ? ["bost_Close"] : [])].includes(linea.lineStatus)) throw error("ESTADO_LINEA_DESCONOCIDO", "No se puede confirmar el estado de una línea");
+    if (esSalidaSap(pedido.fuenteDocumento) && linea.warehouseCode !== "02") continue;
+    if (!esSalidaSap(pedido.fuenteDocumento) && linea.lineStatus === "bost_Close") continue;
+    if (!["bost_Open", ...(esSalidaSap(pedido.fuenteDocumento) ? ["bost_Close"] : [])].includes(linea.lineStatus)) throw error("ESTADO_LINEA_DESCONOCIDO", "No se puede confirmar el estado de una línea");
     const pendiente = linea.remainingOpenQuantity;
     if (!Number.isSafeInteger(pendiente) || pendiente < 0 || !Number.isFinite(linea.quantity) || pendiente > linea.quantity) {
       throw error("PENDIENTE_NO_CONFIRMADO", "La cantidad pendiente no es válida para preparar unidades individuales");
