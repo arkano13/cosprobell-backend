@@ -82,7 +82,7 @@ try {
           break;
         }
         // No imprimir cuerpos HTTP, cookies, claves, URLs ni errores del driver.
-        // El detalle solo viene de ErrorPuente: código del registro y campo, sin valores.
+        // El detalle solo viene de ErrorPuente: código del registro y campo, o el mensaje de SAP sin credenciales.
         const detalle = error instanceof ErrorPuente ? error.detalle : undefined;
         if (manual) {
           const codigo = /^[A-Z0-9_]{1,60}$/.test(error.code ?? "") ? error.code : "ERROR_LOCAL";

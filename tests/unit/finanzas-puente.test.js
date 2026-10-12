@@ -5,7 +5,7 @@ import { FINANZAS } from "../../src/shared/finanzas/contratos.js";
 import { unidades, importe } from "../../src/shared/finanzas/decimal.js";
 import { definicionesSqlFinanzas } from "../../puente/finanzas.sql.js";
 import { lectorFinanciero, transformarFinanzas } from "../../puente/finanzas.transformar.js";
-import { sincronizarPaginaFinanzas, parametrosFinanzas } from "../../puente/finanzas.sincronizar.js";
+import { sincronizarPaginaFinanzas, parametrosFinanzas, paginaFinanzas } from "../../puente/finanzas.sincronizar.js";
 import { configurarFinanzas } from "../../puente/finanzas.config.js";
 import { crearClienteSap } from "../../puente/sap.client.js";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -49,7 +49,10 @@ test("finanzas: científico fuera de rango no se redondea ni desborda", async ()
   }
 });
 test("finanzas: no inventa zona, ruta ni datos ausentes", () => {
-  assert.match(defs.clientes.consulta.SqlText, /NULL AS \[zona\], NULL AS \[ruta\]/);
+  assert.doesNotMatch(defs.clientes.consulta.SqlText, /NULL|\[zona\]|\[ruta\]/);
+  assert.match(definicionesSqlFinanzas({ ...config, campoRuta: "U_ZONA" }).clientes.consulta.SqlText, /H\.\[U_ZONA\] AS \[ruta\]/);
+  const sinUdf = { ...filaCliente }; delete sinUdf.zona; delete sinUdf.ruta;
+  assert.deepEqual(transformarFinanzas("clientes", [sinUdf], null)[0], filaCliente);
   const falta = { ...filaCliente }; delete falta.saldo;
   assert.throws(() => transformarFinanzas("clientes", [falta], null), { code: "FINANZA_SAP_INVALIDA" });
   assert.throws(() => transformarFinanzas("clientes", [filaCliente, filaCliente], null), { code: "PAGINACION_SIN_AVANCE" });
@@ -57,6 +60,10 @@ test("finanzas: no inventa zona, ruta ni datos ausentes", () => {
 test("finanzas: todas las consultas compilan y tienen contratos de columnas completos", () => {
   for (const [nombre, def] of Object.entries(defs)) {
     assert.deepEqual(Object.keys(def.columnas).sort(), Object.keys(FINANZAS[nombre].campos).sort());
+    if (def.servicio) continue;
+    // Sin constantes en columnas ni orden: Service Layer respondió 400 a 'empresa' AS [codigo].
+    const [, seleccion, orden] = /^SELECT TOP 50 ([\s\S]*?) FROM [\s\S]* ORDER BY ([\s\S]*)$/.exec(def.consulta.SqlText);
+    assert.doesNotMatch(seleccion + orden, /'|\bNULL\b/);
     const sql = def.consulta.SqlText.replace("TOP 50 ", "") + " LIMIT 50";
     const db = new DatabaseSync(":memory:");
     try {
@@ -103,6 +110,36 @@ test("finanzas: registro SQL ocurre solo cuando se solicita explícitamente", as
   });
   await assert.rejects(sap.prepararConsultaFinanciera(defs.facturas.consulta), { code: "HTTP_404" });
   assert.equal(llamadas.filter(c => c.opciones.method === "POST").length, 1);
+});
+function sapSimulado(respuesta) {
+  const llamadas = [];
+  const sap = crearClienteSap({ sapUrl: "https://sap.test/b1s/v1", usuario: "usuario1", password: "clave-secreta" }, async (url, opciones = {}) => {
+    llamadas.push({ url, metodo: opciones.method ?? "GET" });
+    if (url.endsWith("Login")) return new Response("{}", { headers: { "Set-Cookie": "B1SESSION=test" } });
+    return respuesta(url);
+  });
+  return { sap, llamadas };
+}
+test("finanzas: monedas de empresa por GetAdminInfo, sin SQLQueries sobre OADM", async () => {
+  assert.equal(defs.empresa.servicio, true);
+  assert.equal(defs.empresa.consulta, undefined);
+  const { sap, llamadas } = sapSimulado(() => Response.json({ CompanyName: "X", LocalCurrency: "HNL", SystemCurrency: "USD" }));
+  const filas = await paginaFinanzas(sap, defs.empresa, parametrosFinanzas(defs.empresa, config, {}, null));
+  assert.deepEqual(transformarFinanzas("empresa", filas, null), [{ codigo: "empresa", monedaLocal: "HNL", monedaSistema: "USD" }]);
+  assert.deepEqual(await paginaFinanzas(sap, defs.empresa, parametrosFinanzas(defs.empresa, config, {}, ["empresa"])), []);
+  assert.deepEqual(llamadas.filter(c => !c.url.endsWith("Login")), [{ url: "https://sap.test/b1s/v1/CompanyService_GetAdminInfo", metodo: "POST" }]);
+  assert.ok(llamadas.every(c => !c.url.includes("SQLQueries")));
+});
+test("finanzas: monedas ausentes en SAP no se suponen", async () => {
+  const { sap } = sapSimulado(() => Response.json({ CompanyName: "X" }));
+  const filas = await paginaFinanzas(sap, defs.empresa, { k0: "" });
+  assert.throws(() => transformarFinanzas("empresa", filas, null), { code: "FINANZA_SAP_INVALIDA" });
+});
+test("finanzas: el rechazo de SAP muestra su mensaje sin credenciales", async () => {
+  const { sap } = sapSimulado(url => url.includes("SQLQueries('") ? new Response("{}", { status: 404 })
+    : Response.json({ error: { code: -1, message: { lang: "en-us", value: "Tabla no permitida\nclave-secreta usuario1" } } }, { status: 400 }));
+  await assert.rejects(sap.prepararConsultaFinanciera(defs.clientes.consulta, true), e => e.code === "HTTP_400" &&
+    e.detalle.codigoSap === "-1" && e.detalle.mensajeSap === "Tabla no permitida [oculto] [oculto]");
 });
 function entorno() {
   const almacen = { nuevo: true, estado: { version: 1, origen: "x", recorrido: null, cursor: null, secuencia: 0, pendiente: null },

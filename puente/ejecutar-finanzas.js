@@ -4,8 +4,8 @@ import { configurarFinanzas } from "./finanzas.config.js";
 import { definicionesSqlFinanzas } from "./finanzas.sql.js";
 import { abrirFinanzas } from "./finanzas.estado.js";
 import { clienteBackendFinanzas } from "./finanzas.backend.js";
-import { sincronizarPaginaFinanzas, parametrosFinanzas, fuenteFinanzas } from "./finanzas.sincronizar.js";
-import { lectorFinanciero, transformarFinanzas } from "./finanzas.transformar.js";
+import { sincronizarPaginaFinanzas, parametrosFinanzas, fuenteFinanzas, paginaFinanzas } from "./finanzas.sincronizar.js";
+import { transformarFinanzas } from "./finanzas.transformar.js";
 import { tomarCandado } from "./candado.js";
 import { crearControl } from "./control.js";
 import { crearClienteSap } from "./sap.client.js";
@@ -33,15 +33,15 @@ try {
   if (modo.length) {
     const def = definiciones[seleccion];
     if (modo[0] !== "--sondeo") console.log(JSON.stringify({ evento: "consulta_financiera", entidad: seleccion,
-      resultado: await sap.prepararConsultaFinanciera(def.consulta, modo[0] === "--registrar") }));
-    const filas = await sap.paginaFinanciera(def.consulta, parametrosFinanzas(def, config,
-      { ventana: def.historialContable ? "1900-01-01" : config.desde }, null), lectorFinanciero(seleccion), 1);
+      resultado: def.servicio ? "servicio_sap" : await sap.prepararConsultaFinanciera(def.consulta, modo[0] === "--registrar") }));
+    const filas = await paginaFinanzas(sap, def, parametrosFinanzas(def, config,
+      { ventana: def.historialContable ? "1900-01-01" : config.desde }, null), 1);
     const registros = transformarFinanzas(seleccion, filas, null);
     if (seleccion === "empresa" && (registros.length !== 1 || registros[0].monedaLocal !== config.monedaLocal || registros[0].monedaSistema !== config.monedaSistema)) throw new ErrorPuente("MONEDA_EMPRESA_DISTINTA");
     console.log(JSON.stringify({ evento: "sondeo_financiero", entidad: seleccion, registros: registros.length }));
   } else {
-    const moneda = transformarFinanzas("empresa", await sap.paginaFinanciera(definiciones.empresa.consulta,
-      parametrosFinanzas(definiciones.empresa, config, {}, null), lectorFinanciero("empresa"), 1), null);
+    const moneda = transformarFinanzas("empresa", await paginaFinanzas(sap, definiciones.empresa,
+      parametrosFinanzas(definiciones.empresa, config, {}, null), 1), null);
     if (moneda.length !== 1 || moneda[0].monedaLocal !== config.monedaLocal || moneda[0].monedaSistema !== config.monedaSistema) throw new ErrorPuente("MONEDA_EMPRESA_DISTINTA");
     const backend = clienteBackendFinanzas(config);
     const pendientes = [];
