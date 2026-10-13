@@ -10,9 +10,9 @@ export const DIAS_REPONER_PRONTO = 3;
 const DIAS = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
 const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 
-// Números como en la app: 4.312 y 3,1.
-export const numero = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-export const porcentaje = (n) => `${(Math.round(n * 10) / 10).toString().replace(".", ",")} %`;
+// Números como los muestra la app (formato de Honduras): 4,312 y 3.1 %.
+export const numero = (n) => Math.round(n).toLocaleString("es-HN");
+export const porcentaje = (n) => `${(Math.round(n * 10) / 10).toLocaleString("es-HN", { maximumFractionDigits: 1 })} %`;
 const plural = (n, uno, varios) => `${numero(n)} ${n === 1 ? uno : varios}`;
 const nombreDia = (fecha) => `${DIAS[diaDeSemana(fecha)]} ${Number(fecha.slice(8, 10))}`;
 const fechaCorta = (fecha) => `${fecha.slice(8, 10)}/${fecha.slice(5, 7)}`;
