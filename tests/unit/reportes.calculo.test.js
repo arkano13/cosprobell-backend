@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { rangoPeriodo, rangoDia, inicioDelDia, fechaLocal, semanaIso, diasHabiles } from "../../src/modules/reportes/reportes.periodo.js";
 import { armarPreparaciones, armarDetalle, armarErrores, armarSalidas, armarReposiciones, armarCorrecciones, armarPendientes,
-  armarActividad, motivoRechazo, duracionValida } from "../../src/modules/reportes/reportes.calculo.js";
+  armarActividad, armarVencimientos, motivoRechazo, duracionValida } from "../../src/modules/reportes/reportes.calculo.js";
 import { textoConteo } from "../../src/modules/inventario/inventario.calculo.js";
 
 const h = (iso) => new Date(iso);
@@ -188,4 +188,24 @@ test("texto de un conteo para el registro de cambios", () => {
     "2 cajas × 12 · L330 + 5 u. sueltas · L331");
   assert.equal(textoConteo([{ cajas: 3, unidadesPorCaja: 12, unidades: 36, lote: "A" }, { cajas: null, unidades: 4, lote: null }]), "3 cajas × 12 · A + 4 u. sueltas");
   assert.equal(textoConteo([]), "0 u.");
+});
+
+test("vencimientos: tramos, por mes, qué pasar primero y lo que no tiene fecha", () => {
+  const f = (lugar, itemCode, lote, vencimiento, cajas, unidades, almacen = null) => ({ lugar, almacen, itemCode, itemName: `Producto ${itemCode}`,
+    lote, vencimiento, cajas, unidades });
+  const filas = [f("grande", "A", "L1", "2026-10-01", 2, 24), f("pequena", "B", "B1", "2026-10-20", 0, 6),
+    f("grande", "C", "C1", "2026-11-10", 1, 12), f("pequena", "C", "C2", "2027-01-15", 0, 5), f("almacen", "D", "D1", "2026-12-31", 3, 36, "04")];
+  const base = { filas, sinFecha: [{ lugar: "grande", almacen: null, productos: 2, unidades: 40 }], almacenes: { grande: "01", pequena: "02" },
+    codigos: new Map([["A", "7401"]]), hoy: "2026-10-13" };
+  const r = armarVencimientos(base);
+  assert.deepEqual(r.resumen, { vencido: { lotes: 1, unidades: 24 }, en30: { lotes: 2, unidades: 18 }, en60: { lotes: 0, unidades: 0 },
+    en90: { lotes: 1, unidades: 36 }, mas: { lotes: 1, unidades: 5 }, sinFecha: { productos: 2, unidades: 40 } });
+  assert.deepEqual(r.vencidos.map((l) => [l.itemCode, l.almacen, l.dias, l.codigo]), [["A", "01", -12, "7401"]]);
+  assert.deepEqual(r.porMes.map((m) => [m.mes, m.unidades]), [["vencido", 24], ["2026-10", 6], ["2026-11", 12], ["2026-12", 36], ["2027-01", 5]]);
+  // C: la 01 tiene un lote que vence antes que el de la 02.
+  assert.deepEqual(r.pasarPrimero, [{ itemCode: "C", itemName: "Producto C", loteGrande: "C1", venceGrande: "2026-11-10", lotePequena: "C2", vencePequena: "2027-01-15" }]);
+  assert.equal(r.destacados[0], "Hay 1 lote vencido con 24 unidades: hay que sacarlos de la venta. La mayor parte está en la 01.");
+  assert.equal(r.destacados[1], "Lo próximo en vencer: Producto B, lote B1, el 20/10/2026 (en 7 días) en la 02: 6 unidades.");
+  const solo04 = armarVencimientos({ ...base, donde: "04" });
+  assert.deepEqual([solo04.porVencer.map((l) => [l.itemCode, l.enCajas, l.cajas]), solo04.resumen.sinFecha.unidades], [[["D", true, 3]], 0]);
 });

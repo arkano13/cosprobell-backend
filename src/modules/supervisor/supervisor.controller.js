@@ -50,3 +50,4 @@ export const reporteReposiciones = manejar((req) => reportes.reporteReposiciones
 export const reporteCorrecciones = manejar((req) => reportes.reporteCorrecciones(req.validatedQuery));
 export const reportePendientes = manejar((req) => reportes.reportePendientes(req.validatedQuery));
 export const reporteActividad = manejar((req) => reportes.reporteActividad(req.validatedQuery));
+export const reporteVencimientos = manejar((req) => reportes.reporteVencimientos(req.validatedQuery));

@@ -311,6 +311,7 @@ test("reportes de bodega: solo el supervisor, con filtros validados y la prepara
   assert.equal((await pedir("/supervisor/reportes/preparaciones?periodo=1d", headers)).status, 400);
   assert.equal((await pedir("/supervisor/reportes/pendientes?minDias=2", headers)).status, 400);
   assert.equal((await pedir("/supervisor/reportes/actividad?dia=13-10-2026", headers)).status, 400);
+  assert.equal((await pedir("/supervisor/reportes/vencimientos?dias=45", headers)).status, 400);
   t.mock.method(reportesRepository, "sesion", async () => null);
   const falta = await pedir("/supervisor/reportes/preparaciones/99", headers);
   assert.deepEqual([falta.status, (await falta.json()).error.code], [404, "PICKING_NO_ENCONTRADO"]);

@@ -495,3 +495,70 @@ export function armarActividad({ dia, preparaciones, lecturasHora, movimientos, 
   } : null;
   return { dia, personas: filas, detalle };
 }
+
+// ---------- 9. Vencimientos ----------
+// Tramos de días hasta el vencimiento (negativo: ya venció).
+export const TRAMOS_VENCIMIENTO = [
+  { tramo: "vencido", desde: -Infinity, hasta: -1 }, { tramo: "en30", desde: 0, hasta: 30 },
+  { tramo: "en60", desde: 31, hasta: 60 }, { tramo: "en90", desde: 61, hasta: 90 }, { tramo: "mas", desde: 91, hasta: Infinity },
+];
+const tramoDe = (dias) => TRAMOS_VENCIMIENTO.find((t) => dias >= t.desde && dias <= t.hasta).tramo;
+
+// filas: repo.vencimientos; sinFecha: repo.sinVencimiento; almacenes: { grande, pequena } (códigos de SAP de cada bodega);
+// codigos: Map itemCode → código de barras; donde: "todas" o el código de un almacén.
+export function armarVencimientos({ filas, sinFecha, almacenes, codigos, hoy, donde = "todas" }) {
+  const codigoDe = (f) => (f.lugar === "almacen" ? f.almacen : almacenes[f.lugar] ?? (f.lugar === "grande" ? "01" : "02"));
+  const lotes = filas.map((f) => {
+    const dias = diasEntre(hoy, f.vencimiento);
+    return { itemCode: f.itemCode, itemName: f.itemName, codigo: codigos.get(f.itemCode) ?? null, almacen: codigoDe(f),
+      enCajas: f.lugar === "grande" || (f.lugar === "almacen" && f.cajas > 0), lote: f.lote, vencimiento: f.vencimiento, dias, tramo: tramoDe(dias),
+      cajas: f.cajas, unidades: f.unidades, contadoEn: f.contadoEn ?? null };
+  }).filter((l) => donde === "todas" || l.almacen === donde);
+  const sinFechaLista = sinFecha.map((s) => ({ almacen: s.lugar === "almacen" ? s.almacen : almacenes[s.lugar] ?? (s.lugar === "grande" ? "01" : "02"),
+    productos: s.productos, unidades: s.unidades })).filter((s) => donde === "todas" || s.almacen === donde);
+
+  const resumen = Object.fromEntries(TRAMOS_VENCIMIENTO.map((t) => [t.tramo, { lotes: 0, unidades: 0 }]));
+  for (const l of lotes) { resumen[l.tramo].lotes += 1; resumen[l.tramo].unidades += l.unidades; }
+  resumen.sinFecha = { productos: sinFechaLista.reduce((t, s) => t + s.productos, 0), unidades: sinFechaLista.reduce((t, s) => t + s.unidades, 0) };
+
+  // Por mes de vencimiento (lo vencido junto, al principio).
+  const meses = new Map([["vencido", { mes: "vencido", unidades: 0, lotes: 0 }]]);
+  for (const l of lotes) {
+    const clave = l.dias < 0 ? "vencido" : l.vencimiento.slice(0, 7);
+    const m = meses.get(clave) ?? { mes: clave, unidades: 0, lotes: 0 };
+    m.unidades += l.unidades; m.lotes += 1;
+    meses.set(clave, m);
+  }
+  const porMes = [...meses.values()].sort((a, b) => (a.mes === "vencido" ? -1 : b.mes === "vencido" ? 1 : a.mes.localeCompare(b.mes)));
+
+  // Productos en los que la 01 tiene un lote que vence antes que todos los de la 02: conviene pasar ese primero.
+  const primero = new Map();
+  for (const l of lotes) {
+    if (l.almacen !== (almacenes.grande ?? "01") && l.almacen !== (almacenes.pequena ?? "02")) continue;
+    const lado = l.almacen === (almacenes.grande ?? "01") ? "grande" : "pequena";
+    const p = primero.get(l.itemCode) ?? { itemCode: l.itemCode, itemName: l.itemName };
+    if (!p[lado] || l.vencimiento < p[lado].vencimiento) p[lado] = l;
+    primero.set(l.itemCode, p);
+  }
+  const pasarPrimero = [...primero.values()].filter((p) => p.grande && p.pequena && p.grande.vencimiento < p.pequena.vencimiento && p.grande.dias >= 0)
+    .map((p) => ({ itemCode: p.itemCode, itemName: p.itemName, loteGrande: p.grande.lote, venceGrande: p.grande.vencimiento,
+      lotePequena: p.pequena.lote, vencePequena: p.pequena.vencimiento }))
+    .sort((a, b) => a.venceGrande.localeCompare(b.venceGrande));
+
+  const lugarMayor = (lista) => {
+    const por = new Map();
+    for (const l of lista) por.set(l.almacen, (por.get(l.almacen) ?? 0) + l.unidades);
+    return [...por.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  };
+  const vencidos = lotes.filter((l) => l.dias < 0);
+  const porVencer = lotes.filter((l) => l.dias >= 0);
+  const destacados = [];
+  if (vencidos.length) destacados.push(`Hay ${plural(vencidos.length, "lote vencido", "lotes vencidos")} con ${plural(resumen.vencido.unidades, "unidad", "unidades")}: hay que sacarlos de la venta. La mayor parte está en la ${lugarMayor(vencidos)}.`);
+  const proximo = porVencer[0];
+  if (proximo) destacados.push(`Lo próximo en vencer: ${proximo.itemName}${proximo.lote ? `, lote ${proximo.lote}` : ""}, el ${fechaCorta(proximo.vencimiento)}/${proximo.vencimiento.slice(0, 4)} (${proximo.dias === 0 ? "hoy" : `en ${plural(proximo.dias, "día", "días")}`}) en la ${proximo.almacen}: ${proximo.enCajas && proximo.cajas ? plural(proximo.cajas, "caja", "cajas") : plural(proximo.unidades, "unidad", "unidades")}.`);
+  if (pasarPrimero.length) destacados.push(`En ${plural(pasarPrimero.length, "producto", "productos")} la ${almacenes.grande ?? "01"} tiene un lote que vence antes que el de la ${almacenes.pequena ?? "02"}: conviene pasar ese primero.`);
+  if (resumen.sinFecha.unidades) destacados.push(`${plural(resumen.sinFecha.unidades, "unidad no tiene", "unidades no tienen")} fecha de vencimiento cargada (${plural(resumen.sinFecha.productos, "producto", "productos")}): no aparecen en este reporte.`);
+  if (!lotes.length && !resumen.sinFecha.unidades) destacados.push("Nada vence en este plazo.");
+
+  return { resumen, destacados, porMes, vencidos, porVencer, pasarPrimero, sinFecha: sinFechaLista };
+}
