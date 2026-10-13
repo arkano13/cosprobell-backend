@@ -553,7 +553,7 @@ export function armarVencimientos({ filas, sinFecha, almacenes, codigos, hoy, do
   const vencidos = lotes.filter((l) => l.dias < 0);
   const porVencer = lotes.filter((l) => l.dias >= 0);
   const destacados = [];
-  if (vencidos.length) destacados.push(`Hay ${plural(vencidos.length, "lote vencido", "lotes vencidos")} con ${plural(resumen.vencido.unidades, "unidad", "unidades")}: hay que sacarlos de la venta. La mayor parte está en la ${lugarMayor(vencidos)}.`);
+  if (vencidos.length) destacados.push(`Hay ${plural(vencidos.length, "lote vencido", "lotes vencidos")} con ${plural(resumen.vencido.unidades, "unidad", "unidades")}: hay que ${vencidos.length === 1 ? "sacarlo" : "sacarlos"} de la venta. La mayor parte está en la ${lugarMayor(vencidos)}.`);
   const proximo = porVencer[0];
   if (proximo) destacados.push(`Lo próximo en vencer: ${proximo.itemName}${proximo.lote ? `, lote ${proximo.lote}` : ""}, el ${fechaCorta(proximo.vencimiento)}/${proximo.vencimiento.slice(0, 4)} (${proximo.dias === 0 ? "hoy" : `en ${plural(proximo.dias, "día", "días")}`}) en la ${proximo.almacen}: ${proximo.enCajas && proximo.cajas ? plural(proximo.cajas, "caja", "cajas") : plural(proximo.unidades, "unidad", "unidades")}.`);
   if (pasarPrimero.length) destacados.push(`En ${plural(pasarPrimero.length, "producto", "productos")} la ${almacenes.grande ?? "01"} tiene un lote que vence antes que el de la ${almacenes.pequena ?? "02"}: conviene pasar ese primero.`);

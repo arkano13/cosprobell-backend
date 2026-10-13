@@ -204,7 +204,7 @@ test("vencimientos: tramos, por mes, qué pasar primero y lo que no tiene fecha"
   assert.deepEqual(r.porMes.map((m) => [m.mes, m.unidades]), [["vencido", 24], ["2026-10", 6], ["2026-11", 12], ["2026-12", 36], ["2027-01", 5]]);
   // C: la 01 tiene un lote que vence antes que el de la 02.
   assert.deepEqual(r.pasarPrimero, [{ itemCode: "C", itemName: "Producto C", loteGrande: "C1", venceGrande: "2026-11-10", lotePequena: "C2", vencePequena: "2027-01-15" }]);
-  assert.equal(r.destacados[0], "Hay 1 lote vencido con 24 unidades: hay que sacarlos de la venta. La mayor parte está en la 01.");
+  assert.equal(r.destacados[0], "Hay 1 lote vencido con 24 unidades: hay que sacarlo de la venta. La mayor parte está en la 01.");
   assert.equal(r.destacados[1], "Lo próximo en vencer: Producto B, lote B1, el 20/10/2026 (en 7 días) en la 02: 6 unidades.");
   const solo04 = armarVencimientos({ ...base, donde: "04" });
   assert.deepEqual([solo04.porVencer.map((l) => [l.itemCode, l.enCajas, l.cajas]), solo04.resumen.sinFecha.unidades], [[["D", true, 3]], 0]);
