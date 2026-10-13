@@ -20,13 +20,23 @@ export function crearClienteSap(config, fetchImpl = fetch) {
     if (!cookies.some((v) => /^B1SESSION=.+/.test(v))) throw new ErrorPuente("SESION_SAP_INVALIDA");
     cookie = cookies.join("; ");
   }
+  // Mensaje de error de Service Layer sin credenciales ni sesión, para corregir el origen.
+  async function leerErrorSap(respuesta) {
+    const cuerpo = await respuesta.json();
+    let mensaje = cuerpo?.error?.message?.value ?? cuerpo?.error?.message;
+    if (typeof mensaje !== "string" || !mensaje) return undefined;
+    for (const secreto of [config.password, config.usuario, cookie]) if (secreto) mensaje = mensaje.split(secreto).join("[oculto]");
+    const codigo = cuerpo.error.code;
+    return { codigoSap: ["number", "string"].includes(typeof codigo) ? String(codigo).slice(0, 20) : undefined,
+      mensajeSap: mensaje.replace(/[\x00-\x1f]/g, " ").slice(0, 300) };
+  }
   // GET con la sesión vigente; ante 401 renueva la sesión una sola vez.
   async function obtener(ruta, cabeceras = {}, lector = leerJson) {
     if (!cookie) await login();
     for (let intento = 0; ; intento++) {
       try {
         await config.control?.antesDeConsultar();
-        return await lector(await solicitar(`${config.sapUrl}/${ruta}`, { headers: { Cookie: cookie, ...cabeceras } }, fetchImpl));
+        return await lector(await solicitar(`${config.sapUrl}/${ruta}`, { headers: { Cookie: cookie, ...cabeceras } }, fetchImpl, leerErrorSap));
       } catch (error) {
         if (error.code !== "HTTP_401" || intento === 1) throw error;
         cookie = null; await login();
@@ -144,6 +154,18 @@ export function crearClienteSap(config, fetchImpl = fetch) {
           factura.CreditosPreparacion = await creditosDeFactura(factura.DocEntry);
         }
       }
+      return datos.value;
+    },
+    // Catálogo de Service Layer ($metadata), en texto. Solo lectura.
+    async metadata() {
+      return obtener("$metadata", {}, async (r) => r.text());
+    },
+    // Una página GET del lector financiero (ruta armada en finanzas.get.js), sin seguir nextLink.
+    async paginaGet(ruta, tamano, lector) {
+      if (!/^[A-Za-z]+\?\$select=/.test(ruta) || !Number.isInteger(tamano) || tamano < 1 || tamano > 50) throw new ErrorPuente("CONSULTA_FINANCIERA_INVALIDA");
+      const datos = await obtener(ruta, { Prefer: `odata.maxpagesize=${tamano}` }, lector);
+      if (!Array.isArray(datos?.value) || datos.value.length > tamano ||
+        (!datos.value.length && (datos["odata.nextLink"] || datos["@odata.nextLink"]))) throw new ErrorPuente("PAGINA_SAP_INVALIDA");
       return datos.value;
     },
     // Un registro por su clave, con los mismos campos que el recorrido. Lo usa la revisión de pedidos cerrados.

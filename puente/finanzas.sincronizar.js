@@ -41,7 +41,9 @@ export async function sincronizarPaginaFinanzas({ config, def, almacen, sap, bac
   almacen.nuevo = false;
   if (!s.finalizando) {
     if (!s.pendiente) {
-      const filas = await sap.paginaFinanciera(def.consulta, parametrosFinanzas(def, config, s.recorrido, s.cursor), lectorFinanciero(entidad));
+      const parametros = parametrosFinanzas(def, config, s.recorrido, s.cursor);
+      // Lectura GET (def.leer) o la consulta SQL original.
+      const filas = def.leer ? await def.leer(sap, parametros) : await sap.paginaFinanciera(def.consulta, parametros, lectorFinanciero(entidad));
       const registros = transformarFinanzas(entidad, filas, s.cursor);
       if (entidad === "empresa" && (registros.length !== (s.cursor ? 0 : 1) || registros.some(r =>
         r.monedaLocal !== config.monedaLocal || r.monedaSistema !== config.monedaSistema))) throw new ErrorPuente("MONEDA_EMPRESA_DISTINTA");
