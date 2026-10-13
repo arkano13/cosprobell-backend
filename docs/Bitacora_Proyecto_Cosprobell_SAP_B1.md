@@ -784,3 +784,16 @@ Verificado: 566 pruebas y contra PostgreSQL local (facturado sin preparar con cr
   los mismos días que las facturas, y la frecuencia de `facturasPreparacion` si `trasladosPreparacion` no tiene una.
 - Base: migración `20261013090000_traslados_preparacion` (cliente opcional solo en traslados, `almacenDestino` y rango
   de claves propio: desde −1.000.000.001).
+
+## Reportería de bodega (13/10/2026)
+
+- Se acordaron 8 reportes para el panel del supervisor (documento "Reportería de bodega Cosprobell"): solo operación de
+  bodega, documentos con su número sin cliente ni montos, PDF como el cuadre, días cortados en la hora de Honduras.
+- Backend: módulo de solo lectura `src/modules/reportes/` con rutas `GET /supervisor/reportes/{preparaciones,
+  preparaciones/:id, errores, salidas, reposiciones, correcciones, pendientes, actividad}`. Detalle en
+  [REPORTES_BODEGA.md](REPORTES_BODEGA.md).
+- Datos nuevos (tabla `auditoria`, sin migración): quién anula una preparación, quién quita un código de barras o de
+  caja, y el antes y después de cada conteo editado (la 01, la 02 vuelta a contar, la 03 y la 04).
+- Decisiones de lo que estaba por confirmar: límite de 4 horas para el tiempo promedio; "código de caja" sale de los
+  códigos no registrados que son el de una caja (el escáner no lo separa); "se confunde con" = el producto leído bien
+  justo después; reponer pronto = menos de 3 días. Las cuatro son constantes fáciles de cambiar.

@@ -187,13 +187,19 @@ test("revisiones: qué cambió en SAP, finalizados con diferencias y preparados 
 
 test("anular: solo una preparación que sigue en revisión, dentro del bloqueo del pedido", async (t) => {
   sustituir(t, prisma.pickingPedido, "findUnique", async () => ({ pedidoDocEntry: 10 }));
-  const actualizadas = [];
-  const tx = { pickingPedido: { update: async (args) => { actualizadas.push(args); } } };
+  const actualizadas = [], registros = [];
+  const tx = { pickingPedido: { update: async (args) => { actualizadas.push(args); } },
+    pedido: { findUnique: async () => ({ docNum: 10452, fuenteDocumento: "factura" }) },
+    auditoria: { create: async (args) => { registros.push(args.data); } } };
   const picking = (estado) => ({ conPedidoBloqueado: async (docEntry, operacion) => { assert.equal(docEntry, 10); return operacion(tx); },
     buscarSesionesDelPedido: async () => [{ id: 1, estado }] });
   const fin = new Date("2026-10-02T12:00:00Z");
-  assert.deepEqual(await anularRevision(1, { picking: picking("requiere_revision"), ahora: () => fin }), { pickingId: 1, estado: "anulada" });
+  assert.deepEqual(await anularRevision(1, { picking: picking("requiere_revision"), ahora: () => fin, hechoPor: "operador:Ana" }),
+    { pickingId: 1, estado: "anulada" });
   assert.deepEqual(actualizadas, [{ where: { id: 1 }, data: { estado: "anulada", fechaFin: fin } }]);
+  // Queda quién la anuló, para el reporte de Correcciones.
+  assert.deepEqual(registros, [{ entidad: "preparacion", accion: "anulada", usuario: "operador:Ana",
+    detalle: JSON.stringify({ pickingId: 1, documento: "Factura 10452" }) }]);
   await assert.rejects(anularRevision(1, { picking: picking("completo") }), { code: "PICKING_NO_EN_REVISION" });
   sustituir(t, prisma.pickingPedido, "findUnique", async () => null);
   await assert.rejects(anularRevision(99, { picking: picking("requiere_revision") }), { code: "PICKING_NO_ENCONTRADO" });
@@ -286,4 +292,26 @@ test("reporte de cuadre: solo el supervisor, con la bodega de cada almacén y si
     pendientes: 1, actualizando: 0 });
   assert.deepEqual(data.menos, [{ itemCode: "Z12", itemName: "Z12P Purify Shampoo 750ml", diferencia: -18,
     grande: { contado: 42, sap: 60, diferencia: -18 }, pequena: { contado: 6, sinEntrega: 0, porPreparar: 0, sap: 6, diferencia: 0 } }]);
+});
+
+test("reportes de bodega: solo el supervisor, con filtros validados y la preparación que no existe da 404", async (t) => {
+  const { reportesRepository } = await import("../../src/modules/reportes/reportes.repository.js");
+  assert.equal((await pedir("/supervisor/reportes/preparaciones", conSesion(t, "operador"))).status, 403);
+  t.mock.restoreAll();
+  const headers = conSesion(t, "supervisor");
+  const pedidos = [];
+  t.mock.method(reportesRepository, "preparaciones", async (filtros) => { pedidos.push(filtros); return []; });
+  t.mock.method(reportesRepository, "sinPreparar", async () => []);
+  t.mock.method(reportesRepository, "operadores", async () => [{ nombre: "Ana", rol: "operador", activo: true }]);
+  const r = await pedir("/supervisor/reportes/preparaciones?periodo=30d&operador=Ana&documento=traslados", headers);
+  assert.equal(r.status, 200);
+  const { data } = await r.json();
+  assert.deepEqual([data.periodo, data.dias, data.resumen.preparaciones, data.filtros.operadores.map((o) => o.nombre)], ["30d", 30, 0, ["Ana"]]);
+  assert.deepEqual([pedidos[0].operador, pedidos[0].fuente], ["Ana", "traslado"]);
+  assert.equal((await pedir("/supervisor/reportes/preparaciones?periodo=1d", headers)).status, 400);
+  assert.equal((await pedir("/supervisor/reportes/pendientes?minDias=2", headers)).status, 400);
+  assert.equal((await pedir("/supervisor/reportes/actividad?dia=13-10-2026", headers)).status, 400);
+  t.mock.method(reportesRepository, "sesion", async () => null);
+  const falta = await pedir("/supervisor/reportes/preparaciones/99", headers);
+  assert.deepEqual([falta.status, (await falta.json()).error.code], [404, "PICKING_NO_ENCONTRADO"]);
 });

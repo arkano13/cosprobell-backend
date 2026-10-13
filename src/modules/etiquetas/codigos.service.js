@@ -4,6 +4,7 @@
 import { prisma } from "../../infrastructure/database/prisma.js";
 import { AppError } from "../../shared/errors/AppError.js";
 import { UNIDAD_MANUAL, unidadConocida } from "../picking/picking.cantidades.js";
+import { registrarCambio } from "../reportes/reportes.repository.js";
 
 const enUso = (otro) => new AppError({ code: "CODIGO_EN_USO", statusCode: 409,
   message: `Ese código ya está registrado para ${otro.itemName} (${otro.itemCode})` });
@@ -57,8 +58,8 @@ export async function registrarCodigo({ codigo, itemCode }, { aplicacion }, { re
 }
 
 // Quitar un código registrado desde la app (por ejemplo, asignado al producto equivocado). Los de SAP o de la ficha
-// del artículo se cambian en SAP.
-export async function quitarCodigo(id, { repo = codigosRepository } = {}) {
+// del artículo se cambian en SAP. Queda registrado quién lo quitó (reporte de Correcciones).
+export async function quitarCodigo(id, { aplicacion = null } = {}, { repo = codigosRepository } = {}) {
   const noEncontrado = () => new AppError({ code: "CODIGO_NO_ENCONTRADO", message: "Código no encontrado", statusCode: 404 });
   const fila = await repo.codigoPorId(id);
   if (!fila) throw noEncontrado();
@@ -68,6 +69,8 @@ export async function quitarCodigo(id, { repo = codigosRepository } = {}) {
     if (actual.origen !== "app") throw new AppError({ code: "CODIGO_DE_SAP", statusCode: 409,
       message: "Ese código viene de SAP: se cambia en SAP" });
     await tx.productoCodigoBarras.delete({ where: { id } });
+    await registrarCambio(tx, { entidad: "codigo", accion: "quitado", usuario: aplicacion,
+      detalle: { clase: "unidad", codigo: actual.codigo, itemCode: actual.itemCode } });
     return { data: { id: actual.id, codigo: actual.codigo, itemCode: actual.itemCode } };
   });
 }
@@ -91,9 +94,13 @@ export async function registrarCodigoCaja({ codigo, itemCode }, { aplicacion }, 
   });
 }
 
-export async function quitarCodigoCaja(id) {
+export async function quitarCodigoCaja(id, { aplicacion = null } = {}) {
   const fila = await prisma.inventarioCodigoCaja.findUnique({ where: { id } });
   if (!fila) throw new AppError({ code: "CODIGO_NO_ENCONTRADO", message: "Código no encontrado", statusCode: 404 });
-  await prisma.inventarioCodigoCaja.delete({ where: { id } });
+  await prisma.$transaction(async (tx) => {
+    await tx.inventarioCodigoCaja.delete({ where: { id } });
+    await registrarCambio(tx, { entidad: "codigo", accion: "quitado", usuario: aplicacion,
+      detalle: { clase: "caja", codigo: fila.codigo, itemCode: fila.itemCode } });
+  });
   return { data: { id: fila.id, codigo: fila.codigo, itemCode: fila.itemCode } };
 }
