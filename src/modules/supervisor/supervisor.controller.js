@@ -4,6 +4,7 @@ import { listarRevisiones, anularRevision } from "./revisiones.service.js";
 import { estadoSincronizacion } from "./sincronizacion.service.js";
 import { listarAlmacenes, elegirAlmacenes as elegir, reporteCuadre as cuadre } from "../inventario/inventario.service.js";
 import { inventarioRepository } from "../inventario/inventario.repository.js";
+import * as reportes from "../reportes/reportes.service.js";
 import { registrarCodigo as registrar, quitarCodigo as quitar, quitarCodigoCaja as quitarCaja } from "../etiquetas/codigos.service.js";
 
 const manejar = (accion) => async (req, res, next) => {
@@ -33,11 +34,19 @@ export const pin = manejar(async (req) => ({ data: await cambiarPin(req.params.i
 export const desbloqueo = manejar(async (req) => ({ data: await desbloquear(req.params.id) }));
 export const activo = manejar(async (req) => ({ data: await cambiarActivo(req.params.id, req.body.activo, { actorId: req.operador.id }) }));
 export const revisiones = manejar(async () => ({ data: await listarRevisiones() }));
-export const anulacion = manejar(async (req) => ({ data: await anularRevision(req.params.id) }));
+export const anulacion = manejar(async (req) => ({ data: await anularRevision(req.params.id, { hechoPor: req.appNombre ?? null }) }));
 export const sincronizacion = manejar(async () => ({ data: await estadoSincronizacion() }));
 export const almacenes = manejar(() => listarAlmacenes());
 export const elegirAlmacenes = manejar((req) => elegir(req.body, quien(req)));
 export const registrarCodigo = manejar((req) => registrar(req.body, quien(req)));
-export const quitarCodigo = manejar((req) => quitar(req.params.id));
-export const quitarCodigoCaja = manejar((req) => quitarCaja(req.params.id));
+export const quitarCodigo = manejar((req) => quitar(req.params.id, quien(req)));
+export const quitarCodigoCaja = manejar((req) => quitarCaja(req.params.id, quien(req)));
 export const reporteCuadre = manejar(() => cuadre());
+export const reportePreparaciones = manejar((req) => reportes.reportePreparaciones(req.validatedQuery));
+export const reporteDetallePreparacion = manejar((req) => reportes.reporteDetallePreparacion(req.params.id));
+export const reporteErrores = manejar((req) => reportes.reporteErrores(req.validatedQuery));
+export const reporteSalidas = manejar((req) => reportes.reporteSalidas(req.validatedQuery));
+export const reporteReposiciones = manejar((req) => reportes.reporteReposiciones(req.validatedQuery));
+export const reporteCorrecciones = manejar((req) => reportes.reporteCorrecciones(req.validatedQuery));
+export const reportePendientes = manejar((req) => reportes.reportePendientes(req.validatedQuery));
+export const reporteActividad = manejar((req) => reportes.reporteActividad(req.validatedQuery));

@@ -159,3 +159,21 @@ export function cajaParaUsarAntes(caja, otras) {
 export function textoAsignacion(asignaciones) {
   return asignaciones.map((a) => `${a.tipo === "pequena" ? "pequeña" : a.lote ?? "sin lote"}: ${a.unidades}`).join(" · ");
 }
+
+// Cómo quedó un conteo, en texto corto para el registro de cambios: "11 cajas × 12 · L330 + 5 u. sueltas · L331".
+// piezas: cajas { unidades, lote, suelto } o líneas de conteo { cajas, unidadesPorCaja, unidades, lote }.
+export function textoConteo(piezas) {
+  const grupos = new Map();
+  for (const p of piezas) {
+    const enCajas = p.cajas !== undefined ? p.cajas != null : !p.suelto;
+    const porCaja = p.cajas != null ? p.unidadesPorCaja : p.unidades;
+    const clave = JSON.stringify([enCajas, enCajas ? porCaja : null, p.lote ?? null]);
+    const g = grupos.get(clave) ?? { enCajas, porCaja, lote: p.lote ?? null, cajas: 0, unidades: 0 };
+    g.cajas += p.cajas != null ? p.cajas : 1;
+    g.unidades += p.unidades;
+    grupos.set(clave, g);
+  }
+  const partes = [...grupos.values()].filter((g) => g.unidades > 0).map((g) => (g.enCajas
+    ? `${g.cajas} ${g.cajas === 1 ? "caja" : "cajas"} × ${g.porCaja}` : `${g.unidades} u. sueltas`) + (g.lote ? ` · ${g.lote}` : ""));
+  return partes.length ? partes.join(" + ") : "0 u.";
+}

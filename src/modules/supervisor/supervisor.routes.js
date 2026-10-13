@@ -7,6 +7,8 @@ import { almacenesSchema, registroCodigoSchema } from "../inventario/inventario.
 import * as c from "./supervisor.controller.js";
 import env from "../../config/env.js";
 import { solicitudesService } from "../sincronizacion/solicitudes.service.js";
+import { actividadQuerySchema, correccionesQuerySchema, erroresQuerySchema, pendientesQuerySchema, preparacionesQuerySchema,
+  reposicionesQuerySchema, salidasQuerySchema } from "../reportes/reportes.schemas.js";
 
 // Panel del supervisor: solo operadores con rol supervisor y sesión iniciada con PIN. Se monta en /supervisor.
 const router = Router();
@@ -36,4 +38,12 @@ router.post("/codigos", validate({ body: registroCodigoSchema }), c.registrarCod
 router.delete("/codigos/:id", validate({ params: idParamsSchema }), c.quitarCodigo);
 router.delete("/codigos-caja/:id", validate({ params: idParamsSchema }), c.quitarCodigoCaja);
 router.get("/reportes/cuadre", c.reporteCuadre);
+router.get("/reportes/preparaciones", validate({ query: preparacionesQuerySchema }), c.reportePreparaciones);
+router.get("/reportes/preparaciones/:id", validate({ params: idParamsSchema }), c.reporteDetallePreparacion);
+router.get("/reportes/errores", validate({ query: erroresQuerySchema }), c.reporteErrores);
+router.get("/reportes/salidas", validate({ query: salidasQuerySchema }), c.reporteSalidas);
+router.get("/reportes/reposiciones", validate({ query: reposicionesQuerySchema }), c.reporteReposiciones);
+router.get("/reportes/correcciones", validate({ query: correccionesQuerySchema }), c.reporteCorrecciones);
+router.get("/reportes/pendientes", validate({ query: pendientesQuerySchema }), c.reportePendientes);
+router.get("/reportes/actividad", validate({ query: actividadQuerySchema }), c.reporteActividad);
 export default router;

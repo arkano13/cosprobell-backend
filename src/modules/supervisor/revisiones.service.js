@@ -3,6 +3,8 @@ import { prisma } from "../../infrastructure/database/prisma.js";
 import { AppError } from "../../shared/errors/AppError.js";
 import { comprobarPedidoElegible, lineasParaPreparar } from "../picking/picking.pedido.js";
 import { pickingRepository, conCombos } from "../picking/picking.repository.js";
+import { registrarCambio } from "../reportes/reportes.repository.js";
+import { rotuloDocumento } from "../reportes/reportes.calculo.js";
 
 export const HORAS_SIN_ENTREGA = 24;
 const LIMITE = 100;
@@ -104,8 +106,8 @@ export async function listarRevisiones({ repo = revisionesRepository, ahora = ne
 }
 
 // El supervisor anula una preparación en revisión: queda en el historial con sus lecturas y el pedido se
-// puede volver a preparar con los datos actuales de SAP.
-export async function anularRevision(pickingId, { picking = pickingRepository, ahora = () => new Date() } = {}) {
+// puede volver a preparar con los datos actuales de SAP. Queda registrado quién la anuló (reporte de Correcciones).
+export async function anularRevision(pickingId, { picking = pickingRepository, ahora = () => new Date(), hechoPor = null } = {}) {
   const sesion = await prisma.pickingPedido.findUnique({ where: { id: pickingId }, select: { pedidoDocEntry: true } });
   if (!sesion) throw new AppError({ code: "PICKING_NO_ENCONTRADO", message: "Preparación no encontrada", statusCode: 404 });
   return picking.conPedidoBloqueado(sesion.pedidoDocEntry, async (tx) => {
@@ -115,6 +117,9 @@ export async function anularRevision(pickingId, { picking = pickingRepository, a
       throw new AppError({ code: "PICKING_NO_EN_REVISION", message: "Esa preparación ya no está en revisión", statusCode: 409 });
     }
     await tx.pickingPedido.update({ where: { id: pickingId }, data: { estado: "anulada", fechaFin: ahora() } });
+    const pedido = await tx.pedido.findUnique({ where: { docEntry: sesion.pedidoDocEntry }, select: { docNum: true, fuenteDocumento: true } });
+    await registrarCambio(tx, { entidad: "preparacion", accion: "anulada", usuario: hechoPor,
+      detalle: { pickingId, documento: pedido ? rotuloDocumento(pedido.fuenteDocumento, pedido.docNum) : null } });
     return { pickingId, estado: "anulada" };
   });
 }

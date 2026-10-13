@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { AppError } from "../../shared/errors/AppError.js";
 import { inventarioRepository as repo } from "./inventario.repository.js";
 import { retirarLotes, contarLotes } from "./inventario.lotes.js";
-import { clasificar, codigoCaja, porPasar, repartirEnCajas, repartirTraspaso, lotesDeTraspaso, cajaParaUsarAntes, textoAsignacion,
+import { clasificar, codigoCaja, porPasar, repartirEnCajas, repartirTraspaso, lotesDeTraspaso, cajaParaUsarAntes, textoAsignacion, textoConteo,
   editarCajas, elegirCajas } from "./inventario.calculo.js";
 import { armarCuadre, armarCuadreAlmacen } from "./inventario.reporte.js";
 
@@ -234,7 +234,7 @@ export async function listarMovimientos({ itemCode, antesDe, limit }) {
 }
 
 // Asignación vigente de un descuento: lo que hoy está restado de cada caja o de la pequeña.
-function asignacionDe(movimientos) {
+export function asignacionDe(movimientos) {
   const netos = new Map();
   for (const m of movimientos) {
     const clave = m.bodega === "pequena" ? `pequena:${m.pequenaLoteId ?? "antiguo"}` : `caja:${m.cajaId}`;
@@ -244,7 +244,7 @@ function asignacionDe(movimientos) {
   }
   return [...netos.values()].filter((a) => a.unidades > 0);
 }
-function resumirAsignacion(asignacion) {
+export function resumirAsignacion(asignacion) {
   const porLote = new Map();
   for (const a of asignacion) {
     const clave = a.tipo === "pequena" ? "pequena" : `lote:${a.lote ?? ""}`;
@@ -516,6 +516,7 @@ export async function contarPequena(itemCode, entrada, { aplicacion }) {
     await repo.activar(itemCode, tx);
     const estado = await repo.estadoProducto(itemCode, tx);
     const delta = unidades - estado.pequena;
+    const lotesAntes = primero ? [] : (await repo.lotesPequena(itemCode, tx)).map((l) => ({ unidades: l.unidades, lote: l.lote, suelto: true }));
     const partes = await contarLotes(itemCode, unidades, entrada.lotes, tx);
     if (delta !== 0) {
       await repo.cambiarPequena(itemCode, delta, tx);
@@ -527,6 +528,10 @@ export async function contarPequena(itemCode, entrada, { aplicacion }) {
       cantidad: -estado.pequena, hechoPor: aplicacion, observacion: "Conciliación del saldo negativo anterior al control por lotes" });
     await repo.registrarMovimientos(movimientos, tx);
     await fotoCuadre(tx, { itemCode, bodega: "pequena", accion: "conteo", cantidad: unidades, primero, hechoPor: aplicacion });
+    // Volver a contar la 02 corrige el conteo anterior: queda en el registro de cambios con lo que había antes.
+    if (!primero) await repo.registrarCambio({ entidad: "conteo", accion: "editado", usuario: aplicacion,
+      detalle: { itemCode, bodega: "pequena", antes: textoConteo(lotesAntes), ahora: textoConteo((await repo.lotesPequena(itemCode, tx))
+        .map((l) => ({ unidades: l.unidades, lote: l.lote, suelto: true }))), unidades: delta } }, tx);
     return { data: { itemCode, pequena: unidades, cambio: delta } };
   }, { operacionId: entrada.operacionId, tipo: "contarPequena", entrada, aplicacion, itemCode });
 }
@@ -582,6 +587,8 @@ export async function editarConteoGrande(itemCode, entrada, { aplicacion }) {
       await repo.sumarAdelantado(itemCode, -Math.min(adelantado, -delta), tx);
     }
     await fotoCuadre(tx, { itemCode, bodega: "grande", accion: "edicion", cantidad: delta, primero: false, hechoPor: aplicacion });
+    await repo.registrarCambio({ entidad: "conteo", accion: "editado", usuario: aplicacion,
+      detalle: { itemCode, bodega: "grande", antes: textoConteo(existentes.filter((c) => c.unidades > 0)), ahora: textoConteo(deseadas), unidades: delta } }, tx);
     return { data: { itemCode, antes, unidades: despues, cajas: creadas.map(vistaCaja), anuladas: anular.map((c) => c.codigo) } };
   }, { operacionId: entrada.operacionId, tipo: "editarConteoGrande", entrada, aplicacion, itemCode });
 }
@@ -893,6 +900,8 @@ export async function guardarConteoAlmacen(almacen, itemCode, entrada, { aplicac
     if (anterior && !supervisor) throw falla("CONTEO_YA_HECHO", 403,
       `Ya está contado en la ${almacen}: si faltó algo, el supervisor puede editar el conteo.`);
     await repo.guardarConteoAlmacen({ almacen, itemCode, unidades, cajas: totalCajas, lineas, quien: aplicacion }, tx);
+    if (anterior) await repo.registrarCambio({ entidad: "conteo", accion: "editado", usuario: aplicacion,
+      detalle: { itemCode, almacen, antes: textoConteo(anterior.lineas ?? []), ahora: textoConteo(lineas), unidades: unidades - anterior.unidades } }, tx);
     return { data: { almacen, itemCode, unidades, cajas: totalCajas, antes: anterior?.unidades ?? null } };
   }, { operacionId: entrada.operacionId, tipo: "conteoAlmacen", entrada, aplicacion, itemCode });
 }

@@ -64,7 +64,7 @@ test("comparación SAP: existencias no disponibles bloquean descuentos basados e
 // Inventario falso: un producto con lo que SAP tiene en los almacenes elegidos y lo que hay en cada bodega.
 function inventario(t, { sap = 0, grande = 0, pequena = 0, activo = true, sapCambioEn = null, cajas = [], almacenes = ["01"] } = {}) {
   const estado = { itemCode: "P1", itemName: "Shampoo", sap, activo, pequena, adelantado: 0, sapCambioEn, grande, sinEntrega: 0 };
-  const hecho = { cajas: [], movimientos: [], pequena: [], adelantado: [], cajaCambios: [], descuentos: [], cuadres: [] };
+  const hecho = { cajas: [], movimientos: [], pequena: [], adelantado: [], cajaCambios: [], descuentos: [], cuadres: [], cambios: [] };
   const tx = {};
   t.mock.method(repo, "almacenesDeEstaBodega", async () => almacenes);
   t.mock.method(repo, "comparacionDisponible", async () => almacenes.length > 0);
@@ -77,6 +77,7 @@ function inventario(t, { sap = 0, grande = 0, pequena = 0, activo = true, sapCam
   t.mock.method(repo, "sapDeProducto", async () => new Map());
   t.mock.method(repo, "contadoEn", async () => new Set());
   t.mock.method(repo, "registrarCuadre", async (datos) => hecho.cuadres.push(datos));
+  t.mock.method(repo, "registrarCambio", async (datos) => hecho.cambios.push(datos));
   t.mock.method(repo, "pases", async () => []);
   t.mock.method(repo, "activar", async () => {});
   t.mock.method(repo, "sumarAdelantado", async (itemCode, unidades) => hecho.adelantado.push(unidades));
@@ -702,15 +703,19 @@ test("panel: quitar un código registrado desde la app (solo el supervisor; los 
   t.mock.restoreAll();
   const headers = conSesion(t, "supervisor");
   const codigos = { 77: { id: 77, codigo: "7401", itemCode: "P1", origen: "app" }, 78: { id: 78, codigo: "7402", itemCode: "P1", origen: "sap" } };
-  const borrados = [];
+  const borrados = [], registros = [];
   t.mock.method(codigosRepository, "codigoPorId", async (id) => codigos[id] ?? null);
   t.mock.method(codigosRepository, "conCodigoBloqueado", async (_codigo, operacion) => operacion({
-    productoCodigoBarras: { delete: async ({ where }) => borrados.push(where.id) } }));
+    productoCodigoBarras: { delete: async ({ where }) => borrados.push(where.id) },
+    auditoria: { create: async ({ data }) => registros.push(data) } }));
   const deSap = await pedir("/supervisor/codigos/78", headers, { method: "DELETE" });
   assert.equal((await deSap.json()).error.code, "CODIGO_DE_SAP");
   assert.equal((await pedir("/supervisor/codigos/99", headers, { method: "DELETE" })).status, 404);
   const r = await pedir("/supervisor/codigos/77", headers, { method: "DELETE" });
   assert.deepEqual([r.status, (await r.json()).data, borrados], [200, { id: 77, codigo: "7401", itemCode: "P1" }, [77]]);
+  // Queda quién lo quitó, para el reporte de Correcciones.
+  assert.deepEqual(registros, [{ entidad: "codigo", accion: "quitado", usuario: "operador:Luis Pérez",
+    detalle: JSON.stringify({ clase: "unidad", codigo: "7401", itemCode: "P1" }) }]);
 });
 
 test("panel: registrar un código de barras", async (t) => {
@@ -767,6 +772,9 @@ test("editar el conteo de la grande: solo el supervisor, sobre un conteo sin caj
     [["correccion", -20, 13, "Edición del conteo: caja anulada"], ["conteo", 20, 120, "Edición del conteo"]]);
   assert.deepEqual(hecho.adelantado, [], "el total no cambió");
   assert.deepEqual(hecho.cuadres.map((c) => [c.bodega, c.accion, c.cantidad, c.primero]), [["grande", "edicion", 0, false]]);
+  // El registro de cambios guarda cómo estaba y cómo quedó, con quién lo editó.
+  assert.deepEqual(hecho.cambios, [{ entidad: "conteo", accion: "editado", usuario: "operador:Luis Pérez",
+    detalle: { itemCode: "P1", bodega: "grande", antes: "3 cajas × 20 · L1", ahora: "2 cajas × 20 · L1 + 1 caja × 20 · L3", unidades: 0 } }]);
 
   // Agregar 30 más cuando SAP solo tiene 10 por ubicar: 20 quedan como recibidas antes que SAP.
   const mas = await enviar("/inventario/productos/P1/grande", supervisor, "PUT",

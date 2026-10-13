@@ -3,6 +3,7 @@ import { Prisma } from "../../../generated/prisma/client.js";
 import { prisma } from "../../infrastructure/database/prisma.js";
 import { ejecutarUnaVez } from "./inventario.operacion.js";
 import env from "../../config/env.js";
+import { registrarCambio } from "../reportes/reportes.repository.js";
 
 const literal = (texto) => texto.replace(/[\\%_]/g, (c) => `\\${c}`);
 
@@ -56,6 +57,10 @@ const DIFERIDO = Prisma.sql`
   FROM (${SIN_ENTREGA}) a FULL JOIN (${POR_PREPARAR}) b ON b."itemCode" = a."itemCode"`;
 
 export const inventarioRepository = {
+  // Registro de cambios (conteos editados) para el reporte de Correcciones.
+  registrarCambio(datos, tx) {
+    return registrarCambio(tx, datos);
+  },
   lotesPequena(itemCode, db = prisma) {
     return db.$queryRaw`SELECT * FROM inventario_pequena_lotes WHERE "itemCode" = ${itemCode} AND unidades > 0
       ORDER BY vencimiento ASC NULLS LAST, id`;

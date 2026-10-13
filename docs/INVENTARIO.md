@@ -52,6 +52,7 @@ SAP (almacenes marcados) = grande + pequeña + preparado sin entregar + diferenc
 | Quitar un código de caja | `DELETE /supervisor/codigos-caja/:id` | Supervisor |
 | Quitar un código registrado desde la app | `DELETE /supervisor/codigos/:id` | Supervisor |
 | Reporte de cuadre con SAP: qué cuadró, qué tiene menos y qué tiene más, bodega por bodega | `GET /supervisor/reportes/cuadre` | Supervisor |
+| Reportes de bodega: preparaciones, errores evitados, más salen, reposiciones, correcciones, pendientes atrasados y actividad (ver [REPORTES_BODEGA.md](REPORTES_BODEGA.md)) | `GET /supervisor/reportes/...` | Supervisor |
 | Conteo de un almacén solo para contar (la 03, la 04): lista con avance (`?estado=falta\|contados\|sin_codigo\|todos&buscar=&pagina=&limit=`) y ficha del producto | `GET /inventario/conteo-almacenes/:almacen` y `/productos/:itemCode` | Operador o aplicación |
 | Guardar lo contado en ese almacén (la primera vez cualquiera; un conteo ya guardado, el supervisor) | `PUT /inventario/conteo-almacenes/:almacen/productos/:itemCode` | Operador, supervisor o aplicación |
 

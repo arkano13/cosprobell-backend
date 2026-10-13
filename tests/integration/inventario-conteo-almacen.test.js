@@ -35,11 +35,13 @@ function almacenes(t, { soloConteo = [{ almacen: "03", tipo: "sueltas" }, { alma
   t.mock.method(repo, "existeProducto", async (itemCode) => itemCode !== "NO-EXISTE");
   t.mock.method(repo, "conteoAlmacenProducto", async (almacen, itemCode) => conteos.get(`${almacen}|${itemCode}`) ?? null);
   t.mock.method(repo, "guardarConteoAlmacen", async (datos) => conteos.set(`${datos.almacen}|${datos.itemCode}`, { ...datos, lineas: datos.lineas }));
+  const cambios = [];
+  t.mock.method(repo, "registrarCambio", async (datos) => cambios.push(datos));
   t.mock.method(repo, "conteoAlmacen", async (almacen) => [
     { itemCode: "P1", itemName: "Shampoo", sap: 50, unidades: conteos.get(`${almacen}|P1`)?.unidades ?? 0, cajas: 0, contado: conteos.has(`${almacen}|P1`), codigos: 1 },
     { itemCode: "P2", itemName: "Acondicionador", sap: 12, unidades: 0, cajas: 0, contado: false, codigos: 0 },
   ]);
-  return { conteos, opciones };
+  return { conteos, opciones, cambios };
 }
 
 test("conteo de la 03: lista con avance, solo de almacenes elegidos para contar", async (t) => {
@@ -72,10 +74,14 @@ test("la 03 se cuenta por lote: cualquiera cuenta una vez y el supervisor corrig
   assert.equal((await otraVez.json()).error.code, "CONTEO_YA_HECHO");
   t.mock.restoreAll();
   const supervisor = conSesion(t, "supervisor");
-  almacenes(t).conteos.set("03|P1", guardado);
+  const segundo = almacenes(t);
+  segundo.conteos.set("03|P1", guardado);
   const corregido = await enviar("/inventario/conteo-almacenes/03/productos/P1", supervisor, "PUT", { operacionId: randomUUID(), lotes: [] });
   assert.equal(corregido.status, 200);
   assert.deepEqual((await corregido.json()).data, { almacen: "03", itemCode: "P1", unidades: 0, cajas: 0, antes: 40 });
+  // La corrección queda en el registro de cambios con lo que había antes; el primer conteo no.
+  assert.deepEqual(segundo.cambios, [{ entidad: "conteo", accion: "editado", usuario: "operador:Luis Pérez",
+    detalle: { itemCode: "P1", almacen: "03", antes: "30 u. sueltas · L1 + 10 u. sueltas", ahora: "0 u.", unidades: -40 } }]);
 });
 
 test("la 04 se cuenta por cajas con bulto; mandar lotes a la 04 o cajas a la 03 se rechaza", async (t) => {
