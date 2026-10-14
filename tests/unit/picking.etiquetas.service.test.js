@@ -214,3 +214,9 @@ test("propaga fallos técnicos sin convertirlos en rechazos de etiqueta", async 
     (error) => error === fallo
   );
 });
+test("el mismo código dos veces en la misma unidad (ficha y SAP): se toma como uno", async (t) => {
+  const deFicha = { ...crearAsociacion(), id: 12, confirmacionPicking: { ...crearAsociacion().confirmacionPicking, codigoBarrasId: 12 } };
+  t.mock.method(pickingEtiquetasRepository, "buscarProductos", async () => [crearProducto([crearAsociacion(), deFicha])]);
+  assert.deepEqual(await resolverEtiquetaParaPicking("00123"),
+    { codigoBarrasId: 10, codigo: "00123", itemCode: "PROD-001", uomEntry: 1, cantidadUnidades: 1 });
+});

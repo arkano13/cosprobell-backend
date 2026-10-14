@@ -48,11 +48,12 @@ export async function resolverEtiquetaParaPicking(codigo, db) {
     });
   }
 
-  // El mismo código en dos unidades de medida de SAP (por ejemplo, unidad y caja): vale si solo una está confirmada
-  // como unidad para picking.
+  // El mismo código más de una vez (en dos unidades de medida de SAP, o en la ficha y en los códigos de SAP): vale si
+  // las confirmadas como unidad son todas del mismo producto y la misma unidad.
   if (asociaciones.length > 1) {
     const unidades = asociaciones.filter((a) => { try { validarEtiquetaParaPicking(a); return true; } catch { return false; } });
-    if (unidades.length === 1) return validarEtiquetaParaPicking(unidades[0]);
+    const distintas = new Set(unidades.map((a) => `${a.itemCode}|${a.uomEntry}`));
+    if (unidades.length && distintas.size === 1) return validarEtiquetaParaPicking(unidades[0]);
     throw new AppError({
       code: "ASOCIACION_AMBIGUA",
       message: "La etiqueta tiene asociaciones duplicadas que requieren revisión",
