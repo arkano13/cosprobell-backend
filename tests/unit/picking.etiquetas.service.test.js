@@ -139,7 +139,7 @@ test("rechaza asociaciones duplicadas sin escoger una confirmación", async (t) 
     async () => [
       crearProducto([
         crearAsociacion(),
-        { ...crearAsociacion(), id: 11 },
+        otraUnidad({ esUnidadIndividual: true }),
       ]),
     ]
   );
@@ -148,6 +148,20 @@ test("rechaza asociaciones duplicadas sin escoger una confirmación", async (t) 
     resolverEtiquetaParaPicking("00123"),
     comprobarError("ASOCIACION_AMBIGUA", 409)
   );
+});
+
+// El mismo código en otra unidad de medida de SAP, con su propia confirmación.
+function otraUnidad({ esUnidadIndividual }) {
+  return { ...crearAsociacion(), id: 11, uomEntry: 2, confirmacionPicking: { ...crearAsociacion().confirmacionPicking,
+    codigoBarrasId: 11, uomEntryConfirmado: 2, esUnidadIndividual } };
+}
+
+test("el mismo código en dos unidades: usa la única confirmada como unidad", async (t) => {
+  t.mock.method(pickingEtiquetasRepository, "buscarProductos", async () => [
+    crearProducto([otraUnidad({ esUnidadIndividual: false }), crearAsociacion()]),
+  ]);
+  assert.deepEqual(await resolverEtiquetaParaPicking("00123"),
+    { codigoBarrasId: 10, codigo: "00123", itemCode: "PROD-001", uomEntry: 1, cantidadUnidades: 1 });
 });
 
 test("aplica las reglas de confirmación a los datos consultados", async (t) => {
