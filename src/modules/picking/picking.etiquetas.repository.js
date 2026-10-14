@@ -20,7 +20,7 @@ export const pickingEtiquetasRepository = {
             uomEntry: true,
             confirmacionPicking: true,
           },
-          take: 2,
+          take: 10,
         },
       },
       take: 2,
