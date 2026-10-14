@@ -66,6 +66,12 @@ test("detalle: productos con lo que faltó primero y lecturas con su motivo", ()
     leidos: new Map([["CAJA-A", { itemCode: "A", esCaja: true }], ["7401B", { itemCode: "B", esCaja: false }]]) });
   assert.deepEqual([r.segundos, r.unidades, r.lineasCompletas, r.faltan], [660, { preparadas: 14, pedidas: 16 }, 1, { unidades: 2, productos: 1 }]);
   assert.deepEqual(r.productos.map((p) => [p.itemCode, p.codigo, p.falta]), [["C", "7401C", 2], ["A", "7401A", 0]]);
+  const conLotes = armarDetalle({ sesion, documento: { fuenteDocumento: "factura", docNum: 10452, cliente: { cardName: "SB Rapunzel's" } }, escaneos,
+    nombres: new Map(), codigos: new Map(), leidos: new Map(),
+    lotes: [{ itemCode: "A", lote: "L330", vencimiento: "2027-03-31", unidades: 8 }, { itemCode: "A", lote: "L331", vencimiento: null, unidades: 4 }] });
+  assert.equal(conLotes.documento.cliente, "SB Rapunzel's");
+  assert.deepEqual(conLotes.productos.find((p) => p.itemCode === "A").lotes,
+    [{ lote: "L330", vencimiento: "2027-03-31", unidades: 8 }, { lote: "L331", vencimiento: null, unidades: 4 }]);
   assert.deepEqual(r.lecturas.lista.map((l) => [l.itemName, l.motivo, l.lleva, l.de]),
     [["Shampoo", "codigoCaja", null, null], ["Crema", "equivocado", null, null], ["Tinte", null, 2, 4]]);
 });

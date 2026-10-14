@@ -91,11 +91,18 @@ export function armarPreparaciones({ sesiones, sinPreparar, rango, hoy }) {
 
 // ---------- 3. Detalle de una preparación ----------
 // codigos: Map itemCode → código de barras; leidos: Map código leído → { itemCode, esCaja }.
-export function armarDetalle({ sesion, documento, escaneos, nombres, codigos, leidos, anuladoPor = null }) {
+// lotes: repo.lotesDePreparacion (de qué lote salió cada producto); van en la primera línea de cada producto.
+export function armarDetalle({ sesion, documento, escaneos, nombres, codigos, leidos, anuladoPor = null, lotes = [] }) {
   const nombre = (itemCode) => nombres.get(itemCode) ?? null;
   const lineas = sesion.lineas.map((l) => ({ itemCode: l.itemCode, itemName: nombre(l.itemCode), codigo: l.codigoBarrasEscaneado ?? codigos.get(l.itemCode) ?? null,
     uomCode: l.uomCode, pedida: l.cantidadPedida, preparada: Math.min(l.cantidadEscaneada, l.cantidadPedida),
     falta: Math.max(0, l.cantidadPedida - l.cantidadEscaneada), combo: l.comboItemCode ? { itemCode: l.comboItemCode, itemName: nombre(l.comboItemCode) } : null }));
+  const conLotes = new Set();
+  for (const l of lineas) {
+    l.lotes = conLotes.has(l.itemCode) ? [] : lotes.filter((x) => x.itemCode === l.itemCode)
+      .map((x) => ({ lote: x.lote, vencimiento: x.vencimiento, unidades: x.unidades }));
+    conLotes.add(l.itemCode);
+  }
   const pedidaDe = new Map(sesion.lineas.map((l) => [l.id, l.cantidadPedida]));
   const comboDe = new Map(sesion.lineas.filter((l) => l.comboItemCode).map((l) => [l.id, nombre(l.comboItemCode) ?? l.comboItemCode]));
   const lecturas = escaneos.map((e) => {
@@ -112,7 +119,8 @@ export function armarDetalle({ sesion, documento, escaneos, nombres, codigos, le
   lineas.sort((a, b) => (b.falta > 0) - (a.falta > 0));
   return {
     pickingId: sesion.id, estado: sesion.estado, operador: sesion.usuarioId, anuladoPor,
-    documento: { fuente: documento?.fuenteDocumento ?? null, docNum: documento?.docNum ?? null, almacenDestino: documento?.almacenDestino ?? null },
+    documento: { fuente: documento?.fuenteDocumento ?? null, docNum: documento?.docNum ?? null, almacenDestino: documento?.almacenDestino ?? null,
+      cliente: documento?.cliente?.cardName ?? documento?.cardCode ?? null },
     inicio: sesion.fechaInicio, fin: sesion.fechaFin,
     segundos: sesion.fechaFin ? Math.round((new Date(sesion.fechaFin) - new Date(sesion.fechaInicio)) / 1000) : null,
     unidades: { preparadas, pedidas }, lineasCompletas: lineas.length - incompletas.length, lineasTotal: lineas.length,

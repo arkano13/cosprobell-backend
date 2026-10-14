@@ -62,7 +62,17 @@ export const reportesRepository = {
   },
   documento(docEntry) {
     return prisma.pedido.findUnique({ where: { docEntry }, select: { docEntry: true, docNum: true, fuenteDocumento: true,
-      almacenDestino: true, cancelled: true } });
+      almacenDestino: true, cancelled: true, cardCode: true, cliente: { select: { cardName: true } } } });
+  },
+  // De qué lote (y con qué vencimiento) salió cada producto al terminar la preparación; lo devuelto por una anulación se resta.
+  lotesDePreparacion(pickingId) {
+    return prisma.$queryRaw`
+      SELECT m."itemCode", COALESCE(m.lote, pl.lote) AS lote, to_char(pl.vencimiento, 'YYYY-MM-DD') AS vencimiento,
+             (-SUM(m.cantidad))::int AS unidades
+      FROM inventario_movimientos m LEFT JOIN inventario_pequena_lotes pl ON pl.id = m."pequenaLoteId"
+      WHERE m."pickingId" = ${pickingId} AND m.tipo IN ('picking', 'anulacion')
+      GROUP BY 1, 2, 3 HAVING SUM(m.cantidad) <> 0
+      ORDER BY 1, 3 NULLS LAST, 2`;
   },
   escaneos(pickingId) {
     return prisma.pickingEscaneo.findMany({ where: { pickingId }, orderBy: { id: "desc" },
