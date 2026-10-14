@@ -2,7 +2,7 @@
 
 ## Alcance
 
-El supervisor solicita actualizar productos, pedidos y existencias que estén habilitadas.
+El supervisor solicita actualizar los documentos para preparar (facturas o pedidos, y traslados) que el puente tenga habilitados. Productos y existencias siguen en la programación del puente.
 El resto conserva sus frecuencias automáticas: puede ejecutarse si ya le corresponde,
 pero el botón no fuerza su actualización. No requiere reemplazar archivos del puente.
 Las solicitudes creadas antes de este cambio conservan su alcance hasta terminar.
@@ -39,7 +39,7 @@ Autenticación: `Authorization: Bearer <sesión del supervisor>`.
 }
 ```
 
-Mostrar el botón **Actualizar productos, pedidos y existencias** en la pantalla de sincronización. Deshabilitarlo
+Mostrar el botón **Actualizar documentos para preparar** en la pantalla de sincronización. Deshabilitarlo
 mientras se envía la petición o el estado sea `pendiente` / `sincronizando`.
 Consultar el estado cada 5–10 segundos mientras la pantalla esté abierta; detener
 el temporizador al salir o cerrar sesión. No repetir automáticamente el POST al fallar.

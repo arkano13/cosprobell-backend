@@ -33,14 +33,15 @@ export async function reportePreparaciones({ periodo, operador, documento }, { r
 export async function reporteDetallePreparacion(id, { repo = reportesRepository } = {}) {
   const sesion = await repo.sesion(id);
   if (!sesion) throw new AppError({ code: "PICKING_NO_ENCONTRADO", message: "Preparación no encontrada", statusCode: 404 });
-  const [documento, escaneos, anulacion] = await Promise.all([repo.documento(sesion.pedidoDocEntry), repo.escaneos(id), repo.anuladoPor([id])]);
+  const [documento, escaneos, anulacion, lotes] = await Promise.all([repo.documento(sesion.pedidoDocEntry), repo.escaneos(id), repo.anuladoPor([id]),
+    repo.lotesDePreparacion(id)]);
   const leidos = new Map((await repo.productosDeCodigos([...new Set(escaneos.filter((e) => !e.itemCode).map((e) => e.codigo))]))
     .map((f) => [f.codigo, { itemCode: f.itemCode, esCaja: f.esCaja }]));
   const itemCodes = [...sesion.lineas.flatMap((l) => [l.itemCode, l.comboItemCode]), ...escaneos.map((e) => e.itemCode),
     ...[...leidos.values()].map((l) => l.itemCode)];
   const [nombres, codigos] = await Promise.all([nombresDe(repo, itemCodes), codigosDe(repo, sesion.lineas.map((l) => l.itemCode))]);
   const anuladoPor = anulacion[0] ? { persona: anulacion[0].usuario?.replace(/^operador:/, "") ?? null, fecha: anulacion[0].creadoEn } : null;
-  return { data: armarDetalle({ sesion, documento, escaneos, nombres, codigos, leidos, anuladoPor }) };
+  return { data: armarDetalle({ sesion, documento, escaneos, nombres, codigos, leidos, anuladoPor, lotes }) };
 }
 
 export async function reporteErrores({ periodo, operador }, { repo = reportesRepository, ahora = new Date() } = {}) {

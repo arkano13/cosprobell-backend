@@ -111,7 +111,8 @@ test("botón manual pide facturas en lugar de pedidos cuando el puente anuncia e
     const r = fn(d); d = r.siguiente; return r.resultado; } } });
   await servicio.consultar("TEST", { entidades: ["clientes", "productos", "facturasPreparacion", "existencias"] });
   const s = await servicio.solicitar("TEST", 1);
-  assert.deepEqual(s.entidades, ["productos", "facturasPreparacion", "existencias"]);
+  // Solo los documentos para preparar: productos y existencias siguen en la programación del puente.
+  assert.deepEqual(s.entidades, ["facturasPreparacion"]);
 });
 test("listado de facturas incluye pagadas, filtra 02 y separa órdenes; cierre exige todas las unidades", async t => {
   fuenteFacturas(t);
