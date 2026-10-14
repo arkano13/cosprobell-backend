@@ -19,9 +19,11 @@ const cambiosPago = `(H.[DocDate] >= :history OR H.[UpdateDate] >= :since OR H.[
 const cliente = "INNER JOIN [OCRD] C ON C.[CardCode] = L.[ShortName] AND C.[CardType] = 'C'";
 
 export function definicionesSqlFinanzas(config) {
-  const udf = nombre => nombre ? `H.[${nombre}]` : "NULL";
+  // Sin campo configurado la columna no se pide (sin constantes en SQLQueries); el lector la deja en null.
+  const udf = nombre => nombre ? `H.[${nombre}]` : null;
   const d = {
-    empresa: { from: "[OADM] H", columnas: { codigo: "'empresa'", ...columnas("H", "MainCurncy:monedaLocal SysCurrncy:monedaSistema") } },
+    // Sin constantes: Service Layer respondió 400 a 'empresa' como columna, filtro y orden.
+    empresa: { from: "[OADM] H", columnas: columnas("H", "CompnyName:codigo MainCurncy:monedaLocal SysCurrncy:monedaSistema") },
     clientes: { from: "[OCRD] H", filtro: "H.[CardType] = 'C'", columnas: {
       ...columnas("H", `CardCode:cardCode CardName:nombre validFor:activo frozenFor:bloqueado Currency:moneda Balance:saldo BalanceFC:saldoFC BalanceSys:saldoSC
         CreditLine:limiteCredito SlpCode:vendedor GroupNum:condicionPago`), zona: udf(config.campoZona), ruta: udf(config.campoRuta) } },
@@ -54,7 +56,7 @@ export function definicionesSqlFinanzas(config) {
   return Object.fromEntries(Object.entries(d).map(([nombre, valor]) => {
     const claves = FINANZAS[nombre].claves.map(k => valor.columnas[k]);
     const cursor = claves.map((k, i) => `(${[...claves.slice(0, i).map((p, j) => `${p} = :k${j}`), `${k} > :k${i}`].join(" AND ")})`).join(" OR ");
-    const sql = `SELECT TOP 50 ${Object.entries(valor.columnas).map(([campo, expr]) => `${expr} AS [${campo}]`).join(", ")} FROM ${valor.from}
+    const sql = `SELECT TOP 50 ${Object.entries(valor.columnas).filter(([, expr]) => expr).map(([campo, expr]) => `${expr} AS [${campo}]`).join(", ")} FROM ${valor.from}
       WHERE (${cursor})${valor.filtro ? ` AND (${valor.filtro})` : ""} ORDER BY ${claves.join(", ")}`;
     const hash = createHash("sha256").update(sql).digest("hex");
     return [nombre, { ...valor, nombre, hash, consulta: { SqlCode: `CP_FIN_${hash.slice(0, 20)}`, SqlName: `Cosprobell finanzas ${nombre}`, SqlText: sql } }];

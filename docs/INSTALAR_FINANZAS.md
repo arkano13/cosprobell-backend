@@ -172,7 +172,9 @@ foreach ($entidadFinanciera in $entidadesFinancieras) {
 requieren que Service Layer autorice las tablas/columnas: OADM, OCRD, OSLP, OCTG,
 OINV/INV1/INV6, ORIN/RIN1, ORCT/RCT2, OITR/ITR1, OJDT/JDT1 y los UDF elegidos.
 Si devuelve 400/403 o un campo incompatible, detener esta etapa y revisar ese
-resultado con sistemas. No modificar automáticamente la allowlist del servidor.
+resultado con sistemas. El error trae `detalle.mensajeSap` con el texto de SAP
+(sin usuario, contraseña ni sesión). No modificar automáticamente la allowlist
+del servidor.
 
 Para repetir solo lectura, sin intentar registrar:
 
