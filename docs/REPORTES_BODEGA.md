@@ -18,6 +18,7 @@ Cada respuesta trae `generadoEn`, el período (`periodo`, `desde`, `hasta` como 
 | 6. Correcciones | `GET /supervisor/reportes/correcciones` | `periodo` (30d), `tipo` (`todos`, `conteo`, `lote`, `anulada`, `codigo`), `persona` |
 | 7. Pendientes atrasados | `GET /supervisor/reportes/pendientes` | `minDias` (`0`, `1`, `3`, `7`; 3) |
 | 8. Actividad por operador | `GET /supervisor/reportes/actividad` | `dia` (`AAAA-MM-DD`; hoy), `persona` |
+| 9. Vencimientos | `GET /supervisor/reportes/vencimientos` | `dias` (`30`, `60`, `90`, `180`, `365`; 90), `donde` (`todas` o el código de un almacén) |
 
 ## Reglas
 
@@ -49,6 +50,12 @@ Cada respuesta trae `generadoEn`, el período (`periodo`, `desde`, `hasta` como 
 - **Actividad**: lo que hizo cada persona en el día: preparaciones (por quien la preparó), lecturas, recepciones,
   productos contados, reposiciones, salidas marcadas, códigos registrados y correcciones. Con `persona`, además
   `detalle` con las acciones por hora y la lista de lo que hizo.
+
+- **Vencimientos**: lotes vencidos y por vencer hasta dentro de `dias` días: cajas y bultos de la 01, unidades de la
+  02 y lo contado en los almacenes solo para contar (la 03, la 04; con la fecha de ese conteo, porque no tienen
+  movimientos). Tramos: vencido, 0–30, 31–60, 61–90 y más de 90 días; unidades por mes de vencimiento; productos en los
+  que la 01 tiene un lote que vence antes que todos los de la 02 (conviene pasar ese primero); y cuántas unidades no
+  tienen fecha cargada (no entran en las listas).
 
 ## Registro de cambios
 

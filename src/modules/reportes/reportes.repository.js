@@ -191,6 +191,42 @@ export const reportesRepository = {
       GROUP BY c."itemCode"`;
   },
 
+  // ---------- Vencimientos ----------
+  // Lo que hay hoy por producto, lugar y lote con su vencimiento: cajas de la 01 (y bultos sueltos), unidades de la 02 y
+  // lo contado en los almacenes solo para contar (la 03, la 04), con la fecha de ese conteo. hasta: "AAAA-MM-DD";
+  // sin vencimiento no entra (se cuenta aparte en sinFecha).
+  vencimientos({ hasta }) {
+    return prisma.$queryRaw`
+      SELECT x.lugar, x.almacen, x."itemCode", pr."itemName", x.lote, to_char(x.vencimiento, 'YYYY-MM-DD') AS vencimiento,
+             SUM(x.cajas)::int AS cajas, SUM(x.unidades)::int AS unidades, MAX(x."contadoEn") AS "contadoEn"
+      FROM (
+        SELECT 'grande' AS lugar, NULL::text AS almacen, "itemCode", lote, vencimiento,
+               CASE WHEN suelto THEN 0 ELSE 1 END AS cajas, unidades, NULL::timestamp AS "contadoEn"
+        FROM inventario_cajas WHERE unidades > 0
+        UNION ALL
+        SELECT 'pequena', NULL, "itemCode", lote, vencimiento, 0, unidades, NULL FROM inventario_pequena_lotes WHERE unidades > 0
+        UNION ALL
+        SELECT 'almacen', l.almacen, l."itemCode", l.lote, l.vencimiento, COALESCE(l.cajas, 0), l.unidades, c."actualizadoEn"
+        FROM inventario_conteos_almacen_lineas l
+        JOIN inventario_conteos_almacen c ON c.almacen = l.almacen AND c."itemCode" = l."itemCode"
+        WHERE l.unidades > 0
+      ) x JOIN productos pr ON pr."itemCode" = x."itemCode"
+      WHERE x.vencimiento IS NOT NULL AND x.vencimiento <= ${hasta}::date
+      GROUP BY x.lugar, x.almacen, x."itemCode", pr."itemName", x.lote, x.vencimiento
+      ORDER BY x.vencimiento, pr."itemName", x.lugar`;
+  },
+  // Unidades sin fecha de vencimiento cargada, por lugar.
+  sinVencimiento() {
+    return prisma.$queryRaw`
+      SELECT lugar, almacen, COUNT(DISTINCT "itemCode")::int AS productos, SUM(unidades)::int AS unidades FROM (
+        SELECT 'grande' AS lugar, NULL::text AS almacen, "itemCode", unidades FROM inventario_cajas WHERE unidades > 0 AND vencimiento IS NULL
+        UNION ALL
+        SELECT 'pequena', NULL, "itemCode", unidades FROM inventario_pequena_lotes WHERE unidades > 0 AND vencimiento IS NULL
+        UNION ALL
+        SELECT 'almacen', almacen, "itemCode", unidades FROM inventario_conteos_almacen_lineas WHERE unidades > 0 AND vencimiento IS NULL
+      ) x GROUP BY lugar, almacen`;
+  },
+
   // ---------- Correcciones ----------
   cambiosRegistrados({ desde, hasta }) {
     return prisma.$queryRaw`

@@ -8,7 +8,7 @@ import * as c from "./supervisor.controller.js";
 import env from "../../config/env.js";
 import { solicitudesService } from "../sincronizacion/solicitudes.service.js";
 import { actividadQuerySchema, correccionesQuerySchema, erroresQuerySchema, pendientesQuerySchema, preparacionesQuerySchema,
-  reposicionesQuerySchema, salidasQuerySchema } from "../reportes/reportes.schemas.js";
+  reposicionesQuerySchema, salidasQuerySchema, vencimientosQuerySchema } from "../reportes/reportes.schemas.js";
 
 // Panel del supervisor: solo operadores con rol supervisor y sesión iniciada con PIN. Se monta en /supervisor.
 const router = Router();
@@ -46,4 +46,5 @@ router.get("/reportes/reposiciones", validate({ query: reposicionesQuerySchema }
 router.get("/reportes/correcciones", validate({ query: correccionesQuerySchema }), c.reporteCorrecciones);
 router.get("/reportes/pendientes", validate({ query: pendientesQuerySchema }), c.reportePendientes);
 router.get("/reportes/actividad", validate({ query: actividadQuerySchema }), c.reporteActividad);
+router.get("/reportes/vencimientos", validate({ query: vencimientosQuerySchema }), c.reporteVencimientos);
 export default router;

@@ -654,7 +654,7 @@ export async function descontarPorPicking({ pickingId, lineas, lotes = [], hecho
 // ---------- Almacenes de esta bodega (supervisor) ----------
 
 // Qué almacén de SAP es cada bodega. Solo vale si el almacén sigue marcado como de esta bodega.
-async function almacenesPorBodega(marcados = null) {
+export async function almacenesPorBodega(marcados = null) {
   const [guardado, vigentes] = await Promise.all([repo.opcion(OPCION_ALMACENES_POR_BODEGA),
     marcados ?? repo.almacenesDeEstaBodega()]);
   const vale = (codigo) => (typeof codigo === "string" && vigentes.includes(codigo) ? codigo : null);
@@ -829,7 +829,7 @@ export async function marcarSinExistencia(itemCode, entrada, { aplicacion }) {
 // entran en la comparación de la 01 y la 02. "cajas": cajas enteras por lote y un bulto (como la 01, sin etiquetas);
 // "sueltas": unidades por lote (como la 02). Cualquiera cuenta; un conteo ya guardado lo corrige el supervisor.
 
-async function guardadosSoloConteo() {
+export async function guardadosSoloConteo() {
   const guardado = await repo.opcion(OPCION_SOLO_CONTEO);
   return Array.isArray(guardado)
     ? guardado.filter((a) => a && typeof a.almacen === "string" && ["cajas", "sueltas"].includes(a.tipo)) : [];

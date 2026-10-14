@@ -16,3 +16,5 @@ export const correccionesQuerySchema = z.object({ periodo: periodo(PERIODOS, "30
   tipo: z.enum(["todos", "conteo", "lote", "anulada", "codigo"]).default("todos"), persona: operador }).strict();
 export const pendientesQuerySchema = z.object({ minDias: z.coerce.number().int().refine((v) => [0, 1, 3, 7].includes(v)).default(3) }).strict();
 export const actividadQuerySchema = z.object({ dia: fecha.optional(), persona: operador }).strict();
+export const vencimientosQuerySchema = z.object({ dias: z.coerce.number().int().refine((v) => [30, 60, 90, 180, 365].includes(v)).default(90),
+  donde: z.string().trim().regex(/^(todas|[A-Za-z0-9-]{1,8})$/).default("todas") }).strict();

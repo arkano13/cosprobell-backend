@@ -4,9 +4,9 @@ import { AppError } from "../../shared/errors/AppError.js";
 import { reportesRepository } from "./reportes.repository.js";
 import { rangoPeriodo, rangoDia, fechaLocal, lunesDe, sumarDias, inicioDelDia, diasHabiles } from "./reportes.periodo.js";
 import { armarPreparaciones, armarDetalle, armarErrores, armarSalidas, armarReposiciones, armarCorrecciones, armarPendientes,
-  armarActividad } from "./reportes.calculo.js";
+  armarActividad, armarVencimientos } from "./reportes.calculo.js";
 import { textoAsignacion } from "../inventario/inventario.calculo.js";
-import { asignacionDe, resumirAsignacion, listarPendientes } from "../inventario/inventario.service.js";
+import { asignacionDe, resumirAsignacion, listarPendientes, almacenesPorBodega, guardadosSoloConteo } from "../inventario/inventario.service.js";
 import { inventarioRepository } from "../inventario/inventario.repository.js";
 
 const mapa = (filas, clave, valor) => new Map(filas.map((f) => [f[clave], f[valor]]));
@@ -112,4 +112,16 @@ export async function reporteActividad({ dia, persona }, { repo = reportesReposi
   const nombres = await nombresDe(repo, itemCodes);
   return { data: { generadoEn: new Date(ahora).toISOString(),
     ...armarActividad({ dia: fecha, preparaciones, lecturasHora, movimientos, cuadres, conteosAlmacen, descuentos, codigos, cambios, nombres, persona }) } };
+}
+
+// Lotes vencidos y por vencer en cada bodega y almacén contado, hasta dentro de "dias" días.
+export async function reporteVencimientos({ dias, donde }, { repo = reportesRepository, ahora = new Date(),
+  bodegas = almacenesPorBodega, soloConteo = guardadosSoloConteo } = {}) {
+  const hoy = fechaLocal(ahora);
+  const [filas, sinFecha, almacenes, contados] = await Promise.all([repo.vencimientos({ hasta: sumarDias(hoy, dias) }), repo.sinVencimiento(),
+    bodegas(), soloConteo()]);
+  const codigos = await codigosDe(repo, filas.map((f) => f.itemCode));
+  const lugares = [almacenes.grande ?? "01", almacenes.pequena ?? "02", ...contados.map((a) => a.almacen)];
+  return { data: { generadoEn: new Date(ahora).toISOString(), hoy, filtros: { dias, donde, lugares },
+    ...armarVencimientos({ filas, sinFecha, almacenes, codigos, hoy, donde }) } };
 }
