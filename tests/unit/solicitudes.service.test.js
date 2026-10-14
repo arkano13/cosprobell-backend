@@ -20,14 +20,16 @@ function preparar() {
   return { s: crearServicioSolicitudes({ repo, ahora: () => new Date(tiempo) }), repo,
     avanzar: ms => { tiempo += ms; } };
 }
-const capacidades = { entidades: ["productos", "pedidos", "existencias"] };
+const capacidades = { entidades: ["productos", "facturasPreparacion", "trasladosPreparacion", "existencias"] };
+// El botón pide solo los documentos para preparar.
+const manuales = ["facturasPreparacion", "trasladosPreparacion"];
 test("botón limita las nuevas solicitudes sin cambiar capacidades ni solicitudes anteriores", async () => {
   const { s, repo } = preparar();
-  const todas = ["clientes", "productos", "unidades", "codigosBarras", "pedidos", "almacenes", "existencias"];
+  const todas = ["clientes", "productos", "unidades", "codigosBarras", "facturasPreparacion", "trasladosPreparacion", "almacenes", "existencias"];
   await s.consultar("SAP", { entidades: todas });
-  assert.deepEqual((await s.estado("SAP")).entidades, capacidades.entidades);
+  assert.deepEqual((await s.estado("SAP")).entidades, manuales);
   const nueva = await s.solicitar("SAP", 1);
-  assert.deepEqual(nueva.entidades, capacidades.entidades);
+  assert.deepEqual(nueva.entidades, manuales);
   assert.deepEqual((await repo.leer("SAP")).entidades, todas);
   await repo.cambiar("SAP", d => ({ siguiente: { ...d, solicitud: { ...nueva, entidades: todas } }, resultado: null }));
   assert.deepEqual((await s.solicitar("SAP", 1)).entidades, todas);
@@ -50,16 +52,16 @@ test("presupuestos y desconexión no completan el trabajo; confirmaciones repeti
   const { s, avanzar } = preparar(); await s.consultar("SAP", capacidades);
   const { id } = await s.solicitar("SAP", 5);
   await s.consultar("SAP", capacidades);
-  await s.progreso("SAP", { id, completas: ["productos"] });
+  await s.progreso("SAP", { id, completas: ["facturasPreparacion"] });
   avanzar(3600000);
   assert.equal((await s.solicitar("SAP", 9)).id, id);
   const continuacion = await s.consultar("SAP", capacidades);
-  assert.deepEqual(continuacion.completas, ["productos"]);
+  assert.deepEqual(continuacion.completas, ["facturasPreparacion"]);
   assert.equal(continuacion.estado, "sincronizando");
-  await s.progreso("SAP", { id, completas: ["productos", "pedidos", "existencias"] });
+  await s.progreso("SAP", { id, completas: manuales });
   const final = (await s.estado("SAP")).solicitud;
   avanzar(10000);
-  const repetido = await s.progreso("SAP", { id, completas: ["productos"], error: "ERROR_LOCAL" });
+  const repetido = await s.progreso("SAP", { id, completas: ["facturasPreparacion"], error: "ERROR_LOCAL" });
   assert.deepEqual(repetido, final);
   assert.equal(final.estado, "completado");
   assert.equal(await s.consultar("SAP", capacidades), null);
@@ -80,17 +82,17 @@ test("valida empresa, capacidades y rechaza progreso ajeno sin mutar", async () 
 test("informa configuración reducida y permite nueva solicitud después de la espera", async () => {
   const { s, avanzar } = preparar(); await s.consultar("SAP", capacidades);
   await s.solicitar("SAP", 1);
-  assert.equal(await s.consultar("SAP", { entidades: ["productos"] }), null);
+  assert.equal(await s.consultar("SAP", { entidades: ["productos", "facturasPreparacion"] }), null);
   assert.equal((await s.estado("SAP")).solicitud.error, "ENTIDADES_DESHABILITADAS");
   await assert.rejects(s.solicitar("SAP", 1), { code: "SINCRONIZACION_MUY_RECIENTE" });
   avanzar(61000);
-  assert.deepEqual((await s.solicitar("SAP", 1)).entidades, ["productos"]);
+  assert.deepEqual((await s.solicitar("SAP", 1)).entidades, ["facturasPreparacion"]);
 });
 
 test("el puente con listas de materiales (combos) se acepta y el botón no las pide", async () => {
   const { s } = preparar();
   const conCombos = ["clientes", "productos", "unidades", "codigosBarras", "listasMateriales", "pedidos", "almacenes", "existencias"];
   assert.equal(await s.consultar("SAP", { entidades: conCombos }), null);
-  assert.deepEqual((await s.estado("SAP")).entidades, capacidades.entidades);
-  assert.deepEqual((await s.solicitar("SAP", 1)).entidades, capacidades.entidades);
+  assert.deepEqual((await s.estado("SAP")).entidades, ["pedidos"]);
+  assert.deepEqual((await s.solicitar("SAP", 1)).entidades, ["pedidos"]);
 });
