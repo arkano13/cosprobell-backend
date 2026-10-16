@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { FINANZAS, cursorRegistro } from "../src/shared/finanzas/contratos.js";
 import { ErrorPuente } from "./http.js";
 import { lectorFinanciero, transformarFinanzas } from "./finanzas.transformar.js";
+import { leerPaginaGet } from "./finanzas.get.js";
 
 export function parametrosFinanzas(def, config, recorrido, cursor) {
   const inicial = FINANZAS[def.nombre].claves.map(k => FINANZAS[def.nombre].campos[k].safeParse(0).success ? -2147483648 : "");
@@ -32,8 +33,9 @@ export async function sincronizarPaginaFinanzas({ config, def, almacen, sap, bac
     const ventana = completo ? (def.historialContable ? "1900-01-01" : config.desde)
       : new Date(Date.parse(s.ultimoInicio) - 2 * 86400000).toISOString().slice(0, 10);
     const recorrido = { recorridoId: randomUUID(), empresa: config.empresa, desde: config.desde, fuente,
-      ventana, modo: completo ? "completo" : "cambios", monedaLocal: config.monedaLocal, monedaSistema: config.monedaSistema };
-    await guardar({ ...s, recorrido, secuencia: 0, cursor: null, iniciadoEn: ahora().toISOString(), fuente });
+      ventana, modo: completo ? "completo" : "cambios", monedaLocal: config.monedaLocal, monedaSistema: config.monedaSistema,
+      ...(def.nativo ? { lectura: "get_parcial" } : {}) };
+    await guardar({ ...s, recorrido, secuencia: 0, cursor: null, ...(def.nativo ? { cursorSap: null } : {}), iniciadoEn: ahora().toISOString(), fuente });
   } else if (remoto?.recorridoId === s.recorrido.recorridoId &&
     remoto.secuencia !== s.secuencia && remoto.secuencia !== s.pendiente?.lote.secuencia) throw new ErrorPuente("REQUIERE_RECONCILIACION");
   const inicio = await backend(entidad, "iniciar", s.recorrido);
@@ -41,19 +43,24 @@ export async function sincronizarPaginaFinanzas({ config, def, almacen, sap, bac
   almacen.nuevo = false;
   if (!s.finalizando) {
     if (!s.pendiente) {
-      const filas = await sap.paginaFinanciera(def.consulta, parametrosFinanzas(def, config, s.recorrido, s.cursor), lectorFinanciero(entidad));
+      const pagina = def.nativo ? await leerPaginaGet({ sap, def, config, recorrido: s.recorrido, cursorSap: s.cursorSap }) : null;
+      const filas = pagina ? pagina.filas : await sap.paginaFinanciera(def.consulta, parametrosFinanzas(def, config, s.recorrido, s.cursor), lectorFinanciero(entidad));
       const registros = transformarFinanzas(entidad, filas, s.cursor);
       if (entidad === "empresa" && (registros.length !== (s.cursor ? 0 : 1) || registros.some(r =>
         r.monedaLocal !== config.monedaLocal || r.monedaSistema !== config.monedaSistema))) throw new ErrorPuente("MONEDA_EMPRESA_DISTINTA");
+      if (!registros.length && pagina && !pagina.completo) {
+        await guardar({ ...s, cursorSap: pagina.cursorSap });
+        return { completo: false, registros: 0, secuencia: s.secuencia };
+      }
       if (!registros.length) await guardar({ ...s, finalizando: true });
       else await guardar({ ...s, pendiente: { lote: { recorridoId: s.recorrido.recorridoId, secuencia: s.secuencia + 1, registros },
-        cursor: cursorRegistro(entidad, registros.at(-1)) } });
+        cursor: cursorRegistro(entidad, registros.at(-1)), ...(pagina ? { cursorSap: pagina.cursorSap } : {}) } });
     }
     if (s.pendiente) {
       const { lote, cursor } = s.pendiente;
       const confirmacion = await backend(entidad, "lote", lote);
       if (confirmacion.secuencia !== lote.secuencia || confirmacion.recibidos !== lote.registros.length || typeof confirmacion.repetido !== "boolean") throw new ErrorPuente("CONFIRMACION_INVALIDA");
-      await guardar({ ...s, secuencia: lote.secuencia, cursor, pendiente: null });
+      await guardar({ ...s, secuencia: lote.secuencia, cursor, ...(def.nativo ? { cursorSap: s.pendiente.cursorSap } : {}), pendiente: null });
       return { completo: false, registros: lote.registros.length, secuencia: s.secuencia };
     }
   }

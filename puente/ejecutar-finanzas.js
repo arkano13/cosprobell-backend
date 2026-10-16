@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { configurarFinanzas } from "./finanzas.config.js";
 import { definicionesSqlFinanzas } from "./finanzas.sql.js";
+import { definicionesGetFinanzas, leerPaginaGet, leerJsonFinancieroGet } from "./finanzas.get.js";
 import { abrirFinanzas } from "./finanzas.estado.js";
 import { clienteBackendFinanzas } from "./finanzas.backend.js";
 import { sincronizarPaginaFinanzas, parametrosFinanzas, fuenteFinanzas } from "./finanzas.sincronizar.js";
@@ -21,7 +22,9 @@ try {
   const config = configurarFinanzas(process.env);
   config.reconciliar = args.includes("--reconciliar");
   config.control = crearControl(config);
-  const definiciones = definicionesSqlFinanzas(config);
+  const nativo = config.lectura === "get";
+  if (nativo && args.includes("--registrar")) throw new ErrorPuente("GET_NO_REQUIERE_REGISTRO");
+  const definiciones = nativo ? definicionesGetFinanzas(config) : definicionesSqlFinanzas(config);
   const seleccion = args.find(a => a.startsWith("--entidad="))?.split("=")[1];
   if (seleccion && !Object.hasOwn(definiciones, seleccion)) throw new Error("Entidad financiera inválida");
   if (modo.length && !seleccion) throw new Error("Sondeo y preparación requieren --entidad=NOMBRE");
@@ -29,18 +32,26 @@ try {
   // Comparte el candado del scanner: nunca consulta SAP en paralelo con él.
   liberar = await tomarCandado(join(config.directorio, "ejecucion.lock"));
   sap = crearClienteSap(config);
+  if (nativo) {
+    console.log(JSON.stringify({ evento: "finanzas_alcance", lectura: "get_parcial", excluidas: ["conciliaciones", "partidas"], monedas: "configuradas_manualmente" }));
+    for (const codigo of new Set([config.monedaLocal, config.monedaSistema])) {
+      const moneda = await sap.leerRecursoFinanciero(`Currencies('${encodeURIComponent(codigo).replaceAll("'", "%27")}')?$select=Code`, leerJsonFinancieroGet);
+      if (moneda.Code !== codigo) throw new ErrorPuente("MONEDA_EMPRESA_DISTINTA");
+    }
+  }
   if (config.huellaSap) console.error(JSON.stringify({ evento: "advertencia", codigo: "TLS_SAP_CERTIFICADO_FIJADO" }));
   if (modo.length) {
     const def = definiciones[seleccion];
-    if (modo[0] !== "--sondeo") console.log(JSON.stringify({ evento: "consulta_financiera", entidad: seleccion,
+    if (!nativo && modo[0] !== "--sondeo") console.log(JSON.stringify({ evento: "consulta_financiera", entidad: seleccion,
       resultado: await sap.prepararConsultaFinanciera(def.consulta, modo[0] === "--registrar") }));
-    const filas = await sap.paginaFinanciera(def.consulta, parametrosFinanzas(def, config,
+    const filas = nativo ? (await leerPaginaGet({ sap, def, config, recorrido: { ventana: config.desde }, tamano: 1 })).filas
+      : await sap.paginaFinanciera(def.consulta, parametrosFinanzas(def, config,
       { ventana: def.historialContable ? "1900-01-01" : config.desde }, null), lectorFinanciero(seleccion), 1);
     const registros = transformarFinanzas(seleccion, filas, null);
     if (seleccion === "empresa" && (registros.length !== 1 || registros[0].monedaLocal !== config.monedaLocal || registros[0].monedaSistema !== config.monedaSistema)) throw new ErrorPuente("MONEDA_EMPRESA_DISTINTA");
     console.log(JSON.stringify({ evento: "sondeo_financiero", entidad: seleccion, registros: registros.length }));
   } else {
-    const moneda = transformarFinanzas("empresa", await sap.paginaFinanciera(definiciones.empresa.consulta,
+    const moneda = nativo ? [{ monedaLocal: config.monedaLocal, monedaSistema: config.monedaSistema }] : transformarFinanzas("empresa", await sap.paginaFinanciera(definiciones.empresa.consulta,
       parametrosFinanzas(definiciones.empresa, config, {}, null), lectorFinanciero("empresa"), 1), null);
     if (moneda.length !== 1 || moneda[0].monedaLocal !== config.monedaLocal || moneda[0].monedaSistema !== config.monedaSistema) throw new ErrorPuente("MONEDA_EMPRESA_DISTINTA");
     const backend = clienteBackendFinanzas(config);

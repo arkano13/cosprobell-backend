@@ -19,18 +19,18 @@ const asiento = `transId:i linea:i cardCode:s fecha:f vencimiento:f? fechaDocume
 const def = (claves, especificacion, extra = {}) => ({ claves, campos: campos(especificacion), ...extra });
 export const FINANZAS = {
   empresa: def(["codigo"], "codigo:s monedaLocal:s monedaSistema:s", { snapshot: true }),
-  clientes: def(["cardCode"], `cardCode:s nombre:s? activo:b bloqueado:b moneda:s saldo:d saldoFC:d saldoSC:d
+  clientes: def(["cardCode"], `cardCode:s nombre:s? activo:b bloqueado:b moneda:s saldo:d saldoFC:d? saldoSC:d?
     limiteCredito:d vendedor:i condicionPago:i zona:s? ruta:s?`, { snapshot: true }),
   vendedores: def(["codigo"], "codigo:i nombre:s? activo:b", { snapshot: true }),
   condicionesPago: def(["codigo"], "codigo:i nombre:s dias:i meses:i cuotas:i?", { snapshot: true }),
   facturas: def(["docEntry"], documento),
   facturaLineas: def(["docEntry", "linea"], linea),
-  cuotas: def(["docEntry", "cuota"], `docEntry:i cuota:i cardCode:s fecha:f vencimiento:f total:d totalFC:d totalSC:d
-    pagado:d pagadoFC:d pagadoSC:d estado:s`),
+  cuotas: def(["docEntry", "cuota"], `docEntry:i cuota:i cardCode:s fecha:f vencimiento:f total:d totalFC:d totalSC:d?
+    pagado:d? pagadoFC:d? pagadoSC:d? estado:s?`),
   notasCredito: def(["docEntry"], documento),
   notaCreditoLineas: def(["docEntry", "linea"], linea),
   pagos: def(["docEntry"], `docEntry:i docNum:i serie:i cardCode:s fecha:f moneda:s cancelado:b transId:i?
-    total:d totalFC:d totalSC:d efectivo:d transferencia:d cheques:d tarjetas:d sinAplicarOriginal:d`),
+    total:d? totalFC:d? totalSC:d? efectivo:d transferencia:d cheques:d? tarjetas:d? sinAplicarOriginal:d?`),
   aplicacionesPagos: def(["pagoEntry", "linea"], `pagoEntry:i linea:i cardCode:s fecha:f cancelado:b documento:i tipo:s cuota:i?
     lineaDocumento:i? aplicado:d aplicadoFC:d aplicadoSC:d`),
   conciliaciones: def(["reconNum", "linea"], `reconNum:i linea:i cardCode:s fecha:f cancelado:b cancelacion:i tipoConciliacion:s
@@ -55,7 +55,12 @@ export function validarCursor(entidad, cursor) {
 export const uuid = z.string().uuid();
 export const inicioSchema = z.object({ recorridoId: uuid, empresa: z.string().min(1).max(128),
   desde: fecha, fuente: z.string().regex(/^[a-f0-9]{64}$/), modo: z.enum(["completo", "cambios"]),
-  ventana: fecha, monedaLocal: z.string().min(1).max(3), monedaSistema: z.string().min(1).max(3) }).strict();
+  ventana: fecha, monedaLocal: z.string().min(1).max(3), monedaSistema: z.string().min(1).max(3),
+  lectura: z.literal("get_parcial").optional() }).strict();
+export function snapshotFinanciero(entidad, configuracion = {}) {
+  return FINANZAS[entidad].snapshot || (configuracion.lectura === "get_parcial" &&
+    ["facturaLineas", "notaCreditoLineas", "cuotas", "pagos", "aplicacionesPagos", "movimientos"].includes(entidad));
+}
 export const finalSchema = z.object({ recorridoId: uuid, secuencia: entero.nonnegative() }).strict();
 export function loteFinanzasSchema(entidad) {
   return z.object({ recorridoId: uuid, secuencia: entero.positive(),

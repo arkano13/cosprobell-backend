@@ -8,6 +8,17 @@ export function crearClienteSap(config, fetchImpl = fetch) {
   if (config.huellaSap) fetchImpl = crearTransporteSap(config.sapUrl, config.huellaSap);
   let cookie = null;
   let almacenesSqlVerificados = false;
+  async function detalleErrorSap(respuesta) {
+    const cuerpo = await respuesta.json();
+    let mensaje = cuerpo?.error?.message?.value ?? cuerpo?.error?.message;
+    if (typeof mensaje !== "string") mensaje = "Sin mensaje de SAP";
+    for (const secreto of [config.password, config.usuario, cookie]) {
+      if (secreto) mensaje = mensaje.split(secreto).join("[oculto]");
+    }
+    const codigo = String(cuerpo?.error?.code);
+    return { codigoSap: /^-?\d+$/.test(codigo) ? codigo : undefined,
+      mensaje: mensaje.replace(/[\x00-\x1f]/g, " ").slice(0, 500) };
+  }
   async function login() {
     await config.control?.antesDeConsultar();
     const respuesta = await solicitar(`${config.sapUrl}/Login`, {
@@ -21,12 +32,12 @@ export function crearClienteSap(config, fetchImpl = fetch) {
     cookie = cookies.join("; ");
   }
   // GET con la sesión vigente; ante 401 renueva la sesión una sola vez.
-  async function obtener(ruta, cabeceras = {}, lector = leerJson) {
+  async function obtener(ruta, cabeceras = {}, lector = leerJson, leerError = null) {
     if (!cookie) await login();
     for (let intento = 0; ; intento++) {
       try {
         await config.control?.antesDeConsultar();
-        return await lector(await solicitar(`${config.sapUrl}/${ruta}`, { headers: { Cookie: cookie, ...cabeceras } }, fetchImpl));
+        return await lector(await solicitar(`${config.sapUrl}/${ruta}`, { headers: { Cookie: cookie, ...cabeceras } }, fetchImpl, leerError));
       } catch (error) {
         if (error.code !== "HTTP_401" || intento === 1) throw error;
         cookie = null; await login();
@@ -55,18 +66,56 @@ export function crearClienteSap(config, fetchImpl = fetch) {
     }
   }
   return {
+    async leerRecursoFinanciero(ruta, lector) {
+      if (!/^(BusinessPartners|Invoices|CreditNotes|IncomingPayments|SalesPersons|PaymentTermsTypes|JournalEntries|Currencies)(\?|\(|$)/.test(ruta) || /[\r\n#]/.test(ruta)) throw new ErrorPuente("RECURSO_FINANCIERO_INVALIDO");
+      return obtener(ruta, { Prefer: "odata.maxpagesize=20" }, lector, detalleErrorSap);
+    },
+    async probarConciliacionesGet(modo, numero) {
+      const rutas = {
+        minimo: "InternalReconciliations?$top=1",
+        clave: "InternalReconciliations?$select=ReconNum&$top=1",
+      };
+      if (modo === "documento") {
+        if (!Number.isSafeInteger(numero) || numero < 1 || numero > 2147483647) throw new ErrorPuente("ARGUMENTOS_INVALIDOS");
+        rutas.documento = `InternalReconciliations(${numero})`;
+      }
+      if (!Object.hasOwn(rutas, modo)) throw new ErrorPuente("ARGUMENTOS_INVALIDOS");
+      const leerError = async respuesta => {
+        const cuerpo = await respuesta.json();
+        const codigo = cuerpo?.error?.code;
+        let mensaje = cuerpo?.error?.message?.value ?? cuerpo?.error?.message;
+        if (typeof mensaje !== "string") mensaje = "Sin mensaje de SAP";
+        for (const secreto of [config.password, config.usuario, cookie]) {
+          if (secreto) mensaje = mensaje.split(secreto).join("[oculto]");
+        }
+        return { codigoSap: /^-?\d+$/.test(String(codigo)) ? String(codigo) : undefined,
+          mensaje: mensaje.replace(/[\x00-\x1f]/g, " ").slice(0, 500) };
+      };
+      const datos = await obtener(rutas[modo], { Prefer: "odata.maxpagesize=1" }, leerJson, leerError);
+      if (modo === "documento") {
+        if (!datos || typeof datos !== "object" || Array.isArray(datos) || datos.ReconNum !== numero) throw new ErrorPuente("CONCILIACION_RESPUESTA_INVALIDA");
+        return { numero: datos.ReconNum, campos: Object.keys(datos),
+          cantidadLineas: Array.isArray(datos.InternalReconciliationRows) ? datos.InternalReconciliationRows.length : null };
+      }
+      if (!Array.isArray(datos.value) || datos.value.length > 1) throw new ErrorPuente("PAGINA_SAP_INVALIDA");
+      return { registros: datos.value.length, campos: datos.value.length ? Object.keys(datos.value[0]) : [] };
+    },
+    async esquemaFinanciero() {
+      // Solo el catálogo de recursos; no se crean consultas ni se leen documentos.
+      return obtener("$metadata", { Accept: "application/xml" }, respuesta => respuesta.text());
+    },
     async prepararConsultaFinanciera(definicion, crear = false) {
       if (!/^CP_FIN_[a-f0-9]{20}$/.test(definicion.SqlCode)) throw new ErrorPuente("CONSULTA_FINANCIERA_INVALIDA");
       const ruta = `SQLQueries('${definicion.SqlCode}')`;
       try {
-        validarConsultaExistencias((await obtener(ruta)).SqlText, definicion);
+        validarConsultaExistencias((await obtener(ruta, {}, leerJson, detalleErrorSap)).SqlText, definicion);
         return "existente";
       } catch (error) { if (error.code !== "HTTP_404" || !crear) throw error; }
       await config.control?.antesDeConsultar();
       const respuesta = await solicitar(`${config.sapUrl}/SQLQueries`, { method: "POST",
-        headers: { Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify(definicion) }, fetchImpl);
+        headers: { Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify(definicion) }, fetchImpl, detalleErrorSap);
       await respuesta.body?.cancel();
-      validarConsultaExistencias((await obtener(ruta)).SqlText, definicion);
+      validarConsultaExistencias((await obtener(ruta, {}, leerJson, detalleErrorSap)).SqlText, definicion);
       return "creada";
     },
     async paginaFinanciera(definicion, parametros, lector, tamano = 50) {
@@ -76,7 +125,7 @@ export function crearClienteSap(config, fetchImpl = fetch) {
         const literal = typeof v === "string" ? `'${v.replaceAll("'", "''")}'` : String(v);
         return `${k}=${encodeURIComponent(literal).replaceAll("'", "%27")}`;
       }).join("&");
-      const datos = await obtener(`SQLQueries('${definicion.SqlCode}')/List?${valores}`, { Prefer: `odata.maxpagesize=${tamano}` }, lector);
+      const datos = await obtener(`SQLQueries('${definicion.SqlCode}')/List?${valores}`, { Prefer: `odata.maxpagesize=${tamano}` }, lector, detalleErrorSap);
       validarConsultaExistencias(datos.SqlText, definicion);
       if (!Array.isArray(datos.value) || datos.value.length > tamano ||
         (!datos.value.length && (datos["odata.nextLink"] || datos["@odata.nextLink"]))) throw new ErrorPuente("PAGINA_SAP_INVALIDA");
