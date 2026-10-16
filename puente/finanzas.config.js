@@ -30,5 +30,6 @@ export function configurarFinanzas(v) {
     monedaLocal: moneda("BRIDGE_FINANCE_LOCAL_CURRENCY"), monedaSistema: moneda("BRIDGE_FINANCE_SYSTEM_CURRENCY"),
     frecuencias, maxConsultas: numero("BRIDGE_FINANCE_MAX_REQUESTS", 10, lectura === "get" ? 4 : 2, 100),
     maxDuracionMs: numero("BRIDGE_FINANCE_MAX_SECONDS", 60, 10, 120) * 1000,
+    documentosPorConsulta: numero("BRIDGE_FINANCE_DOCS_PER_REQUEST", 10, 1, 20),
     pausaMs: Math.max(base.pausaMs, 1500) };
 }

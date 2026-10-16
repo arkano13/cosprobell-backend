@@ -56,6 +56,7 @@ BRIDGE_FINANCE_ZONE_FIELD=
 BRIDGE_FINANCE_FREQUENCIES_JSON={}
 BRIDGE_FINANCE_MAX_REQUESTS=10
 BRIDGE_FINANCE_MAX_SECONDS=60
+BRIDGE_FINANCE_DOCS_PER_REQUEST=10
 ```
 
 Conservar las credenciales, TLS, URL del backend, configuración operativa y `BRIDGE_STATE_DIR` actuales. `FREQUENCIES_JSON={}` permite completar la primera carga financiera; después, no inicia recorridos periódicos nuevos. Configuraremos sus frecuencias tras validar la primera carga y su duración.
@@ -87,6 +88,8 @@ $LASTEXITCODE
 Esperado: `ciclo_financiero`, posiblemente `pausa_por_presupuesto`, `resumen_financiero` y 0. Repetir el mismo comando cuando termine para continuar donde quedó. No usar `--forzar`, no borrar estados y no lanzar varias ventanas a la vez.
 
 La primera carga pide todo el historial disponible desde 1900; no lo termina necesariamente en una ejecución. Se limita a 10 solicitudes y 60 segundos, con pausas de al menos 1,5 segundos. Las colecciones de líneas se leen por documento; un historial grande puede requerir muchas ejecuciones. No hay un tiempo total confirmado.
+
+Cada consulta trae hasta 50 cabeceras (clientes, facturas, pagos) o hasta `BRIDGE_FINANCE_DOCS_PER_REQUEST` documentos con sus líneas, cortando el lote en 50 registros. La verificación de monedas se hace como máximo una vez al día (`finanzas-monedas.json` en el directorio de estado) y solo si hay entidades pendientes; si no hay trabajo, la ejecución no inicia sesión en SAP. El estado del backend se consulta una vez por entidad y ejecución. Si el servidor SAP se carga, bajar `BRIDGE_FINANCE_DOCS_PER_REQUEST`.
 
 Cada entidad se publica cuando termina su recorrido. Para confirmar la primera carga, todas las entidades deben haber informado `completo:true` y estar disponibles en el receptor. Si aparece `LECTOR_FINANCIERO_DISTINTO`, hay una carga previa con otro perfil: detenerse y revisar esa transición sin borrar tablas ni estados.
 

@@ -12,6 +12,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { abrirFinanzas } from "../../puente/finanzas.estado.js";
+import { definicionesGetFinanzas, leerPaginaGet } from "../../puente/finanzas.get.js";
 
 const config = { empresa: "TEST", desde: "2026-01-01", monedaLocal: "HNL", monedaSistema: "USD", campoZona: null, campoRuta: null };
 const defs = definicionesSqlFinanzas(config);
@@ -178,4 +179,59 @@ test("finanzas: estado durable se recupera y rechaza cursor de pendiente alterad
   await writeFile(join(directorio, "finanzas-clientes.json"), JSON.stringify({ ...a.estado, recorrido,
     pendiente: { cursor: ["C999"], lote: { recorridoId: recorrido.recorridoId, secuencia: 1, registros: [filaCliente] } } }));
   await assert.rejects(abrirFinanzas(c, "clientes"), { code: "ESTADO_FINANCIERO_INVALIDO" });
+});
+
+const configGet = { ...config, documentosPorConsulta: 10 };
+const defsGet = definicionesGetFinanzas(configGet);
+const factura = (DocEntry, lineas) => ({ DocEntry, CardCode: "C1", DocDate: "2026-02-01",
+  DocumentLines: Array.from({ length: lineas }, (_, LineNum) => ({ LineNum, ItemCode: "A", ItemDescription: null, Quantity: "1",
+    Price: "2.5", LineTotal: "2.5", WarehouseCode: "01", BaseType: -1, BaseEntry: null, BaseLine: null })) });
+function sapGet(documentos) {
+  const rutas = [];
+  return { rutas, async leerRecursoFinanciero(ruta) {
+    rutas.push(ruta);
+    const filtro = decodeURIComponent(ruta.match(/\$filter=([^&]*)/)?.[1] ?? "");
+    const desde = filtro.match(/DocEntry (gt|ge) (\d+)/);
+    const top = Number(ruta.match(/\$top=(\d+)/)[1]);
+    const value = documentos.filter(d => !desde || (desde[1] === "gt" ? d.DocEntry > +desde[2] : d.DocEntry >= +desde[2])).slice(0, top);
+    return { value: structuredClone(value) };
+  } };
+}
+test("finanzas GET: una consulta trae varios documentos con sus líneas y corta el lote en 50", async () => {
+  const sap = sapGet([factura(1, 30), factura(2, 30), factura(3, 5)]);
+  const def = defsGet.facturaLineas;
+  const p1 = await leerPaginaGet({ sap, def, config: configGet, recorrido: { ventana: config.desde } });
+  assert.equal(sap.rutas.length, 1);
+  assert.match(sap.rutas[0], /\$top=10/);
+  assert.equal(p1.filas.length, 50);
+  assert.deepEqual(p1.cursorSap, { id: 2, linea: 19 });
+  assert.deepEqual(transformarFinanzas("facturaLineas", p1.filas, null).at(-1).linea, 19);
+  const p2 = await leerPaginaGet({ sap, def, config: configGet, recorrido: { ventana: config.desde }, cursorSap: p1.cursorSap });
+  assert.equal(p2.filas.length, 15);
+  assert.deepEqual([p2.filas[0].docEntry, p2.filas[0].linea], [2, 20]);
+  assert.deepEqual(p2.cursorSap, { id: 3, linea: null });
+  transformarFinanzas("facturaLineas", p2.filas, [2, 19]);
+  const p3 = await leerPaginaGet({ sap, def, config: configGet, recorrido: { ventana: config.desde }, cursorSap: p2.cursorSap });
+  assert.equal(p3.completo, true);
+});
+test("finanzas GET: estado e inicio se piden al backend una sola vez por recorrido en la ejecución", async () => {
+  const sap = sapGet([factura(1, 30), factura(2, 30), factura(3, 5)]);
+  const almacen = { nuevo: true, estado: { version: 1, origen: "x", recorrido: null, cursor: null, secuencia: 0, pendiente: null, cursorSap: null },
+    async guardar(s) { this.estado = structuredClone(s); } };
+  let control = null; const acciones = [];
+  const backend = async (_e, accion, entrada) => {
+    acciones.push(accion);
+    if (accion === "estado") return control;
+    if (accion === "iniciar") { control ??= { ...entrada, secuencia: 0, finalizadoEn: null }; return { recorridoId: control.recorridoId }; }
+    if (accion === "lote") { control.secuencia = entrada.secuencia; return { secuencia: entrada.secuencia, recibidos: entrada.registros.length, repetido: false }; }
+    control.finalizadoEn = "2026-10-16T12:00:00Z";
+    return { recorridoId: control.recorridoId, completo: true };
+  };
+  let r;
+  do r = await sincronizarPaginaFinanzas({ config: configGet, def: defsGet.facturaLineas, almacen, sap, backend });
+  while (!r.completo);
+  assert.equal(acciones.filter(a => a === "estado").length, 1);
+  assert.equal(acciones.filter(a => a === "iniciar").length, 1);
+  assert.equal(acciones.filter(a => a === "lote").length, 2);
+  assert.equal(sap.rutas.length, 3);
 });

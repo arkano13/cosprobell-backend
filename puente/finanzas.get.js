@@ -70,7 +70,10 @@ export function definicionesGetFinanzas(config) {
 const literal = valor => typeof valor === "number" ? String(valor) : `'${valor.replaceAll("'", "''")}'`;
 const enc = valor => encodeURIComponent(valor).replaceAll("'", "%27");
 
-export async function leerPaginaGet({ sap, def, config, recorrido, cursorSap = null, tamano = 20 }) {
+// Una consulta trae hasta `tamano` cabeceras o, en colecciones, hasta `documentos` documentos con sus líneas;
+// el lote nunca supera 50 registros (límite del receptor). Si un documento no cabe, el cursor queda en su
+// última línea enviada y los documentos siguientes de esa respuesta se descartan: se releen en la próxima.
+export async function leerPaginaGet({ sap, def, config, recorrido, cursorSap = null, tamano = 50, documentos = config.documentosPorConsulta ?? 10 }) {
   if (def.nombre === "empresa") return { filas: cursorSap ? [] : [{ codigo: "empresa", monedaLocal: config.monedaLocal, monedaSistema: config.monedaSistema }],
     cursorSap: { id: "empresa", linea: null }, completo: Boolean(cursorSap) };
   const filtros = [def.filtro];
@@ -78,10 +81,10 @@ export async function leerPaginaGet({ sap, def, config, recorrido, cursorSap = n
   if (def.incremental) filtros.push(`(DocDate ge '${config.desde}' or DocumentStatus eq 'bost_Open') and (UpdateDate ge '${recorrido.ventana}' or CreationDate ge '${recorrido.ventana}' or DocumentStatus eq 'bost_Open')`);
   else if (def.historico) filtros.push(`DocDate ge '${config.desde}'`);
   const campos = [...new Set([...def.campos, ...(def.adicionales ?? []), ...(def.coleccion ? [def.coleccion] : [])])];
-  const ruta = `${def.recurso}?$select=${campos.join(",")}&$orderby=${enc(def.clave + " asc")}&$top=${def.coleccion ? 1 : tamano}` +
+  const ruta = `${def.recurso}?$select=${campos.join(",")}&$orderby=${enc(def.clave + " asc")}&$top=${def.coleccion ? documentos : tamano}` +
     (filtros.filter(Boolean).length ? `&$filter=${enc(filtros.filter(Boolean).map(f => `(${f})`).join(" and "))}` : "");
   const datos = await sap.leerRecursoFinanciero(ruta, leerJsonFinancieroGet);
-  if (!Array.isArray(datos.value) || datos.value.length > (def.coleccion ? 1 : tamano) ||
+  if (!Array.isArray(datos.value) || datos.value.length > (def.coleccion ? documentos : tamano) ||
       (!datos.value.length && (datos["odata.nextLink"] || datos["@odata.nextLink"]))) throw new ErrorPuente("PAGINA_SAP_INVALIDA");
   if (!datos.value.length) return { filas: [], cursorSap, completo: true };
   const filas = []; let siguiente = cursorSap;
@@ -98,7 +101,8 @@ export async function leerPaginaGet({ sap, def, config, recorrido, cursorSap = n
       if (lineas.some(l => !Number.isSafeInteger(l[def.claveLinea]) || l[def.claveLinea] < 0) || new Set(lineas.map(l => l[def.claveLinea])).size !== lineas.length) throw new ErrorPuente("FINANZA_SAP_INVALIDA");
       const pendientes = lineas.filter(l => !cursorSap || id !== cursorSap.id || cursorSap.linea === null || l[def.claveLinea] > cursorSap.linea)
         .sort((a, b) => a[def.claveLinea] - b[def.claveLinea]);
-      for (const l of pendientes.slice(0, 50)) {
+      const cupo = 50 - filas.length;
+      for (const l of pendientes.slice(0, cupo)) {
         const registro = { ...convertir(def.mapa, d), ...convertir(def.mapaLinea, l), ...def.completar?.(d) };
         if (def.nombre === "movimientos") {
           if (registro.tipo === undefined || registro.tipo === null) throw new ErrorPuente("FINANZA_SAP_INVALIDA");
@@ -106,7 +110,13 @@ export async function leerPaginaGet({ sap, def, config, recorrido, cursorSap = n
         }
         filas.push(registro);
       }
-      siguiente = { id, linea: pendientes.length > 50 ? pendientes[49][def.claveLinea] : null };
+      if (pendientes.length > cupo) {
+        // Cupo agotado a mitad del documento (cupo > 0 siempre: se corta antes de pasar al siguiente).
+        siguiente = { id, linea: pendientes[cupo - 1][def.claveLinea] };
+        break;
+      }
+      siguiente = { id, linea: null };
+      if (filas.length >= 50) break;
     }
   }
   return { filas, cursorSap: siguiente, completo: false };

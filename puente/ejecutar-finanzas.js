@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { configurarFinanzas } from "./finanzas.config.js";
 import { definicionesSqlFinanzas } from "./finanzas.sql.js";
 import { definicionesGetFinanzas, leerPaginaGet, leerJsonFinancieroGet } from "./finanzas.get.js";
@@ -32,19 +32,31 @@ try {
   // Comparte el candado del scanner: nunca consulta SAP en paralelo con él.
   liberar = await tomarCandado(join(config.directorio, "ejecucion.lock"));
   sap = crearClienteSap(config);
-  if (nativo) {
-    console.log(JSON.stringify({ evento: "finanzas_alcance", lectura: "get_parcial", excluidas: ["conciliaciones", "partidas"], monedas: "configuradas_manualmente" }));
+  if (nativo) console.log(JSON.stringify({ evento: "finanzas_alcance", lectura: "get_parcial", excluidas: ["conciliaciones", "partidas"], monedas: "configuradas_manualmente" }));
+  // Perezosa: solo cuando hay que leer SAP, y una vez al día por empresa y monedas. Ahorra login y 1-2 consultas por ejecución.
+  const archivoMonedas = join(config.directorio, "finanzas-monedas.json");
+  const huellaMonedas = JSON.stringify([config.empresa, config.monedaLocal, config.monedaSistema]);
+  let monedasVerificadas = !nativo;
+  async function verificarMonedas(usarCache = true) {
+    if (monedasVerificadas) return;
+    if (usarCache) {
+      const previa = await readFile(archivoMonedas, "utf8").then(JSON.parse).catch(() => null);
+      if (previa?.huella === huellaMonedas && Date.now() - Date.parse(previa.verificadoEn) < 86400000) { monedasVerificadas = true; return; }
+    }
     for (const codigo of new Set([config.monedaLocal, config.monedaSistema])) {
       const moneda = await sap.leerRecursoFinanciero(`Currencies('${encodeURIComponent(codigo).replaceAll("'", "%27")}')?$select=Code`, leerJsonFinancieroGet);
       if (moneda.Code !== codigo) throw new ErrorPuente("MONEDA_EMPRESA_DISTINTA");
     }
+    monedasVerificadas = true;
+    await writeFile(archivoMonedas, JSON.stringify({ huella: huellaMonedas, verificadoEn: new Date().toISOString() }));
   }
   if (config.huellaSap) console.error(JSON.stringify({ evento: "advertencia", codigo: "TLS_SAP_CERTIFICADO_FIJADO" }));
   if (modo.length) {
     const def = definiciones[seleccion];
+    await verificarMonedas(false);
     if (!nativo && modo[0] !== "--sondeo") console.log(JSON.stringify({ evento: "consulta_financiera", entidad: seleccion,
       resultado: await sap.prepararConsultaFinanciera(def.consulta, modo[0] === "--registrar") }));
-    const filas = nativo ? (await leerPaginaGet({ sap, def, config, recorrido: { ventana: config.desde }, tamano: 1 })).filas
+    const filas = nativo ? (await leerPaginaGet({ sap, def, config, recorrido: { ventana: config.desde }, tamano: 1, documentos: 1 })).filas
       : await sap.paginaFinanciera(def.consulta, parametrosFinanzas(def, config,
       { ventana: def.historialContable ? "1900-01-01" : config.desde }, null), lectorFinanciero(seleccion), 1);
     const registros = transformarFinanzas(seleccion, filas, null);
@@ -60,13 +72,16 @@ try {
       const almacen = await abrirFinanzas(config, def.nombre);
       pendientes.push({ def, almacen });
     }
+    // Solo entidades con trabajo; si no queda ninguna, la ejecución no abre sesión en SAP.
+    const conTrabajo = ({ def, almacen: { estado: s } }) => s.recorrido || !s.ultimoCompleto || s.fuente !== fuenteFinanzas(def, config) ||
+      config.reconciliar || args.includes("--forzar") || (config.frecuencias[def.nombre] && Date.now() - Date.parse(s.ultimoCompleto) >= config.frecuencias[def.nombre] * 1000);
+    pendientes.splice(0, pendientes.length, ...pendientes.filter(conTrabajo));
+    if (pendientes.some(p => p.def.nombre !== "empresa")) await verificarMonedas();
     pendientes.sort((a, b) => Date.parse(a.almacen.estado.ultimaAtencion ?? "1970-01-01") - Date.parse(b.almacen.estado.ultimaAtencion ?? "1970-01-01"));
     // Una página por entidad por ronda; repetir las incompletas solo si queda presupuesto.
     while (pendientes.length && !parar) {
       const { def, almacen } = pendientes.shift();
-      const s = almacen.estado, frecuencia = config.frecuencias[def.nombre];
-      if (!s.recorrido && s.ultimoCompleto && s.fuente === fuenteFinanzas(def, config) && !config.reconciliar && !args.includes("--forzar") &&
-        (!frecuencia || Date.now() - Date.parse(s.ultimoCompleto) < frecuencia * 1000)) continue;
+      const s = almacen.estado;
       await almacen.guardar({ ...s, ultimaAtencion: new Date().toISOString() });
       try {
         const resultado = await sincronizarPaginaFinanzas({ config, def, almacen, sap, backend });

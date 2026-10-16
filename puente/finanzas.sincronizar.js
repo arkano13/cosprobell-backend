@@ -17,30 +17,35 @@ export async function sincronizarPaginaFinanzas({ config, def, almacen, sap, bac
   const entidad = def.nombre;
   let s = almacen.estado;
   const guardar = async datos => { await almacen.guardar(datos); s = almacen.estado; };
-  const remoto = await backend(entidad, "estado");
-  if (almacen.nuevo && remoto) throw new ErrorPuente("FALTA_ESTADO_FINANCIERO_LOCAL");
-  if (!remoto && (s.ultimoRecorrido || s.secuencia > 0)) throw new ErrorPuente("REQUIERE_RECONCILIACION");
-  if (s.recorrido && remoto && remoto.recorridoId !== s.recorrido.recorridoId &&
-    (remoto.recorridoId !== s.ultimoRecorrido || !remoto.finalizadoEn)) throw new ErrorPuente("REQUIERE_RECONCILIACION");
-  if (remoto && remoto.empresa !== config.empresa) throw new ErrorPuente("ORIGEN_INCOMPATIBLE");
   const fuente = fuenteFinanzas(def, config);
   if (s.recorrido && s.recorrido.fuente !== fuente) throw new ErrorPuente("CAMBIO_FINANCIERO_CON_PENDIENTE");
-  if (!s.recorrido) {
-    if (remoto && (!remoto.finalizadoEn || remoto.recorridoId !== s.ultimoRecorrido)) throw new ErrorPuente("REQUIERE_RECONCILIACION");
-    const completo = !s.ultimoCompleto || config.reconciliar || s.fuente !== fuente;
-    // Solapamiento de dos días desde el INICIO anterior: incluye cambios durante
-    // una carga de varias ejecuciones y diferencia de zona horaria con SAP.
-    const ventana = completo ? (def.historialContable ? "1900-01-01" : config.desde)
-      : new Date(Date.parse(s.ultimoInicio) - 2 * 86400000).toISOString().slice(0, 10);
-    const recorrido = { recorridoId: randomUUID(), empresa: config.empresa, desde: config.desde, fuente,
-      ventana, modo: completo ? "completo" : "cambios", monedaLocal: config.monedaLocal, monedaSistema: config.monedaSistema,
-      ...(def.nativo ? { lectura: "get_parcial" } : {}) };
-    await guardar({ ...s, recorrido, secuencia: 0, cursor: null, ...(def.nativo ? { cursorSap: null } : {}), iniciadoEn: ahora().toISOString(), fuente });
-  } else if (remoto?.recorridoId === s.recorrido.recorridoId &&
-    remoto.secuencia !== s.secuencia && remoto.secuencia !== s.pendiente?.lote.secuencia) throw new ErrorPuente("REQUIERE_RECONCILIACION");
-  const inicio = await backend(entidad, "iniciar", s.recorrido);
-  if (inicio.recorridoId !== s.recorrido.recorridoId) throw new ErrorPuente("CONFIRMACION_INVALIDA");
-  almacen.nuevo = false;
+  // Perezoso: estado e inicio se verifican con el backend en la primera página del recorrido en esta
+  // ejecución; las siguientes (con el candado tomado) solo envían lotes, que el backend vuelve a validar.
+  if (!s.recorrido || almacen.confirmado !== s.recorrido.recorridoId) {
+    const remoto = await backend(entidad, "estado");
+    if (almacen.nuevo && remoto) throw new ErrorPuente("FALTA_ESTADO_FINANCIERO_LOCAL");
+    if (!remoto && (s.ultimoRecorrido || s.secuencia > 0)) throw new ErrorPuente("REQUIERE_RECONCILIACION");
+    if (s.recorrido && remoto && remoto.recorridoId !== s.recorrido.recorridoId &&
+      (remoto.recorridoId !== s.ultimoRecorrido || !remoto.finalizadoEn)) throw new ErrorPuente("REQUIERE_RECONCILIACION");
+    if (remoto && remoto.empresa !== config.empresa) throw new ErrorPuente("ORIGEN_INCOMPATIBLE");
+    if (!s.recorrido) {
+      if (remoto && (!remoto.finalizadoEn || remoto.recorridoId !== s.ultimoRecorrido)) throw new ErrorPuente("REQUIERE_RECONCILIACION");
+      const completo = !s.ultimoCompleto || config.reconciliar || s.fuente !== fuente;
+      // Solapamiento de dos días desde el INICIO anterior: incluye cambios durante
+      // una carga de varias ejecuciones y diferencia de zona horaria con SAP.
+      const ventana = completo ? (def.historialContable ? "1900-01-01" : config.desde)
+        : new Date(Date.parse(s.ultimoInicio) - 2 * 86400000).toISOString().slice(0, 10);
+      const recorrido = { recorridoId: randomUUID(), empresa: config.empresa, desde: config.desde, fuente,
+        ventana, modo: completo ? "completo" : "cambios", monedaLocal: config.monedaLocal, monedaSistema: config.monedaSistema,
+        ...(def.nativo ? { lectura: "get_parcial" } : {}) };
+      await guardar({ ...s, recorrido, secuencia: 0, cursor: null, ...(def.nativo ? { cursorSap: null } : {}), iniciadoEn: ahora().toISOString(), fuente });
+    } else if (remoto?.recorridoId === s.recorrido.recorridoId &&
+      remoto.secuencia !== s.secuencia && remoto.secuencia !== s.pendiente?.lote.secuencia) throw new ErrorPuente("REQUIERE_RECONCILIACION");
+    const inicio = await backend(entidad, "iniciar", s.recorrido);
+    if (inicio.recorridoId !== s.recorrido.recorridoId) throw new ErrorPuente("CONFIRMACION_INVALIDA");
+    almacen.nuevo = false;
+    almacen.confirmado = s.recorrido.recorridoId;
+  }
   if (!s.finalizando) {
     if (!s.pendiente) {
       const pagina = def.nativo ? await leerPaginaGet({ sap, def, config, recorrido: s.recorrido, cursorSap: s.cursorSap }) : null;

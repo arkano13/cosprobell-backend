@@ -68,7 +68,7 @@ export function crearClienteSap(config, fetchImpl = fetch) {
   return {
     async leerRecursoFinanciero(ruta, lector) {
       if (!/^(BusinessPartners|Invoices|CreditNotes|IncomingPayments|SalesPersons|PaymentTermsTypes|JournalEntries|Currencies)(\?|\(|$)/.test(ruta) || /[\r\n#]/.test(ruta)) throw new ErrorPuente("RECURSO_FINANCIERO_INVALIDO");
-      return obtener(ruta, { Prefer: "odata.maxpagesize=20" }, lector, detalleErrorSap);
+      return obtener(ruta, { Prefer: "odata.maxpagesize=50" }, lector, detalleErrorSap);
     },
     async probarConciliacionesGet(modo, numero) {
       const rutas = {
