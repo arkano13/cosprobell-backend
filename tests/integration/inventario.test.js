@@ -56,6 +56,7 @@ test("movimiento sin operacionId se rechaza antes de tocar inventario", async (t
 test("comparación SAP: existencias no disponibles bloquean descuentos basados en diferencias", async (t) => {
   inventario(t);
   t.mock.method(repo, "comparacionDisponible", async () => false);
+  t.mock.method(repo, "traspasosDisponibles", async () => false);
   const r = await pedir("/inventario/pendientes", conSesion(t));
   assert.equal(r.status, 409);
   assert.equal((await r.json()).error.code, "COMPARACION_SAP_NO_DISPONIBLE");
@@ -68,6 +69,7 @@ function inventario(t, { sap = 0, grande = 0, pequena = 0, activo = true, sapCam
   const tx = {};
   t.mock.method(repo, "almacenesDeEstaBodega", async () => almacenes);
   t.mock.method(repo, "comparacionDisponible", async () => almacenes.length > 0);
+  t.mock.method(repo, "traspasosDisponibles", async () => almacenes.length > 0);
   t.mock.method(repo, "conProducto", async (_itemCodes, op) => op(tx));
   t.mock.method(repo, "estados", async () => [estado]);
   t.mock.method(repo, "opcion", async () => null);
@@ -548,7 +550,16 @@ test("traspasos de la 01 a la 02: SAP ya los registró y la bodega acepta de qu�
   assert.equal(ficha.porPasar, 48);
   assert.deepEqual(ficha.traspaso, { unidades: 48, sugerencia: [{ lote: "L1", vencimiento: "2027-01-31", unidades: 48, cajas: 2 }] });
 
-  // Aceptar: tiene que ser justo lo que pasó SAP.
+  // Con el puente parado unas horas (sin comparación, pero con traspasos) siguen los traspasos y nada más.
+  t.mock.method(repo, "comparacionDisponible", async () => false);
+  const { data: resumenSinSap } = await (await pedir("/inventario/resumen", headers)).json();
+  assert.deepEqual([resumenSinSap.comparacionDisponible, resumenSinSap.traspasosDisponibles, resumenSinSap.pendientes.porPasar], [false, true, 1]);
+  const { data: soloTraspasos } = await (await pedir("/inventario/pendientes", headers)).json();
+  assert.equal(soloTraspasos.comparacionDisponible, false);
+  assert.deepEqual([soloTraspasos.porUbicar, soloTraspasos.porDescontar, soloTraspasos.porPasar.map((v) => v.unidades)], [[], [], [48]]);
+  assert.equal((await (await pedir("/inventario/productos/P1", headers)).json()).data.porPasar, 48);
+
+  // Aceptar (también con el puente parado): tiene que ser justo lo que pasó SAP.
   t.mock.method(repo, "cajasDeProductoBloqueadas", async () => cajas);
   const otra = await enviar("/inventario/traspasos", headers, "POST", { itemCode: "P1", unidades: 24 });
   assert.equal((await otra.json()).error.code, "CANTIDAD_CAMBIO");
@@ -570,6 +581,7 @@ test("traspasos de la 01 a la 02: SAP ya los registró y la bodega acepta de qu�
   assert.equal((await sinLote.json()).error.code, "LOTE_INSUFICIENTE");
   // Sin datos recientes de SAP no se calcula ni se acepta.
   t.mock.method(repo, "comparacionDisponible", async () => false);
+  t.mock.method(repo, "traspasosDisponibles", async () => false);
   assert.equal((await (await pedir("/inventario/resumen", headers)).json()).data.pendientes.porPasar, 0);
   const sinSap = await enviar("/inventario/traspasos", headers, "POST", { itemCode: "P1", unidades: 48 });
   assert.equal((await sinSap.json()).error.code, "COMPARACION_SAP_NO_DISPONIBLE");
