@@ -805,3 +805,5 @@ Verificado: 566 pruebas y contra PostgreSQL local (facturado sin preparar con cr
 - Ahora los traspasos siguen visibles y se aceptan con existencias de hasta `INVENTARIO_TRASPASOS_MAX_AGE_HOURS` (72 h
   por defecto). "Falta guardar" y "Falta marcar salida" siguen pidiendo datos recientes. Sin migración.
 - La app guarda en el equipo las cajas escaneadas de un traspaso y las recupera al volver a abrirlo.
+- Traspaso con la hoja de traslado: el número de traslado (`traslado`) permite pasar de la 01 a la 02 sin datos de SAP.
+  Caso real: el traslado 4695 (13 líneas) del 16/10, del que solo se aceptaron 2 antes del corte de internet.

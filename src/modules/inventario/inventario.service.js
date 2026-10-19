@@ -439,32 +439,39 @@ export async function descontar(entrada, { aplicacion }) {
 // SAP ya registró el traspaso de la 01 a la 02 (sin lotes ni cajas): la bodega acepta de qué lotes salió (la
 // sugerencia o los que elija) y se pasa de las cajas de la grande a la pequeña, con su lote y vencimiento. Hay que
 // pasar justo lo que SAP traspasó.
+// Con traslado (la hoja de traslado en la mano) se pasa sin esperar a SAP: no hace falta que SAP lo tenga ni datos
+// recientes. Cuando SAP lo registre, lo pendiente ya da cero porque lo local cambió igual.
 export async function traspasar(entrada, { aplicacion, supervisor = true }) {
-  const { itemCode, unidades, lotes, cajas: escaneadas } = entrada;
+  const { itemCode, unidades, lotes, cajas: escaneadas, traslado } = entrada;
   if (!escaneadas && !supervisor) throw falla("TRASPASO_SIN_ESCANEAR", 403, "Escaneá las cajas que pasás: sin escanear lo acepta solo el supervisor");
   if (lotes && sumar(lotes) !== unidades) throw falla("ASIGNACION_INCOMPLETA", 400, `Hay que elegir lotes por ${numero(unidades)} unidades en total`);
   return repo.conProducto(itemCode, async (tx) => {
-    await exigirAlmacenes({ traspasos: true });
     await exigirSaldoConciliado(itemCode, tx);
-    const [pase] = await pasesPendientes([itemCode], tx);
-    const pendiente = pase?.unidades ?? 0;
-    if (pendiente !== unidades) throw falla("CANTIDAD_CAMBIO", 409, pendiente === 0 ? "Ya no hay nada por pasar de este producto"
-      : `Ahora SAP tiene ${numero(pendiente)} por pasar (antes ${numero(unidades)}). Revisá y volvé a intentar.`);
+    if (!traslado) {
+      await exigirAlmacenes({ traspasos: true });
+      const [pase] = await pasesPendientes([itemCode], tx);
+      const pendiente = pase?.unidades ?? 0;
+      if (pendiente !== unidades) throw falla("CANTIDAD_CAMBIO", 409, pendiente === 0 ? "Ya no hay nada por pasar de este producto"
+        : `Ahora SAP tiene ${numero(pendiente)} por pasar (antes ${numero(unidades)}). Revisá y volvé a intentar.`);
+    }
     const cajas = await repo.cajasDeProductoBloqueadas(itemCode, tx);
     const partes = escaneadas ? cajasEscaneadas(cajas, escaneadas, unidades) : lotes
       ? lotes.flatMap((l) => repartirTraspaso(cajas.filter((c) => (c.lote ?? null) === l.lote), l.unidades, { lote: l.lote }))
       : repartirTraspaso(cajas, unidades);
     await repo.activar(itemCode, tx);
     const grupo = randomUUID(), movimientos = [];
+    const observacion = traslado ? `Traslado ${traslado} (sin esperar a SAP)` : null;
     for (const p of partes) {
       await repo.cambiarUnidadesCaja(p.cajaId, -p.unidades, tx);
       const saldo = await repo.sumarLotePequena(itemCode, p.lote, p.vencimiento, p.unidades, tx);
       movimientos.push(
-        { grupo, tipo: "traspaso", itemCode, bodega: "grande", cantidad: -p.unidades, cajaId: p.cajaId, lote: p.lote, hechoPor: aplicacion },
-        { grupo, tipo: "traspaso", itemCode, bodega: "pequena", cantidad: p.unidades, cajaId: p.cajaId, lote: p.lote, pequenaLoteId: saldo.id, hechoPor: aplicacion });
+        { grupo, tipo: "traspaso", itemCode, bodega: "grande", cantidad: -p.unidades, cajaId: p.cajaId, lote: p.lote, hechoPor: aplicacion, observacion },
+        { grupo, tipo: "traspaso", itemCode, bodega: "pequena", cantidad: p.unidades, cajaId: p.cajaId, lote: p.lote, pequenaLoteId: saldo.id, hechoPor: aplicacion, observacion });
     }
     await repo.cambiarPequena(itemCode, unidades, tx);
     await repo.registrarMovimientos(movimientos, tx);
+    if (traslado) await repo.registrarCambio({ entidad: "traspaso", accion: "manual", usuario: aplicacion,
+      detalle: { itemCode, unidades, traslado } }, tx);
     const estado = await repo.estadoProducto(itemCode, tx);
     return { data: { itemCode, unidades, pequena: estado.pequena,
       lotes: lotesDeTraspaso(partes).map((l) => ({ ...l, vencimiento: fechaIso(l.vencimiento) })),

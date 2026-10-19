@@ -585,6 +585,17 @@ test("traspasos de la 01 a la 02: SAP ya los registró y la bodega acepta de qu�
   assert.equal((await (await pedir("/inventario/resumen", headers)).json()).data.pendientes.porPasar, 0);
   const sinSap = await enviar("/inventario/traspasos", headers, "POST", { itemCode: "P1", unidades: 48 });
   assert.equal((await sinSap.json()).error.code, "COMPARACION_SAP_NO_DISPONIBLE");
+  // Con la hoja de traslado se pasa sin SAP: cualquier cantidad que haya en la grande, con el número en el movimiento.
+  hecho.movimientos.length = 0;
+  const manual = await enviar("/inventario/traspasos", headers, "POST", { itemCode: "P1", unidades: 24, traslado: "4695" });
+  assert.equal(manual.status, 201);
+  assert.deepEqual(hecho.movimientos.map((m) => [m.bodega, m.cantidad, m.lote, m.observacion]),
+    [["grande", -24, "L1", "Traslado 4695 (sin esperar a SAP)"], ["pequena", 24, "L1", "Traslado 4695 (sin esperar a SAP)"]]);
+  assert.deepEqual(hecho.cambios.at(-1), { entidad: "traspaso", accion: "manual", usuario: "operador:Luis Pérez", detalle: { itemCode: "P1", unidades: 24, traslado: "4695" } });
+  const mal = await enviar("/inventario/traspasos", headers, "POST", { itemCode: "P1", unidades: 24, traslado: "46 95" });
+  assert.equal(mal.status, 400);
+  const operador = await enviar("/inventario/traspasos", conSesion(t), "POST", { itemCode: "P1", unidades: 24, traslado: "4695" });
+  assert.equal((await operador.json()).error.code, "TRASPASO_SIN_ESCANEAR");
 });
 
 test("conteo de una bodega: lo que falta contar, el avance y \"no hay\"", async (t) => {
