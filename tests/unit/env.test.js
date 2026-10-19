@@ -95,9 +95,6 @@ test("inventario permite antigüedad y alcance explícitos con valores acotados"
   assert.equal(env.inventarioSapMaxAgeMinutes, 120);
   assert.deepEqual(env.inventarioSapWarehouses, ["01", "02"]);
   for (const valor of ["0", "241", "abc", "30.5"]) assert.throws(() => parseEnv({ DATABASE_URL: databaseUrl, INVENTARIO_SAP_MAX_AGE_MINUTES: valor }));
-  assert.equal(parseEnv({ DATABASE_URL: databaseUrl }).inventarioTraspasosMaxAgeHours, 72);
-  assert.equal(parseEnv({ DATABASE_URL: databaseUrl, INVENTARIO_TRASPASOS_MAX_AGE_HOURS: "24" }).inventarioTraspasosMaxAgeHours, 24);
-  for (const valor of ["0", "169", "abc"]) assert.throws(() => parseEnv({ DATABASE_URL: databaseUrl, INVENTARIO_TRASPASOS_MAX_AGE_HOURS: valor }));
   for (const valor of ["", "01,01", "01,", "01,'02"]) assert.throws(() => parseEnv({ DATABASE_URL: databaseUrl, INVENTARIO_SAP_WAREHOUSES: valor }));
 });
 

@@ -41,9 +41,6 @@ const envSchema = z.object({
   PREPARACION_FUENTE: z.enum(["pedidos", "facturas"]).default("pedidos"),
   INVENTARIO_SAP_MAX_AGE_MINUTES: z.string().regex(/^\d+$/).default("30")
     .pipe(z.coerce.number().int().min(5).max(240)),
-  // Traspasos de la 01 a la 02: hasta cuántas horas de antigüedad de las existencias de SAP se siguen mostrando y aceptando.
-  INVENTARIO_TRASPASOS_MAX_AGE_HOURS: z.string().regex(/^\d+$/).default("72")
-    .pipe(z.coerce.number().int().min(1).max(168)),
   // Actualizaciones de la app de escritorio: token de GitHub de solo lectura del repositorio de la app (privado).
   // Vacío cuenta como no configurado (no impide arrancar).
   ACTUALIZACIONES_GITHUB_TOKEN: z.string().trim().optional().transform((v) => v || undefined),
@@ -81,7 +78,6 @@ export function parseEnv(variables) {
     actualizacionesToken: datos.ACTUALIZACIONES_GITHUB_TOKEN,
     actualizacionesRepo: datos.ACTUALIZACIONES_REPO,
     inventarioSapMaxAgeMinutes: datos.INVENTARIO_SAP_MAX_AGE_MINUTES,
-    inventarioTraspasosMaxAgeHours: datos.INVENTARIO_TRASPASOS_MAX_AGE_HOURS,
     inventarioSapWarehouses: Object.freeze(datos.INVENTARIO_SAP_WAREHOUSES),
     etiquetasAppsAutorizadas: Object.freeze((datos.ETIQUETAS_APPS_AUTORIZADAS ?? "")
       .split(",").map((nombre) => nombre.trim()).filter(Boolean)),
