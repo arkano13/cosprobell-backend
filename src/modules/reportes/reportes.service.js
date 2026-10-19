@@ -96,6 +96,9 @@ export async function reporteCorrecciones({ periodo, tipo, persona }, { repo = r
 export async function reportePendientes({ minDias }, { repo = reportesRepository, inventario = inventarioRepository, pendientes = listarPendientes,
   ahora = new Date() } = {}) {
   const [{ data }, estados] = await Promise.all([pendientes(), inventario.estados()]);
+  // Con el puente parado unas horas el inventario devuelve solo los traspasos: el reporte necesita todo.
+  if (data.comparacionDisponible === false) throw new AppError({ code: "COMPARACION_SAP_NO_DISPONIBLE", statusCode: 409,
+    message: "Faltan datos recientes de almacenes y existencias de SAP. El inventario local sigue disponible." });
   const itemCodes = [...data.porUbicar, ...data.porDescontar, ...data.porPasar].map((v) => v.itemCode);
   const codigos = await codigosDe(repo, itemCodes);
   return { data: { generadoEn: new Date(ahora).toISOString(),

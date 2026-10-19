@@ -797,3 +797,13 @@ Verificado: 566 pruebas y contra PostgreSQL local (facturado sin preparar con cr
 - Decisiones de lo que estaba por confirmar: límite de 4 horas para el tiempo promedio; "código de caja" sale de los
   códigos no registrados que son el de una caja (el escáner no lo separa); "se confunde con" = el producto leído bien
   justo después; reponer pronto = menos de 3 días. Las cuatro son constantes fáciles de cambiar.
+
+## Traspasos con el puente parado (19/10/2026)
+
+- Problema: parar el puente (por la carga en el servidor de SAP) o un corte de internet dejaba las existencias con más
+  de 2 horas y el sistema escondía los traspasos de la 01 a la 02, incluso con uno a medio escanear.
+- Ahora los traspasos no se esconden por la antigüedad de los datos de SAP: quedan hasta que se aceptan o SAP los
+  cambia (un traslado anulado). "Falta guardar" y "Falta marcar salida" siguen pidiendo datos recientes. Sin migración.
+- La app guarda en el equipo las cajas escaneadas de un traspaso y las recupera al volver a abrirlo.
+- Traspaso con la hoja de traslado: el número de traslado (`traslado`) permite pasar de la 01 a la 02 sin datos de SAP.
+  Caso real: el traslado 4695 (13 líneas) del 16/10, del que solo se aceptaron 2 antes del corte de internet.

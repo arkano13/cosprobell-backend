@@ -81,8 +81,9 @@ const asignaciones = z.array(asignacion).min(1).max(50).refine((lista) => {
 export const descuentoSchema = z.object({ operacionId, itemCode, unidades, asignaciones }).strict();
 // Traspaso de la 01 a la 02 que SAP ya registró: cuántas unidades y, si no se acepta la sugerencia, de qué lotes.
 // cajas: las que se escanearon, una por caja entera, con el lote y la fecha que dice cada una. Sin cajas (o con lotes)
-// solo el supervisor.
+// solo el supervisor. traslado: el número de la hoja de traslado cuando se pasa sin esperar a SAP (traspaso manual).
 export const traspasoSchema = z.object({ operacionId, itemCode, unidades,
+  traslado: z.string().trim().regex(/^[A-Za-z0-9-]{1,20}$/, "Número de traslado inválido").optional(),
   lotes: z.array(z.object({ lote: z.string().trim().min(1).max(60).nullable(), unidades }).strict()).min(1).max(50)
     .refine((lista) => new Set(lista.map((l) => l.lote ?? "")).size === lista.length, "Cada lote va una sola vez").optional(),
   cajas: z.array(z.object({ lote: z.string().trim().min(1).max(60).nullable(), vencimiento: vence.nullable() }).strict()).min(1).max(MAX_CAJAS).optional(),

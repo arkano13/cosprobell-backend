@@ -88,7 +88,16 @@ export const inventarioRepository = {
       (SELECT "actualizadoEn" FROM sincronizacion_estados WHERE entidad = 'existencias')) AS al`;
     return fila?.al ?? null;
   },
-  async comparacionDisponible(db = prisma) {
+  comparacionDisponible(db = prisma) {
+    return this.datosSapDisponibles({ minutos: env.inventarioSapMaxAgeMinutes, horasAlmacenes: 48 }, db);
+  },
+  // Los traspasos de la 01 a la 02 no se esconden por la antigüedad de los datos de SAP (el puente parado o sin
+  // internet): quedan hasta que la bodega los acepta o SAP los cambia (un traslado anulado llega con las existencias
+  // nuevas). Basta con que los almacenes y las existencias se hayan leído alguna vez.
+  traspasosDisponibles(db = prisma) {
+    return this.datosSapDisponibles({ minutos: null, horasAlmacenes: null }, db);
+  },
+  async datosSapDisponibles({ minutos, horasAlmacenes }, db = prisma) {
     // Cada existencia tiene que estar confirmada por SAP hace menos del máximo: la edad es la de la confirmación más
     // vieja, así que terminar un recorrido lento no rejuvenece sus primeras páginas. Mientras el puente hace un
     // recorrido nuevo se sigue comparando con lo que ya llegó (lo del recorrido anterior y lo ya actualizado); solo
@@ -99,11 +108,12 @@ export const inventarioRepository = {
     const [fila] = await db.$queryRaw`
       SELECT EXISTS (SELECT 1 FROM bodegas WHERE "deEstaBodega")
         AND EXISTS (SELECT 1 FROM sincronizacion_recorridos
-          WHERE entidad = 'almacenes' AND "finalizadoEn" IS NOT NULL AND "iniciadoEn" >= now() - interval '48 hours')
+          WHERE entidad = 'almacenes' AND "finalizadoEn" IS NOT NULL ${horasAlmacenes === null ? Prisma.empty
+            : Prisma.sql`AND "iniciadoEn" >= now() - (${horasAlmacenes} * interval '1 hour')`})
         AND EXISTS (SELECT 1 FROM sincronizacion_recorridos r WHERE r.entidad = 'existencias' AND (r."finalizadoEn" IS NOT NULL
           OR EXISTS (SELECT 1 FROM productos_existencias e WHERE e."actualizadoEn" < r."iniciadoEn")))
-        AND (SELECT MIN("actualizadoEn") FROM productos_existencias)
-          >= now() - (${env.inventarioSapMaxAgeMinutes} * interval '1 minute') ${alcance} AS disponible`;
+        ${minutos === null ? Prisma.empty : Prisma.sql`AND (SELECT MIN("actualizadoEn") FROM productos_existencias)
+          >= now() - (${minutos} * interval '1 minute')`} ${alcance} AS disponible`;
     return fila?.disponible === true;
   },
   // Una operación por producto a la vez: recepciones, reposiciones, descuentos y picking no se pisan.

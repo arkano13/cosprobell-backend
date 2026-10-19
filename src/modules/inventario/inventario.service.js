@@ -40,14 +40,17 @@ const vistaCaja = (c) => ({ id: c.id, codigo: c.codigo, itemCode: c.itemCode, it
   lote: c.lote, vencimiento: fechaIso(c.vencimiento), suelto: c.suelto, unidadesIniciales: c.unidadesIniciales, unidades: c.unidades,
   abierta: c.unidades > 0 && c.unidades < c.unidadesIniciales, recibidaEn: c.recibidaEn, recibidaPor: c.recibidaPor });
 
-async function exigirAlmacenes() {
+// traspasos: alcanzan datos de SAP más viejos (ver repo.traspasosDisponibles).
+async function exigirAlmacenes({ traspasos = false } = {}) {
   const almacenes = await repo.almacenesDeEstaBodega();
   if (!almacenes.length) throw falla("ALMACENES_SIN_ELEGIR", 409,
     "Falta elegir los almacenes de SAP de esta bodega (Panel del supervisor → Almacenes)");
-  if (!(await repo.comparacionDisponible())) throw falla("COMPARACION_SAP_NO_DISPONIBLE", 409,
+  if (!(await (traspasos ? repo.traspasosDisponibles() : repo.comparacionDisponible()))) throw falla("COMPARACION_SAP_NO_DISPONIBLE", 409,
     "Faltan datos recientes de almacenes y existencias de SAP. El inventario local sigue disponible.");
   return almacenes;
 }
+// Con la comparación disponible también lo están los traspasos; si no, se averigua aparte.
+const conTraspasos = async (comparacionDisponible) => comparacionDisponible || repo.traspasosDisponibles();
 // Foto de cuadre de una bodega después de contar o recibir (ver InventarioCuadre en el esquema). primero se averigua
 // antes del cambio: si el producto todavía no tenía recepción ni conteo en esa bodega, es su conteo inicial.
 async function fotoCuadre(tx, { itemCode, bodega, accion, cantidad, primero, hechoPor }) {
@@ -70,6 +73,7 @@ export async function resumenInventario() {
     repo.resumenBodegas(), almacenes.length ? repo.estados() : [], repo.porVencer(60), repo.movimientos({ limite: 8 }),
     repo.existenciasSapAl(), bodegasConNombre(almacenes)]);
   const vistas = estados.map((f) => vistaEstado(f, Date.now(), comparacionDisponible));
+  const traspasosDisponibles = almacenes.length > 0 && await conTraspasos(comparacionDisponible);
   const contar = (estado) => vistas.filter((v) => v.estado === estado).length;
   const avance = async (bodega) => {
     if (!nombres[bodega]) return null;
@@ -77,12 +81,12 @@ export async function resumenInventario() {
     return { total: filas.length, contados: filas.filter((f) => f.contado).length };
   };
   const [conteoGrande, conteoPequena, pases, soloConteo] = await Promise.all([avance("grande"), avance("pequena"),
-    comparacionDisponible ? pasesPendientes() : [], almacenesSoloConteo()]);
+    traspasosDisponibles ? pasesPendientes() : [], almacenesSoloConteo()]);
   const conteoAlmacenes = await Promise.all(soloConteo.map(async (a) => {
     const filas = await repo.conteoAlmacen(a.almacen);
     return { ...a, avance: { total: filas.length, contados: filas.filter((f) => f.contado).length } };
   }));
-  return { data: { almacenes, comparacionDisponible, existenciasSapAl, bodegas: nombres,
+  return { data: { almacenes, comparacionDisponible, traspasosDisponibles, existenciasSapAl, bodegas: nombres,
     conteo: { grande: conteoGrande, pequena: conteoPequena }, soloConteo: conteoAlmacenes, ...bodegas,
     pendientes: { porUbicar: contar("por_ubicar"), porDescontar: contar("por_descontar"), porPasar: pases.length, actualizando: contar("actualizando"),
       conteoInicial: contar("conteo_inicial"), faltaEnSap: vistas.filter((v) => v.faltaEnSap > 0).length },
@@ -99,12 +103,13 @@ export async function consultarProducto(itemCode) {
   if (!producto) throw sinProducto();
   const almacenes = await repo.almacenesDeEstaBodega();
   const comparacionDisponible = await repo.comparacionDisponible();
+  const traspasosDisponibles = almacenes.length > 0 && await conTraspasos(comparacionDisponible);
   const nombres = await bodegasConNombre(almacenes);
   const asignados = [nombres.grande?.almacen, nombres.pequena?.almacen].filter(Boolean);
   const [estado, cajas, movimientos, documentos, ultima, lotesPequena, sap, contado, pases] = await Promise.all([
     comparacionDisponible ? estadoDe(itemCode) : null, repo.cajasDe(itemCode), repo.movimientos({ itemCode, limite: 15 }),
     repo.documentosRecientes([itemCode], { dias: 60, porProducto: 8 }), repo.ultimaRecepcion(itemCode), repo.lotesPequena(itemCode),
-    repo.sapDeProducto(itemCode, asignados), repo.contadoEn(itemCode), comparacionDisponible ? pasesPendientes([itemCode]) : []]);
+    repo.sapDeProducto(itemCode, asignados), repo.contadoEn(itemCode), traspasosDisponibles ? pasesPendientes([itemCode]) : []]);
   const sapDe = (bodega) => (nombres[bodega] ? Math.round(sap.get(nombres[bodega].almacen) ?? 0) : null);
   // Bodega grande agrupada por lote (y vencimiento), con sus cajas.
   const lotes = new Map();
@@ -116,7 +121,7 @@ export async function consultarProducto(itemCode) {
     l.unidades += c.unidades; l.cajas.push(vistaCaja(c));
   }
   return { data: {
-    itemCode: producto.itemCode, itemName: producto.itemName, almacenes, comparacionDisponible, estado,
+    itemCode: producto.itemCode, itemName: producto.itemName, almacenes, comparacionDisponible, traspasosDisponibles, estado,
     pequena: producto.inventario?.pequena ?? 0, enInventario: Boolean(producto.inventario),
     codigos: producto.codigosBarras.map((c) => ({ id: c.id, codigo: c.codigo, origen: c.origen, confirmado: c.confirmacionPicking?.esUnidadIndividual === true,
       registradoPor: c.registradoPor?.replace(/^operador:/, "") ?? null })),
@@ -140,15 +145,19 @@ function sugerenciaTraspaso(cajas, unidades) {
   }
 }
 
+// Sin datos recientes de SAP pero con traspasos disponibles (el puente parado unas horas) quedan solo los traspasos.
 export async function listarPendientes() {
-  await exigirAlmacenes();
+  await exigirAlmacenes({ traspasos: true });
+  const [comparacionDisponible, existenciasSapAl] = await Promise.all([repo.comparacionDisponible(), repo.existenciasSapAl()]);
+  if (!comparacionDisponible) return { data: { comparacionDisponible, existenciasSapAl, porUbicar: [], porPasar: await pasesPendientes(),
+    porDescontar: [], actualizando: [], faltaEnSap: [], conteoInicial: { productos: 0, unidades: 0 } } };
   const vistas = (await repo.estados()).map((f) => vistaEstado(f));
   const de = (estado) => vistas.filter((v) => v.estado === estado);
   const porUbicar = de("por_ubicar"), porDescontar = de("por_descontar");
   const documentos = await repo.documentosRecientes([...porUbicar, ...porDescontar].map((v) => v.itemCode), { dias: 30, porProducto: 3 });
   const docs = (itemCode) => documentos.filter((d) => d.itemCode === itemCode);
   const inicial = de("conteo_inicial");
-  return { data: {
+  return { data: { comparacionDisponible, existenciasSapAl,
     porUbicar: porUbicar.map((v) => ({ ...v, documentos: docs(v.itemCode) })),
     porPasar: await pasesPendientes(),
     porDescontar: porDescontar.map((v) => ({ ...v, documentos: docs(v.itemCode) })),
@@ -430,32 +439,39 @@ export async function descontar(entrada, { aplicacion }) {
 // SAP ya registró el traspaso de la 01 a la 02 (sin lotes ni cajas): la bodega acepta de qué lotes salió (la
 // sugerencia o los que elija) y se pasa de las cajas de la grande a la pequeña, con su lote y vencimiento. Hay que
 // pasar justo lo que SAP traspasó.
+// Con traslado (la hoja de traslado en la mano) se pasa sin esperar a SAP: no hace falta que SAP lo tenga ni datos
+// recientes. Cuando SAP lo registre, lo pendiente ya da cero porque lo local cambió igual.
 export async function traspasar(entrada, { aplicacion, supervisor = true }) {
-  const { itemCode, unidades, lotes, cajas: escaneadas } = entrada;
+  const { itemCode, unidades, lotes, cajas: escaneadas, traslado } = entrada;
   if (!escaneadas && !supervisor) throw falla("TRASPASO_SIN_ESCANEAR", 403, "Escaneá las cajas que pasás: sin escanear lo acepta solo el supervisor");
   if (lotes && sumar(lotes) !== unidades) throw falla("ASIGNACION_INCOMPLETA", 400, `Hay que elegir lotes por ${numero(unidades)} unidades en total`);
   return repo.conProducto(itemCode, async (tx) => {
-    await exigirAlmacenes();
     await exigirSaldoConciliado(itemCode, tx);
-    const [pase] = await pasesPendientes([itemCode], tx);
-    const pendiente = pase?.unidades ?? 0;
-    if (pendiente !== unidades) throw falla("CANTIDAD_CAMBIO", 409, pendiente === 0 ? "Ya no hay nada por pasar de este producto"
-      : `Ahora SAP tiene ${numero(pendiente)} por pasar (antes ${numero(unidades)}). Revisá y volvé a intentar.`);
+    if (!traslado) {
+      await exigirAlmacenes({ traspasos: true });
+      const [pase] = await pasesPendientes([itemCode], tx);
+      const pendiente = pase?.unidades ?? 0;
+      if (pendiente !== unidades) throw falla("CANTIDAD_CAMBIO", 409, pendiente === 0 ? "Ya no hay nada por pasar de este producto"
+        : `Ahora SAP tiene ${numero(pendiente)} por pasar (antes ${numero(unidades)}). Revisá y volvé a intentar.`);
+    }
     const cajas = await repo.cajasDeProductoBloqueadas(itemCode, tx);
     const partes = escaneadas ? cajasEscaneadas(cajas, escaneadas, unidades) : lotes
       ? lotes.flatMap((l) => repartirTraspaso(cajas.filter((c) => (c.lote ?? null) === l.lote), l.unidades, { lote: l.lote }))
       : repartirTraspaso(cajas, unidades);
     await repo.activar(itemCode, tx);
     const grupo = randomUUID(), movimientos = [];
+    const observacion = traslado ? `Traslado ${traslado} (sin esperar a SAP)` : null;
     for (const p of partes) {
       await repo.cambiarUnidadesCaja(p.cajaId, -p.unidades, tx);
       const saldo = await repo.sumarLotePequena(itemCode, p.lote, p.vencimiento, p.unidades, tx);
       movimientos.push(
-        { grupo, tipo: "traspaso", itemCode, bodega: "grande", cantidad: -p.unidades, cajaId: p.cajaId, lote: p.lote, hechoPor: aplicacion },
-        { grupo, tipo: "traspaso", itemCode, bodega: "pequena", cantidad: p.unidades, cajaId: p.cajaId, lote: p.lote, pequenaLoteId: saldo.id, hechoPor: aplicacion });
+        { grupo, tipo: "traspaso", itemCode, bodega: "grande", cantidad: -p.unidades, cajaId: p.cajaId, lote: p.lote, hechoPor: aplicacion, observacion },
+        { grupo, tipo: "traspaso", itemCode, bodega: "pequena", cantidad: p.unidades, cajaId: p.cajaId, lote: p.lote, pequenaLoteId: saldo.id, hechoPor: aplicacion, observacion });
     }
     await repo.cambiarPequena(itemCode, unidades, tx);
     await repo.registrarMovimientos(movimientos, tx);
+    if (traslado) await repo.registrarCambio({ entidad: "traspaso", accion: "manual", usuario: aplicacion,
+      detalle: { itemCode, unidades, traslado } }, tx);
     const estado = await repo.estadoProducto(itemCode, tx);
     return { data: { itemCode, unidades, pequena: estado.pequena,
       lotes: lotesDeTraspaso(partes).map((l) => ({ ...l, vencimiento: fechaIso(l.vencimiento) })),
@@ -673,7 +689,7 @@ async function bodegasConNombre(marcados = null) {
 // puede averiguar, el aviso sale sin ella.
 async function traspasoPendiente(itemCode, tx) {
   try {
-    return (await repo.comparacionDisponible()) ? (await pasesPendientes([itemCode], tx))[0] ?? null : null;
+    return (await repo.traspasosDisponibles()) ? (await pasesPendientes([itemCode], tx))[0] ?? null : null;
   } catch {
     return null;
   }
