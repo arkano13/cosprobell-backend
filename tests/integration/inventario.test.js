@@ -595,7 +595,10 @@ test("traspasos de la 01 a la 02: SAP ya los registrÃ³ y la bodega acepta de quÃ
   const mal = await enviar("/inventario/traspasos", headers, "POST", { itemCode: "P1", unidades: 24, traslado: "46 95" });
   assert.equal(mal.status, 400);
   const operador = await enviar("/inventario/traspasos", conSesion(t), "POST", { itemCode: "P1", unidades: 24, traslado: "4695" });
-  assert.equal((await operador.json()).error.code, "TRASPASO_SIN_ESCANEAR");
+  assert.equal((await operador.json()).error.code, "TRASPASO_MANUAL_SOLO_SUPERVISOR");
+  const escaneando = await enviar("/inventario/traspasos", conSesion(t), "POST", { itemCode: "P1", unidades: 24, traslado: "4695",
+    cajas: [{ lote: "L1", vencimiento: "2027-01-31" }] });
+  assert.equal((await escaneando.json()).error.code, "TRASPASO_MANUAL_SOLO_SUPERVISOR", "aunque escanee las cajas");
 });
 
 test("conteo de una bodega: lo que falta contar, el avance y \"no hay\"", async (t) => {
