@@ -750,7 +750,7 @@ export async function listarTrasladosEntrada() {
     traslados.get(l.docEntry).lineas.push({ ...vistaLineaTraslado(l, cajas.get(l.itemCode) ?? []),
       sapPorPasar: porPasar ? porPasar.get(l.itemCode) ?? 0 : null });
   }
-  return { data: [...traslados.values()] };
+  return { data: [...traslados.values()], bodegas: await bodegasConNombre() };
 }
 
 // El supervisor da por pasada una línea sin mover nada (ya se había pasado antes, por ejemplo por la lista de SAP).

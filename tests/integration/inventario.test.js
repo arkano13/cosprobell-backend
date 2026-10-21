@@ -619,7 +619,8 @@ test("traslados de SAP de la 01 a la 02: por documento, pasar una línea y darla
   // SAP marca 48 por pasar de P1: 24 son de la línea del traslado, los otros 24 quedan sin documento.
   t.mock.method(repo, "pases", async () => [{ itemCode: "P1", itemName: "Shampoo", sapGrande: 0, sapPequena: 48, grande: 48, cajas: 2, pequena: 0, sinEntrega: 0 }]);
   const operador = conSesion(t);
-  const { data: traslados } = await (await pedir("/inventario/traslados", operador)).json();
+  const { data: traslados, bodegas } = await (await pedir("/inventario/traslados", operador)).json();
+  assert.equal(bodegas.grande.almacen, "01", "con los almacenes de cada bodega");
   assert.equal(traslados.length, 1);
   assert.deepEqual([traslados[0].docNum, traslados[0].lineas.map((l) => [l.itemCode, l.pendientes, l.enGrande, l.sapPorPasar])],
     [4695, [["P1", 24, 48, 48], ["A1", 12, 0, 0]]]);
