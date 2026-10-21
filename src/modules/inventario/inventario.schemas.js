@@ -84,10 +84,15 @@ export const descuentoSchema = z.object({ operacionId, itemCode, unidades, asign
 // solo el supervisor. traslado: el número de la hoja de traslado cuando se pasa sin esperar a SAP (traspaso manual).
 export const traspasoSchema = z.object({ operacionId, itemCode, unidades,
   traslado: z.string().trim().regex(/^[A-Za-z0-9-]{1,20}$/, "Número de traslado inválido").optional(),
+  // Una línea de un traslado de SAP de la 01 a la 02 (ver GET /inventario/traslados).
+  linea: z.object({ docEntry: z.number().int().min(0).max(2147483647), lineNum: z.number().int().min(0).max(2147483647) }).strict().optional(),
   lotes: z.array(z.object({ lote: z.string().trim().min(1).max(60).nullable(), unidades }).strict()).min(1).max(50)
     .refine((lista) => new Set(lista.map((l) => l.lote ?? "")).size === lista.length, "Cada lote va una sola vez").optional(),
   cajas: z.array(z.object({ lote: z.string().trim().min(1).max(60).nullable(), vencimiento: vence.nullable() }).strict()).min(1).max(MAX_CAJAS).optional(),
-}).strict().refine((t) => !(t.lotes && t.cajas), { message: "Lotes o cajas, no los dos", path: ["cajas"] });
+}).strict().refine((t) => !(t.lotes && t.cajas), { message: "Lotes o cajas, no los dos", path: ["cajas"] })
+  .refine((t) => !(t.traslado && t.linea), { message: "Hoja de traslado o línea de traslado, no las dos", path: ["linea"] });
+export const lineaTrasladoParamsSchema = z.object({ docEntry: z.coerce.number().int().min(0).max(2147483647),
+  lineNum: z.coerce.number().int().min(0).max(2147483647) });
 export const reasignacionSchema = z.object({ operacionId, asignaciones }).strict();
 export const conteoSchema = z.object({ operacionId, unidades: z.number().int().min(0).max(1_000_000),
   lotes: z.array(z.object({ lote, vencimiento: vence.nullable().optional(), unidades: z.number().int().min(0).max(1_000_000) }).strict())

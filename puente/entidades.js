@@ -5,7 +5,8 @@ import { construirLoteClientes } from "./clientes.js";
 import { lotePedidosSchema } from "../src/modules/sincronizacion/pedidos.schemas.js";
 import { construirLotePedidos } from "./pedidos.js";
 import { loteTrasladosPreparacionSchema } from "../src/modules/sincronizacion/trasladosPreparacion.schemas.js";
-import { construirLoteTrasladosPreparacion } from "./trasladosPreparacion.js";
+import { construirLoteTrasladosPreparacion, construirLoteTrasladosEntrada } from "./trasladosPreparacion.js";
+import { loteTrasladosEntradaSchema } from "../src/modules/sincronizacion/trasladosEntrada.schemas.js";
 import { loteUnidadesSchema } from "../src/modules/sincronizacion/unidades.schemas.js";
 import { construirLoteUnidades } from "./unidades.js";
 import { loteCodigosBarrasSchema } from "../src/modules/sincronizacion/codigosBarras.schemas.js";
@@ -74,10 +75,15 @@ export const TRASLADOS_PREPARACION = { nombre: "trasladosPreparacion", recurso: 
   campos: ["DocEntry", "DocNum", "DocDate", "CardCode", "FromWarehouse", "ToWarehouse", "StockTransferLines"],
   filtro: "FromWarehouse eq '02'", ventanaFacturas: true,
   schema: loteTrasladosPreparacionSchema, construirLote: construirLoteTrasladosPreparacion };
-export const ENTIDADES = [CLIENTES, PRODUCTOS, UNIDADES, CODIGOS_BARRAS, LISTAS_MATERIALES, PEDIDOS, FACTURAS_PREPARACION, TRASLADOS_PREPARACION, ALMACENES, EXISTENCIAS];
+// Traslados de la 01 a la 02: la bodega los pasa escaneando las cajas. Mismos días que las facturas; se activan junto con
+// los que salen de la 02 (BRIDGE_PICKING_TRANSFERS).
+export const TRASLADOS_ENTRADA = { ...TRASLADOS_PREPARACION, nombre: "trasladosEntrada", dependencias: ["productos"],
+  filtro: "FromWarehouse eq '01'", schema: loteTrasladosEntradaSchema, construirLote: construirLoteTrasladosEntrada };
+export const ENTIDADES = [CLIENTES, PRODUCTOS, UNIDADES, CODIGOS_BARRAS, LISTAS_MATERIALES, PEDIDOS, FACTURAS_PREPARACION, TRASLADOS_PREPARACION,
+  TRASLADOS_ENTRADA, ALMACENES, EXISTENCIAS];
 export const entidadesHabilitadas = config => ENTIDADES.filter(e => (!e.inventario || config.inventarioHabilitado) && (!e.combos || config.combosHabilitados))
   .filter(e => e.nombre !== (config.fuentePreparacion === "facturas" ? "pedidos" : "facturasPreparacion"))
-  .filter(e => e.nombre !== "trasladosPreparacion" || (config.trasladosHabilitados && config.fuentePreparacion === "facturas"))
+  .filter(e => !["trasladosPreparacion", "trasladosEntrada"].includes(e.nombre) || (config.trasladosHabilitados && config.fuentePreparacion === "facturas"))
   .map(e => e.nombre === "facturasPreparacion" ? { ...e,
     // La fecha la agrega cada recorrido (ver desdeFacturas en sincronizar.js).
     filtro: "DocType eq 'dDocument_Items' and ReserveInvoice eq 'tNO'",

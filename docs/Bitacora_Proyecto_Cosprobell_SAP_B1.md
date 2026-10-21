@@ -807,3 +807,11 @@ Verificado: 566 pruebas y contra PostgreSQL local (facturado sin preparar con cr
 - La app guarda en el equipo las cajas escaneadas de un traspaso y las recupera al volver a abrirlo.
 - Traspaso con la hoja de traslado: el número de traslado (`traslado`) permite pasar de la 01 a la 02 sin datos de SAP.
   Caso real: el traslado 4695 (13 líneas) del 16/10, del que solo se aceptaron 2 antes del corte de internet.
+
+## Traslados de la 01 a la 02 por documento (21/10/2026)
+
+- El puente trae los traslados de SAP que salen de la 01 (`trasladosEntrada`, con `BRIDGE_PICKING_TRANSFERS`, misma
+  frecuencia y días que los de la 02). El backend guarda las líneas de la 01 a la 02 y cuánto se pasó de cada una.
+- En la bodega aparecen por documento ("Traslado 4695") con sus productos; cada línea se pasa escaneando las cajas y el
+  traslado se va cuando se terminan todas. El supervisor puede dar por pasada una línea que se pasó antes.
+- Migración `20261021090000_traslados_entrada`.

@@ -165,6 +165,29 @@ export const inventarioRepository = {
 
   // Lo que SAP tiene en el almacén de cada bodega frente a lo que hay en ella, para los productos que ya están en el
   // inventario (para los traspasos de la 01 a la 02 que falta marcar).
+  // Líneas de traslados de la 01 a la 02 que falta pasar (sin terminar ni dar por pasadas), con el producto.
+  trasladosEntradaPendientes({ itemCodes = null } = {}, db = prisma) {
+    const filtro = itemCodes ? Prisma.sql`AND l."itemCode" = ANY(${itemCodes})` : Prisma.empty;
+    return db.$queryRaw`
+      SELECT t."docEntry", t."docNum", to_char(t."docDate", 'YYYY-MM-DD') AS "docDate", l."lineNum", l."itemCode",
+             p."itemName", l.unidades, l.aceptadas
+      FROM traslados_entrada_lineas l JOIN traslados_entrada t ON t."docEntry" = l."docEntry"
+      LEFT JOIN productos p ON p."itemCode" = l."itemCode"
+      WHERE l.aceptadas < l.unidades AND l."cerradaPor" IS NULL ${filtro}
+      ORDER BY t."docDate", t."docNum", l."lineNum"`;
+  },
+  async lineaTrasladoEntrada(docEntry, lineNum, db = prisma) {
+    const [fila] = await db.$queryRaw`
+      SELECT l.*, t."docNum" FROM traslados_entrada_lineas l JOIN traslados_entrada t ON t."docEntry" = l."docEntry"
+      WHERE l."docEntry" = ${docEntry} AND l."lineNum" = ${lineNum} FOR UPDATE OF l`;
+    return fila ?? null;
+  },
+  aceptarLineaTraslado(id, unidades, hechoPor, db = prisma) {
+    return db.trasladoEntradaLinea.update({ where: { id }, data: { aceptadas: { increment: unidades }, aceptadoEn: new Date(), aceptadoPor: hechoPor } });
+  },
+  cerrarLineaTraslado(id, hechoPor, db = prisma) {
+    return db.trasladoEntradaLinea.update({ where: { id }, data: { cerradaPor: hechoPor ?? "supervisor", aceptadoEn: new Date() } });
+  },
   pases(almacenGrande, almacenPequena, { itemCodes = null } = {}, db = prisma) {
     const sap = (almacen) => Prisma.sql`SELECT "itemCode", SUM("inStock")::float AS sap FROM productos_existencias
       WHERE "warehouseCode" = ${almacen} GROUP BY "itemCode"`;

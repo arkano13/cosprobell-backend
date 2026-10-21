@@ -14,6 +14,7 @@ const modelos = {
   pedidos: { modelo: "pedido", clave: "docEntry", numerica: true },
   facturasPreparacion: { modelo: "pedido", clave: "sapDocEntry", numerica: true, filtro: { fuenteDocumento: "factura" } },
   trasladosPreparacion: { modelo: "pedido", clave: "sapDocEntry", numerica: true, filtro: { fuenteDocumento: "traslado" } },
+  trasladosEntrada: { modelo: "trasladoEntrada", clave: "docEntry", numerica: true },
   unidades: { modelo: "unidadMedida", clave: "absEntry", numerica: true, actualizar: false },
   codigosBarras: { modelo: "productoCodigoBarras", clave: "sapAbsEntry", numerica: true },
   almacenes: { modelo: "bodega", clave: "warehouseCode" },

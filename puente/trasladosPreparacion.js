@@ -1,11 +1,11 @@
 import { loteTrasladosPreparacionSchema } from "../src/modules/sincronizacion/trasladosPreparacion.schemas.js";
+import { loteTrasladosEntradaSchema } from "../src/modules/sincronizacion/trasladosEntrada.schemas.js";
 import { crearConstructorLote } from "./lote.js";
 import { ErrorPuente } from "./http.js";
 
 // Traslados de SAP (StockTransfers) que salen de la 02. El receptor deja solo las líneas que salen de la bodega.
-export const construirLoteTrasladosPreparacion = crearConstructorLote({
-  entidad: "trasladosPreparacion", schema: loteTrasladosPreparacionSchema, codigoError: "TRASLADO_SAP_INVALIDO",
-  claveSap: "DocEntry", claveLocal: "docEntry",
+const traslado = {
+  codigoError: "TRASLADO_SAP_INVALIDO", claveSap: "DocEntry", claveLocal: "docEntry",
   camposSap: { docEntry: "DocEntry", docNum: "DocNum", cardCode: "CardCode", docDate: "DocDate",
     fromWarehouse: "FromWarehouse", toWarehouse: "ToWarehouse", lineas: "StockTransferLines" },
   mapear: (t) => {
@@ -22,4 +22,9 @@ export const construirLoteTrasladosPreparacion = crearConstructorLote({
       })).sort((a, b) => a.lineNum - b.lineNum) : t.StockTransferLines,
     };
   },
-});
+};
+export const construirLoteTrasladosPreparacion = crearConstructorLote({ ...traslado,
+  entidad: "trasladosPreparacion", schema: loteTrasladosPreparacionSchema });
+// Los de la 01 a la 02 (se pasan en la bodega escaneando las cajas): el mismo registro, otra entidad.
+export const construirLoteTrasladosEntrada = crearConstructorLote({ ...traslado,
+  entidad: "trasladosEntrada", schema: loteTrasladosEntradaSchema });

@@ -858,6 +858,34 @@ model InventarioConteoAlmacenLinea {
 }
 
 // Cada cambio de unidades, con quién, cuándo y por qué. cantidad con signo: + entra, − sale.
+// Traslados de SAP de la 01 a la 02 (ver migración traslados_entrada). docEntry: el de SAP.
+model TrasladoEntrada {
+  docEntry       Int                    @id
+  docNum         Int
+  docDate        DateTime               @db.Date
+  sincronizadoEn DateTime               @default(now())
+  lineas         TrasladoEntradaLinea[]
+
+  @@map("traslados_entrada")
+}
+
+model TrasladoEntradaLinea {
+  id          Int             @id @default(autoincrement())
+  traslado    TrasladoEntrada @relation(fields: [docEntry], references: [docEntry], onDelete: Cascade)
+  docEntry    Int
+  lineNum     Int
+  itemCode    String
+  unidades    Int
+  aceptadas   Int             @default(0)
+  aceptadoEn  DateTime?
+  aceptadoPor String?
+  cerradaPor  String?
+
+  @@unique([docEntry, lineNum])
+  @@index([itemCode])
+  @@map("traslados_entrada_lineas")
+}
+
 model InventarioMovimiento {
   id          Int                  @id @default(autoincrement())
   grupo       String // los movimientos de una misma operación (una recepción de 10 cajas, una reposición) lo comparten
