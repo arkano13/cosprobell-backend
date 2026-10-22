@@ -48,3 +48,12 @@ export function articulosDelPedido(lineas, combos) {
     return [l.itemCode, ...(lista ? (lista.lineas ?? []).map((c) => c.itemCode) : [])];
   }))];
 }
+
+// Artículos que en SAP no son "de inventario" (por ejemplo, una promoción 2+1 que solo lleva el precio): no tienen
+// existencia, así que no se preparan ni salen de la bodega. Devuelve el Set de esos itemCodes.
+export async function cargarNoInventario(itemCodes, db) {
+  const codigos = [...new Set(itemCodes)].filter(Boolean);
+  if (!codigos.length) return new Set();
+  const filas = await db.producto.findMany({ where: { itemCode: { in: codigos }, esInventario: false }, select: { itemCode: true } });
+  return new Set(filas.map((f) => f.itemCode));
+}

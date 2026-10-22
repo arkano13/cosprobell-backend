@@ -28,10 +28,17 @@ export function comprobarPedidoElegible(pedido) {
   }
 }
 
+// Lo que no es mercadería no se prepara: la línea de una lista de materiales de venta (el padre; sus productos vienen como
+// líneas propias, iIngredient) y los artículos que en SAP no son "de inventario" (pedido.noInventario, por ejemplo una
+// promoción 2+1 que solo lleva el precio: los tintes vienen en otras líneas). No se escanean ni salen de la bodega.
+export const TIPO_LISTA_VENTA = "iSalesTree";
+
 export function lineasParaPreparar(pedido) {
   const error = (code, message) => new AppError({ code, message, statusCode: 409 });
   const abiertas = [];
+  const conListaVenta = pedido.lineas.some((l) => l.treeType === TIPO_LISTA_VENTA);
   for (const linea of pedido.lineas) {
+    if (linea.treeType === TIPO_LISTA_VENTA || pedido.noInventario?.has(linea.itemCode)) continue;
     if (esSalidaSap(pedido.fuenteDocumento) && linea.warehouseCode !== "02") continue;
     if (!esSalidaSap(pedido.fuenteDocumento) && linea.lineStatus === "bost_Close") continue;
     if (!["bost_Open", ...(esSalidaSap(pedido.fuenteDocumento) ? ["bost_Close"] : [])].includes(linea.lineStatus)) throw error("ESTADO_LINEA_DESCONOCIDO", "No se puede confirmar el estado de una línea");
@@ -49,7 +56,8 @@ export function lineasParaPreparar(pedido) {
     const combo = pedido.combos?.get(linea.itemCode);
     if (linea.treeType === "iAssemblyTree" && !combo) throw error("COMBO_SIN_RECETA", "Falta sincronizar la receta del combo.");
     if (combo) {
-      if (pedido.lineas.some(l => l.treeType === "iIngredient")) throw error("COMBO_YA_DESGLOSADO", "SAP incluye componentes en el pedido; revisar su relación antes de expandir el combo.");
+      // Los componentes de una lista de venta también vienen como iIngredient: esos no son de este combo.
+      if (!conListaVenta && pedido.lineas.some(l => l.treeType === "iIngredient")) throw error("COMBO_YA_DESGLOSADO", "SAP incluye componentes en el pedido; revisar su relación antes de expandir el combo.");
       // El combo no se escanea: se preparan sus productos, en unidades de inventario (cada código de barras ya está
       // confirmado como una unidad individual del producto).
       for (const { itemCode, factor } of productosDelCombo(combo)) {

@@ -815,3 +815,14 @@ Verificado: 566 pruebas y contra PostgreSQL local (facturado sin preparar con cr
 - En la bodega aparecen por documento ("Traslado 4695") con sus productos; cada línea se pasa escaneando las cajas y el
   traslado se va cuando se terminan todas. El supervisor puede dar por pasada una línea que se pasó antes.
 - Migración `20261021090000_traslados_entrada`.
+
+## Promociones: artículos que no son de inventario (22/10/2026)
+
+- Una promo como "PROMOCION TINTES 2+1" (ER10492) va en la factura como una línea más (`treeType` `iNotATree`) y cada
+  tinte en su propia línea. En SAP la promo no es "Artículo de inventario": no tiene existencia. La bodega pedía
+  escanearla y stock en la 02 para finalizar (factura 1018328).
+- El puente trae `InventoryItem` de cada producto (`productos.esInventario`, migración
+  `20261022090000_productos_es_inventario`). La preparación salta las líneas de artículos que no son de inventario y el
+  inventario no las cuenta como por preparar. También se saltan las líneas `iSalesTree` (listas de materiales de venta).
+- Puente: copiar `puente/entidades.js`, `puente/productos.js` y `src/modules/sincronizacion/productos.schemas.js` después
+  de desplegar el backend. Como cambia la huella de los productos, el puente los reenvía todos una vez.
