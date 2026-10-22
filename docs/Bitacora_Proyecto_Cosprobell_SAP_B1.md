@@ -808,11 +808,13 @@ Verificado: 566 pruebas y contra PostgreSQL local (facturado sin preparar con cr
 - Traspaso con la hoja de traslado: el número de traslado (`traslado`) permite pasar de la 01 a la 02 sin datos de SAP.
   Caso real: el traslado 4695 (13 líneas) del 16/10, del que solo se aceptaron 2 antes del corte de internet.
 
-## Promociones: listas de materiales de venta (22/10/2026)
+## Promociones: artículos que no son de inventario (22/10/2026)
 
-- Una promo como "PROMOCION TINTES 2+1" (ER10492) es una lista de materiales de venta: SAP pone en la factura la línea de
-  la promo (`treeType` `iSalesTree`), que no tiene existencia, y debajo cada producto (`iIngredient`). La bodega pedía
-  escanear la promo y stock en la 02 para finalizar.
-- Ahora la línea de la promo no se prepara ni se cuenta como por preparar en el inventario; sus productos sí, como
-  siempre. Los componentes de una promo ya no bloquean un combo (Conjunto) de la misma factura. Sin migración ni cambios
-  en el puente ni en la app.
+- Una promo como "PROMOCION TINTES 2+1" (ER10492) va en la factura como una línea más (`treeType` `iNotATree`) y cada
+  tinte en su propia línea. En SAP la promo no es "Artículo de inventario": no tiene existencia. La bodega pedía
+  escanearla y stock en la 02 para finalizar (factura 1018328).
+- El puente trae `InventoryItem` de cada producto (`productos.esInventario`, migración
+  `20261022090000_productos_es_inventario`). La preparación salta las líneas de artículos que no son de inventario y el
+  inventario no las cuenta como por preparar. También se saltan las líneas `iSalesTree` (listas de materiales de venta).
+- Puente: copiar `puente/entidades.js`, `puente/productos.js` y `src/modules/sincronizacion/productos.schemas.js` después
+  de desplegar el backend. Como cambia la huella de los productos, el puente los reenvía todos una vez.

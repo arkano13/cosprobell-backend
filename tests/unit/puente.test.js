@@ -150,7 +150,7 @@ test("consulta con $ literal, espacios %20, caracteres codificados y página de 
     urls.push(url); assert.equal(opciones.headers.Prefer, "odata.maxpagesize=50"); return Response.json({ value: [] });
   });
   await cliente.pagina(null); await cliente.pagina("A+B&C D");
-  assert.equal(urls[0], "https://sap.example/b1s/v1/Items?$select=ItemCode,ItemName,BarCode,Valid,Frozen&$orderby=ItemCode%20asc&$top=50");
+  assert.equal(urls[0], "https://sap.example/b1s/v1/Items?$select=ItemCode,ItemName,BarCode,Valid,Frozen,InventoryItem&$orderby=ItemCode%20asc&$top=50");
   assert.equal(urls[1], `${urls[0]}&$filter=ItemCode%20gt%20'A%2BB%26C%20D'`);
   assert.equal(new URL(urls[1]).searchParams.get("$filter"), "ItemCode gt 'A+B&C D'");
 });

@@ -1,10 +1,11 @@
 import { prisma } from "../../infrastructure/database/prisma.js";
-import { cargarCombos } from "./picking.combos.js";
+import { cargarCombos, cargarNoInventario } from "./picking.combos.js";
 
 // Deja en el pedido sus combos (pedido.combos), para que lineasParaPreparar los cambie por sus productos.
 export async function conCombos(pedido, db = prisma) {
   if (!pedido) return pedido;
   pedido.combos = await cargarCombos(pedido.lineas.map((l) => l.itemCode), db);
+  pedido.noInventario = await cargarNoInventario(pedido.lineas.map((l) => l.itemCode), db);
   return pedido;
 }
 

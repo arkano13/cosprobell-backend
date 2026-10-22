@@ -86,6 +86,7 @@ test("recibir crédito nuevo exige revisión solo a sesiones activas y conserva 
   const anterior = proyectarFactura({ ...f, creditos: [] }); const cambios = []; const guardadas = [];
   const tx = { cliente: { findUnique: async () => ({ cardCode: "C1" }) }, $queryRaw: async () => [{ hay: false }], $executeRaw: async () => 1,
     listaMateriales: { findMany: async () => [] },
+    producto: { findMany: async () => [] },
     pedido: { findUnique: async () => anterior, upsert: async q => guardadas.push(q) },
     pickingPedido: { updateMany: async q => cambios.push(q), findMany: async () => [] },
     pedidoLinea: { upsert: async q => guardadas.push(q), deleteMany: async () => {} } };
@@ -155,6 +156,7 @@ test("factura anulada después de prepararla: la mercadería vuelve a la pequeñ
   t.mock.method(inventarioRepository, "registrarMovimientos", async (lista) => { hecho.registrados.push(...lista); movimientos.push(...lista); });
   const tx = { cliente: { findUnique: async () => ({ cardCode: "C1" }) }, $queryRaw: async () => [], $executeRaw: async () => 1,
     listaMateriales: { findMany: async () => [] },
+    producto: { findMany: async () => [] },
     pedido: { findUnique: async () => anterior, upsert: async () => {} },
     pickingPedido: { updateMany: async () => {}, findMany: async (q) => (q.where.estado?.in ? [{ id: 5 }] : []) },
     pedidoLinea: { upsert: async () => {}, deleteMany: async () => {} } };

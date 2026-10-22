@@ -1,7 +1,7 @@
 import { AppError } from "../../shared/errors/AppError.js";
 import { sesionCoincideConPedido } from "../picking/picking.pedido.js";
 import { registrarCambioPedido } from "../inventario/inventario.sap.js";
-import { articulosDelPedido, cargarCombos } from "../picking/picking.combos.js";
+import { articulosDelPedido, cargarCombos, cargarNoInventario } from "../picking/picking.combos.js";
 
 // Solo campos que afectan a la preparación. Fechas y precios no invalidan escaneos.
 export function contenidoPreparacion(pedido) {
@@ -33,13 +33,14 @@ export async function guardarPedido(pedido, db) {
   await db.$queryRaw`SELECT id FROM picking_pedidos WHERE "pedidoDocEntry" = ${pedido.docEntry} ORDER BY id FOR UPDATE`;
   const lineasAntes = anterior?.lineas ?? [];
   const combos = await cargarCombos([...lineasAntes, ...pedido.lineas].map((l) => l.itemCode), db);
+  const noInventario = await cargarNoInventario(pedido.lineas.map((l) => l.itemCode), db);
   if (contenidoPreparacion(anterior) !== contenidoPreparacion(pedido)) {
     await db.pickingPedido.updateMany({ where: { pedidoDocEntry: pedido.docEntry, estado: "en_proceso" },
       data: { estado: "requiere_revision" } });
   } else {
     // También detecta sesiones creadas por versiones anteriores que usaban el total.
     const activas = await db.pickingPedido.findMany({ where: { pedidoDocEntry: pedido.docEntry, estado: "en_proceso" }, include: { lineas: true } });
-    const ids = activas.filter(s => !sesionCoincideConPedido(s, { ...pedido, combos })).map(s => s.id);
+    const ids = activas.filter(s => !sesionCoincideConPedido(s, { ...pedido, combos, noInventario })).map(s => s.id);
     if (ids.length) await db.pickingPedido.updateMany({ where: { id: { in: ids }, estado: "en_proceso" }, data: { estado: "requiere_revision" } });
   }
   const { lineas, ...cabecera } = pedido;

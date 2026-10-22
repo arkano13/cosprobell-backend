@@ -10,7 +10,9 @@ function nombreProducto(p) {
 export const construirLote = crearConstructorLote({
   entidad: "productos", schema: loteProductosSchema, codigoError: "PRODUCTO_SAP_INVALIDO", claveSap: "ItemCode", claveLocal: "itemCode",
   camposSap: { itemCode: "ItemCode", itemName: "ItemName", barCode: "BarCode", valid: "Valid", frozen: "Frozen" },
+  // InventoryItem ("Artículo de inventario"): si SAP no lo manda, el producto queda como estaba en el backend.
   mapear: (p, booleano) => ({ itemCode: p.ItemCode, itemName: nombreProducto(p),
     barCode: p.BarCode === "" ? null : p.BarCode,
-    valid: booleano(p, "Valid"), frozen: booleano(p, "Frozen") }),
+    valid: booleano(p, "Valid"), frozen: booleano(p, "Frozen"),
+    ...(p.InventoryItem !== undefined ? { esInventario: booleano(p, "InventoryItem") } : {}) }),
 });

@@ -37,6 +37,7 @@ function baseFalsa(anterior, { cliente = true, falloLinea = false } = {}) {
       deleteMany: async q => { llamadas.push(["retirar", q]); } },
     pickingPedido: { findMany: async () => [], updateMany: async q => { llamadas.push(["revision", q]); } },
     listaMateriales: { findMany: async () => [] },
+    producto: { findMany: async () => [] },
   } };
 }
 test("receptor bloquea pedido y sesiones antes de actualizar; no toca escaneos", async () => {

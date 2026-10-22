@@ -91,6 +91,8 @@ model Producto {
   barCode                    String?
   valid                      Boolean        @default(true)
   frozen                     Boolean        @default(false)
+  // "Artículo de inventario" de SAP: false para lo que no tiene existencia (promociones de referencia).
+  esInventario               Boolean        @default(true)
   quantityOnStock            Float?
   quantityOrderedFromVendors Float?
   quantityOrderedByCustomers Float?

@@ -6,4 +6,6 @@ export const loteProductosSchema = loteDe("productos", z.object({
   barCode: identificador(254).nullable(),
   valid: z.boolean(),
   frozen: z.boolean(),
+  // Opcional: un puente anterior no lo manda y el producto queda como estaba.
+  esInventario: z.boolean().optional(),
 }), "itemCode", "Producto repetido en el lote");
