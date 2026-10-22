@@ -68,6 +68,19 @@ test("combos en factura: el crédito descuenta combos antes de multiplicar compo
   p.combos = new Map([["PROMO", { cantidad: 1, lineas: [{ itemCode: "P1", cantidad: 1 }, { itemCode: "P2", cantidad: 2 }] }]]);
   assert.deepEqual(lineasParaPreparar(p).map(l => [l.itemCode, l.cantidadPedida]), [["P1", 3], ["P2", 6]]);
 });
+test("lista de materiales de venta (promo 2+1): se preparan sus productos y la línea de la promo no", () => {
+  const f = facturaSap(); f.CreditosPreparacion = [];
+  f.DocumentLines = [{ ...linea(0), ItemCode: "ER10492", TreeType: "iSalesTree" },
+    { ...linea(1), ItemCode: "TINTE1", TreeType: "iIngredient", Quantity: 2, InventoryQuantity: 2 },
+    { ...linea(2), ItemCode: "TINTE2", TreeType: "iIngredient", Quantity: 1, InventoryQuantity: 1 }];
+  const p = proyectarFactura(construirLoteFacturasPreparacion([f], "TEST", 1).facturasPreparacion[0]);
+  assert.deepEqual(lineasParaPreparar(p).map(l => [l.itemCode, l.cantidadPedida]), [["TINTE1", 2], ["TINTE2", 1]]);
+  // Con un combo (Conjunto) en la misma factura, los componentes de la promo no lo bloquean.
+  f.DocumentLines.push({ ...linea(3), ItemCode: "COMBO", TreeType: "iAssemblyTree", Quantity: 1, InventoryQuantity: 1 });
+  const conCombo = proyectarFactura(construirLoteFacturasPreparacion([f], "TEST", 1).facturasPreparacion[0]);
+  conCombo.combos = new Map([["COMBO", { cantidad: 1, lineas: [{ itemCode: "P9", cantidad: 3 }] }]]);
+  assert.deepEqual(lineasParaPreparar(conCombo).map(l => [l.itemCode, l.cantidadPedida]), [["TINTE1", 2], ["TINTE2", 1], ["P9", 3]]);
+});
 test("recibir crédito nuevo exige revisión solo a sesiones activas y conserva las finalizadas", async () => {
   const f = construirLoteFacturasPreparacion([facturaSap()], "TEST", 1).facturasPreparacion[0];
   const anterior = proyectarFactura({ ...f, creditos: [] }); const cambios = []; const guardadas = [];

@@ -28,10 +28,17 @@ export function comprobarPedidoElegible(pedido) {
   }
 }
 
+// Lista de materiales de venta (por ejemplo, una promoción 2+1): SAP pone en el documento la línea de la lista (padre),
+// que no es mercadería ni tiene existencia, y debajo cada producto como una línea propia (iIngredient). Se preparan los
+// productos; el padre no se escanea ni sale de la bodega.
+export const TIPO_LISTA_VENTA = "iSalesTree";
+
 export function lineasParaPreparar(pedido) {
   const error = (code, message) => new AppError({ code, message, statusCode: 409 });
   const abiertas = [];
+  const conListaVenta = pedido.lineas.some((l) => l.treeType === TIPO_LISTA_VENTA);
   for (const linea of pedido.lineas) {
+    if (linea.treeType === TIPO_LISTA_VENTA) continue;
     if (esSalidaSap(pedido.fuenteDocumento) && linea.warehouseCode !== "02") continue;
     if (!esSalidaSap(pedido.fuenteDocumento) && linea.lineStatus === "bost_Close") continue;
     if (!["bost_Open", ...(esSalidaSap(pedido.fuenteDocumento) ? ["bost_Close"] : [])].includes(linea.lineStatus)) throw error("ESTADO_LINEA_DESCONOCIDO", "No se puede confirmar el estado de una línea");
@@ -49,7 +56,8 @@ export function lineasParaPreparar(pedido) {
     const combo = pedido.combos?.get(linea.itemCode);
     if (linea.treeType === "iAssemblyTree" && !combo) throw error("COMBO_SIN_RECETA", "Falta sincronizar la receta del combo.");
     if (combo) {
-      if (pedido.lineas.some(l => l.treeType === "iIngredient")) throw error("COMBO_YA_DESGLOSADO", "SAP incluye componentes en el pedido; revisar su relación antes de expandir el combo.");
+      // Los componentes de una lista de venta también vienen como iIngredient: esos no son de este combo.
+      if (!conListaVenta && pedido.lineas.some(l => l.treeType === "iIngredient")) throw error("COMBO_YA_DESGLOSADO", "SAP incluye componentes en el pedido; revisar su relación antes de expandir el combo.");
       // El combo no se escanea: se preparan sus productos, en unidades de inventario (cada código de barras ya está
       // confirmado como una unidad individual del producto).
       for (const { itemCode, factor } of productosDelCombo(combo)) {
