@@ -20,12 +20,15 @@ export const sincronizacionEstadoRepository = {
       prisma.sincronizacionEstado.findMany({ select: { entidad: true, empresa: true, actualizadoEn: true } }),
     ]);
     const traslados = fuenteDocumento === "factura" ? await sincronizacionRepository.contarTrasladosPendientes() : null;
+    // Traslados de la 01 a la 02 con algo por pasar.
+    const entrada = fuenteDocumento === "factura" ? await prisma.trasladoEntrada.count({ where: { lineas: { some: {
+      cerradaPor: null, aceptadas: { lt: prisma.trasladoEntradaLinea.fields.unidades } } } } }) : null;
     const [almacenes, [existencias], documentos] = await Promise.all([
       prisma.bodega.aggregate({ _count: { _all: true }, _max: { sincronizadoEn: true } }),
       prisma.$queryRaw`SELECT COUNT(DISTINCT "itemCode")::int AS productos, MAX("actualizadoEn") AS "actualizadoEn" FROM productos_existencias`,
       prisma.documentoStock.aggregate({ where: { cancelado: false }, _count: { _all: true }, _max: { sincronizadoEn: true } }),
     ]);
-    return { clientes, productos, pedidos, pedidosAbiertos, traslados, codigos, unidades, estados, almacenes, existencias, documentos };
+    return { clientes, productos, pedidos, pedidosAbiertos, traslados, entrada, codigos, unidades, estados, almacenes, existencias, documentos };
   },
 };
 
@@ -43,6 +46,8 @@ export async function estadoSincronizacion({ repo = sincronizacionEstadoReposito
       // Solo con facturas: los traslados de la 02 se preparan junto con ellas.
       ...(d.traslados == null ? [] : [{ entidad: "trasladosPreparacion", nombre: "Traslados para preparar", registros: d.traslados,
         ultimaRecepcion: lote.get("trasladosPreparacion") ?? null }]),
+      ...(d.entrada == null ? [] : [{ entidad: "trasladosEntrada", nombre: "Traslados de la 01 a la 02", registros: d.entrada,
+        ultimaRecepcion: lote.get("trasladosEntrada") ?? null }]),
       { entidad: "clientes", registros: d.clientes._count._all, ultimaRecepcion: masReciente(d.clientes._max.sincronizadoEn, lote.get("clientes")) },
       { entidad: "productos", registros: d.productos._count._all, ultimaRecepcion: masReciente(d.productos._max.sincronizadoEn, lote.get("productos")) },
       { entidad: "unidades", registros: d.unidades, ultimaRecepcion: lote.get("unidades") ?? null },

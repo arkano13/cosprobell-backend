@@ -76,6 +76,9 @@ export function configurar(v) {
   if (traslados === "true" && frecuencias.trasladosPreparacion == null && frecuencias.facturasPreparacion != null) {
     frecuencias.trasladosPreparacion = frecuencias.facturasPreparacion;
   }
+  if (traslados === "true" && frecuencias.trasladosEntrada == null && frecuencias.trasladosPreparacion != null) {
+    frecuencias.trasladosEntrada = frecuencias.trasladosPreparacion;
+  }
   return { sapUrl, backendUrl, empresa, usuario: v.SAP_USER, password: v.SAP_PASSWORD,
     fuentePreparacion, facturasDesde, facturasDias, trasladosHabilitados: traslados === "true",
     frecuencias, soloCambios: true, huellaSap, combosHabilitados: activarCombos === "true", inventarioHabilitado: activarInventario === "true", modoExistencias, almacenesSap,

@@ -81,14 +81,16 @@ export async function resumenInventario() {
     return { total: filas.length, contados: filas.filter((f) => f.contado).length };
   };
   const [conteoGrande, conteoPequena, pases, soloConteo] = await Promise.all([avance("grande"), avance("pequena"),
-    traspasosDisponibles ? pasesPendientes() : [], almacenesSoloConteo()]);
+    traspasosDisponibles ? pasesSinDocumento() : [], almacenesSoloConteo()]);
+  const lineasTraslado = await repo.trasladosEntradaPendientes();
   const conteoAlmacenes = await Promise.all(soloConteo.map(async (a) => {
     const filas = await repo.conteoAlmacen(a.almacen);
     return { ...a, avance: { total: filas.length, contados: filas.filter((f) => f.contado).length } };
   }));
   return { data: { almacenes, comparacionDisponible, traspasosDisponibles, existenciasSapAl, bodegas: nombres,
     conteo: { grande: conteoGrande, pequena: conteoPequena }, soloConteo: conteoAlmacenes, ...bodegas,
-    pendientes: { porUbicar: contar("por_ubicar"), porDescontar: contar("por_descontar"), porPasar: pases.length, actualizando: contar("actualizando"),
+    pendientes: { porUbicar: contar("por_ubicar"), porDescontar: contar("por_descontar"), porPasar: pases.length,
+      trasladosEntrada: lineasTraslado.length, actualizando: contar("actualizando"),
       conteoInicial: contar("conteo_inicial"), faltaEnSap: vistas.filter((v) => v.faltaEnSap > 0).length },
     porVencer: { vencidos: porVencer.filter((l) => l.vencido).length, proximos: porVencer.filter((l) => !l.vencido).length },
     movimientos } };
@@ -109,7 +111,8 @@ export async function consultarProducto(itemCode) {
   const [estado, cajas, movimientos, documentos, ultima, lotesPequena, sap, contado, pases] = await Promise.all([
     comparacionDisponible ? estadoDe(itemCode) : null, repo.cajasDe(itemCode), repo.movimientos({ itemCode, limite: 15 }),
     repo.documentosRecientes([itemCode], { dias: 60, porProducto: 8 }), repo.ultimaRecepcion(itemCode), repo.lotesPequena(itemCode),
-    repo.sapDeProducto(itemCode, asignados), repo.contadoEn(itemCode), traspasosDisponibles ? pasesPendientes([itemCode]) : []]);
+    repo.sapDeProducto(itemCode, asignados), repo.contadoEn(itemCode), traspasosDisponibles ? pasesSinDocumento([itemCode]) : []]);
+  const lineasTraslado = await repo.trasladosEntradaPendientes({ itemCodes: [itemCode] });
   const sapDe = (bodega) => (nombres[bodega] ? Math.round(sap.get(nombres[bodega].almacen) ?? 0) : null);
   // Bodega grande agrupada por lote (y vencimiento), con sus cajas.
   const lotes = new Map();
@@ -132,6 +135,7 @@ export async function consultarProducto(itemCode) {
     contadoEn: { grande: contado.has("grande") || cajas.length > 0, pequena: contado.has("pequena") || (producto.inventario?.pequena ?? 0) !== 0 },
     porPasar: pases[0]?.unidades ?? 0,
     traspaso: pases[0] ? { unidades: pases[0].unidades, sugerencia: sugerenciaTraspaso(cajas, pases[0].unidades) } : null,
+    trasladosEntrada: lineasTraslado.map((l) => vistaLineaTraslado(l, cajas)),
   } };
 }
 
@@ -149,7 +153,7 @@ function sugerenciaTraspaso(cajas, unidades) {
 export async function listarPendientes() {
   await exigirAlmacenes({ traspasos: true });
   const [comparacionDisponible, existenciasSapAl] = await Promise.all([repo.comparacionDisponible(), repo.existenciasSapAl()]);
-  if (!comparacionDisponible) return { data: { comparacionDisponible, existenciasSapAl, porUbicar: [], porPasar: await pasesPendientes(),
+  if (!comparacionDisponible) return { data: { comparacionDisponible, existenciasSapAl, porUbicar: [], porPasar: await pasesSinDocumento(),
     porDescontar: [], actualizando: [], faltaEnSap: [], conteoInicial: { productos: 0, unidades: 0 } } };
   const vistas = (await repo.estados()).map((f) => vistaEstado(f));
   const de = (estado) => vistas.filter((v) => v.estado === estado);
@@ -159,7 +163,7 @@ export async function listarPendientes() {
   const inicial = de("conteo_inicial");
   return { data: { comparacionDisponible, existenciasSapAl,
     porUbicar: porUbicar.map((v) => ({ ...v, documentos: docs(v.itemCode) })),
-    porPasar: await pasesPendientes(),
+    porPasar: await pasesSinDocumento(),
     porDescontar: porDescontar.map((v) => ({ ...v, documentos: docs(v.itemCode) })),
     actualizando: de("actualizando"),
     faltaEnSap: vistas.filter((v) => v.faltaEnSap > 0),
@@ -442,13 +446,21 @@ export async function descontar(entrada, { aplicacion }) {
 // Con traslado (la hoja de traslado en la mano) se pasa sin esperar a SAP: no hace falta que SAP lo tenga ni datos
 // recientes. Cuando SAP lo registre, lo pendiente ya da cero porque lo local cambió igual.
 export async function traspasar(entrada, { aplicacion, supervisor = true }) {
-  const { itemCode, unidades, lotes, cajas: escaneadas, traslado } = entrada;
+  const { itemCode, unidades, lotes, cajas: escaneadas, traslado, linea: refLinea } = entrada;
   if (traslado && !supervisor) throw falla("TRASPASO_MANUAL_SOLO_SUPERVISOR", 403, "Pasar con hoja de traslado (sin esperar a SAP) lo hace solo el supervisor");
   if (!escaneadas && !supervisor) throw falla("TRASPASO_SIN_ESCANEAR", 403, "Escaneá las cajas que pasás: sin escanear lo acepta solo el supervisor");
   if (lotes && sumar(lotes) !== unidades) throw falla("ASIGNACION_INCOMPLETA", 400, `Hay que elegir lotes por ${numero(unidades)} unidades en total`);
   return repo.conProducto(itemCode, async (tx) => {
     await exigirSaldoConciliado(itemCode, tx);
-    if (!traslado) {
+    // Una línea de un traslado de SAP de la 01 a la 02: se pasa justo lo que falta de esa línea.
+    const linea = refLinea ? await repo.lineaTrasladoEntrada(refLinea.docEntry, refLinea.lineNum, tx) : null;
+    if (refLinea) {
+      if (!linea || linea.itemCode !== itemCode) throw falla("LINEA_TRASLADO_NO_ENCONTRADA", 404, "No existe esa línea del traslado para este producto");
+      const pendientes = linea.cerradaPor ? 0 : linea.unidades - linea.aceptadas;
+      if (pendientes !== unidades) throw falla("CANTIDAD_CAMBIO", 409, pendientes === 0 ? "Esa línea del traslado ya está pasada"
+        : `Del traslado ${linea.docNum} faltan ${numero(pendientes)} (antes ${numero(unidades)}). Revisá y volvé a intentar.`);
+    }
+    if (!traslado && !linea) {
       await exigirAlmacenes({ traspasos: true });
       const [pase] = await pasesPendientes([itemCode], tx);
       const pendiente = pase?.unidades ?? 0;
@@ -461,7 +473,7 @@ export async function traspasar(entrada, { aplicacion, supervisor = true }) {
       : repartirTraspaso(cajas, unidades);
     await repo.activar(itemCode, tx);
     const grupo = randomUUID(), movimientos = [];
-    const observacion = traslado ? `Traslado ${traslado} (sin esperar a SAP)` : null;
+    const observacion = linea ? `Traslado ${linea.docNum}` : traslado ? `Traslado ${traslado} (sin esperar a SAP)` : null;
     for (const p of partes) {
       await repo.cambiarUnidadesCaja(p.cajaId, -p.unidades, tx);
       const saldo = await repo.sumarLotePequena(itemCode, p.lote, p.vencimiento, p.unidades, tx);
@@ -473,6 +485,7 @@ export async function traspasar(entrada, { aplicacion, supervisor = true }) {
     await repo.registrarMovimientos(movimientos, tx);
     if (traslado) await repo.registrarCambio({ entidad: "traspaso", accion: "manual", usuario: aplicacion,
       detalle: { itemCode, unidades, traslado } }, tx);
+    if (linea) await repo.aceptarLineaTraslado(linea.id, unidades, aplicacion, tx);
     const estado = await repo.estadoProducto(itemCode, tx);
     return { data: { itemCode, unidades, pequena: estado.pequena,
       lotes: lotesDeTraspaso(partes).map((l) => ({ ...l, vencimiento: fechaIso(l.vencimiento) })),
@@ -705,6 +718,52 @@ async function pasesPendientes(itemCodes = null, db = undefined) {
   return filas.map((f) => ({ itemCode: f.itemCode, itemName: f.itemName, unidades: porPasar(f), cajas: f.cajas,
     sapGrande: Math.round(f.sapGrande), sapPequena: Math.round(f.sapPequena), grande: f.grande, pequena: f.pequena }))
     .filter((v) => v.unidades > 0);
+}
+
+// Lo que SAP marca por pasar y no cubre ningún traslado de la 01 a la 02 pendiente (esos se pasan por su línea).
+async function pasesSinDocumento(itemCodes = null) {
+  const [pases, lineas] = await Promise.all([pasesPendientes(itemCodes), repo.trasladosEntradaPendientes({ itemCodes })]);
+  const enDocumento = new Map();
+  for (const l of lineas) enDocumento.set(l.itemCode, (enDocumento.get(l.itemCode) ?? 0) + l.unidades - l.aceptadas);
+  return pases.map((v) => ({ ...v, unidades: v.unidades - (enDocumento.get(v.itemCode) ?? 0) })).filter((v) => v.unidades > 0);
+}
+const vistaLineaTraslado = (l, cajas) => {
+  const pendientes = l.unidades - l.aceptadas;
+  const enGrande = cajas.reduce((t, c) => t + c.unidades, 0);
+  return { docEntry: l.docEntry, docNum: l.docNum, docDate: l.docDate, lineNum: l.lineNum, itemCode: l.itemCode,
+    itemName: l.itemName ?? null, unidades: l.unidades, aceptadas: l.aceptadas, pendientes, enGrande,
+    sugerencia: enGrande >= pendientes ? sugerenciaTraspaso(cajas, pendientes) : null };
+};
+
+// Traslados de SAP de la 01 a la 02 con lo que falta pasar de cada línea, el más viejo primero. sapPorPasar: lo que SAP
+// todavía marca por pasar de ese producto (con datos de SAP), para notar una línea que ya se pasó antes de existir esta lista.
+export async function listarTrasladosEntrada() {
+  const lineas = await repo.trasladosEntradaPendientes();
+  const itemCodes = [...new Set(lineas.map((l) => l.itemCode))];
+  const [cajas, sap] = await Promise.all([
+    Promise.all(itemCodes.map(async (i) => [i, await repo.cajasDe(i)])).then((x) => new Map(x)),
+    (await repo.traspasosDisponibles()) && itemCodes.length ? pasesPendientes(itemCodes) : null]);
+  const porPasar = sap ? new Map(sap.map((v) => [v.itemCode, v.unidades])) : null;
+  const traslados = new Map();
+  for (const l of lineas) {
+    if (!traslados.has(l.docEntry)) traslados.set(l.docEntry, { docEntry: l.docEntry, docNum: l.docNum, docDate: l.docDate, lineas: [] });
+    traslados.get(l.docEntry).lineas.push({ ...vistaLineaTraslado(l, cajas.get(l.itemCode) ?? []),
+      sapPorPasar: porPasar ? porPasar.get(l.itemCode) ?? 0 : null });
+  }
+  return { data: [...traslados.values()], bodegas: await bodegasConNombre() };
+}
+
+// El supervisor da por pasada una línea sin mover nada (ya se había pasado antes, por ejemplo por la lista de SAP).
+export async function cerrarLineaTraslado({ docEntry, lineNum }, { aplicacion }) {
+  return repo.transaccion(async (tx) => {
+    const linea = await repo.lineaTrasladoEntrada(docEntry, lineNum, tx);
+    if (!linea) throw falla("LINEA_TRASLADO_NO_ENCONTRADA", 404, "No existe esa línea del traslado");
+    if (linea.cerradaPor || linea.aceptadas >= linea.unidades) throw falla("LINEA_TRASLADO_TERMINADA", 409, "Esa línea ya está pasada");
+    await repo.cerrarLineaTraslado(linea.id, aplicacion, tx);
+    await repo.registrarCambio({ entidad: "traspaso", accion: "linea_cerrada", usuario: aplicacion,
+      detalle: { itemCode: linea.itemCode, docNum: linea.docNum, lineNum, pendientes: linea.unidades - linea.aceptadas } }, tx);
+    return { data: { docEntry, lineNum, cerrada: true } };
+  });
 }
 
 export async function listarAlmacenes() {
