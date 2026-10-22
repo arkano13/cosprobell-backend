@@ -70,6 +70,7 @@ function inventario(t, { sap = 0, grande = 0, pequena = 0, activo = true, sapCam
   t.mock.method(repo, "almacenesDeEstaBodega", async () => almacenes);
   t.mock.method(repo, "comparacionDisponible", async () => almacenes.length > 0);
   t.mock.method(repo, "traspasosDisponibles", async () => almacenes.length > 0);
+  t.mock.method(repo, "trasladosEntradaPendientes", async () => []);
   t.mock.method(repo, "conProducto", async (_itemCodes, op) => op(tx));
   t.mock.method(repo, "estados", async () => [estado]);
   t.mock.method(repo, "opcion", async () => null);
@@ -599,6 +600,67 @@ test("traspasos de la 01 a la 02: SAP ya los registró y la bodega acepta de qu�
   const escaneando = await enviar("/inventario/traspasos", conSesion(t), "POST", { itemCode: "P1", unidades: 24, traslado: "4695",
     cajas: [{ lote: "L1", vencimiento: "2027-01-31" }] });
   assert.equal((await escaneando.json()).error.code, "TRASPASO_MANUAL_SOLO_SUPERVISOR", "aunque escanee las cajas");
+});
+
+test("traslados de SAP de la 01 a la 02: por documento, pasar una línea y darla por pasada", async (t) => {
+  const cajas = [{ id: 1, codigo: "CJ-000001", lote: "L1", vencimiento: new Date("2027-01-31"), unidades: 24, unidadesIniciales: 24 },
+    { id: 2, codigo: "CJ-000002", lote: "L1", vencimiento: new Date("2027-01-31"), unidades: 24, unidadesIniciales: 24 }];
+  const hecho = inventario(t, { sap: 48, grande: 48 });
+  t.mock.method(repo, "almacenesDeEstaBodega", async () => ["01", "02"]);
+  t.mock.method(repo, "opcion", async () => ({ grande: "01", pequena: "02" }));
+  t.mock.method(repo, "resumenBodegas", async () => ({ grande: { cajas: 2 }, pequena: { unidades: 0 } }));
+  t.mock.method(repo, "porVencer", async () => []);
+  t.mock.method(repo, "movimientos", async () => []);
+  const lineas = [{ docEntry: 900, docNum: 4695, docDate: "2026-10-16", lineNum: 2, itemCode: "P1", itemName: "Shampoo", unidades: 24, aceptadas: 0, id: 7, cerradaPor: null },
+    { docEntry: 900, docNum: 4695, docDate: "2026-10-16", lineNum: 3, itemCode: "A1", itemName: "Acondicionador", unidades: 12, aceptadas: 0, id: 8, cerradaPor: null }];
+  t.mock.method(repo, "trasladosEntradaPendientes", async ({ itemCodes = null } = {}) => lineas.filter((l) => l.aceptadas < l.unidades && !l.cerradaPor
+    && (!itemCodes || itemCodes.includes(l.itemCode))));
+  t.mock.method(repo, "cajasDe", async (itemCode) => (itemCode === "P1" ? cajas : []));
+  // SAP marca 48 por pasar de P1: 24 son de la línea del traslado, los otros 24 quedan sin documento.
+  t.mock.method(repo, "pases", async () => [{ itemCode: "P1", itemName: "Shampoo", sapGrande: 0, sapPequena: 48, grande: 48, cajas: 2, pequena: 0, sinEntrega: 0 }]);
+  const operador = conSesion(t);
+  const { data: traslados, bodegas } = await (await pedir("/inventario/traslados", operador)).json();
+  assert.equal(bodegas.grande.almacen, "01", "con los almacenes de cada bodega");
+  assert.equal(traslados.length, 1);
+  assert.deepEqual([traslados[0].docNum, traslados[0].lineas.map((l) => [l.itemCode, l.pendientes, l.enGrande, l.sapPorPasar])],
+    [4695, [["P1", 24, 48, 48], ["A1", 12, 0, 0]]]);
+  assert.deepEqual(traslados[0].lineas[0].sugerencia, [{ lote: "L1", vencimiento: "2027-01-31", unidades: 24, cajas: 1 }]);
+  assert.equal(traslados[0].lineas[1].sugerencia, null, "sin cajas en la 01 no hay sugerencia");
+  const { data: pendientes } = await (await pedir("/inventario/pendientes", operador)).json();
+  assert.deepEqual(pendientes.porPasar.map((v) => [v.itemCode, v.unidades]), [["P1", 24]]);
+  const { data: resumen } = await (await pedir("/inventario/resumen", operador)).json();
+  assert.deepEqual([resumen.pendientes.porPasar, resumen.pendientes.trasladosEntrada], [1, 2]);
+
+  // El operador pasa la línea escaneando las cajas: justo lo que falta de la línea.
+  t.mock.method(repo, "cajasDeProductoBloqueadas", async () => cajas);
+  t.mock.method(repo, "lineaTrasladoEntrada", async (docEntry, lineNum) => lineas.find((l) => l.docEntry === docEntry && l.lineNum === lineNum) ?? null);
+  t.mock.method(repo, "aceptarLineaTraslado", async (id, unidades) => { lineas.find((l) => l.id === id).aceptadas += unidades; });
+  const linea = { docEntry: 900, lineNum: 2 };
+  const otra = await enviar("/inventario/traspasos", operador, "POST", { itemCode: "P1", unidades: 48, linea, cajas: [{ lote: "L1", vencimiento: "2027-01-31" }] });
+  assert.equal((await otra.json()).error.code, "CANTIDAD_CAMBIO");
+  const sinEscanear = await enviar("/inventario/traspasos", operador, "POST", { itemCode: "P1", unidades: 24, linea });
+  assert.equal((await sinEscanear.json()).error.code, "TRASPASO_SIN_ESCANEAR");
+  const r = await enviar("/inventario/traspasos", operador, "POST", { itemCode: "P1", unidades: 24, linea,
+    cajas: [{ lote: "L1", vencimiento: "2027-01-31" }] });
+  assert.equal(r.status, 201);
+  assert.deepEqual(hecho.movimientos.map((m) => [m.bodega, m.cantidad, m.observacion]), [["grande", -24, "Traslado 4695"], ["pequena", 24, "Traslado 4695"]]);
+  assert.equal(lineas[0].aceptadas, 24);
+  const repetida = await enviar("/inventario/traspasos", operador, "POST", { itemCode: "P1", unidades: 24, linea,
+    cajas: [{ lote: "L1", vencimiento: "2027-01-31" }] });
+  assert.equal((await repetida.json()).error.code, "CANTIDAD_CAMBIO", "una línea pasada no se pasa dos veces");
+  const ajena = await enviar("/inventario/traspasos", operador, "POST", { itemCode: "A1", unidades: 24, linea, cajas: [{ lote: "L1", vencimiento: "2027-01-31" }] });
+  assert.equal((await ajena.json()).error.code, "LINEA_TRASLADO_NO_ENCONTRADA");
+
+  // Dar por pasada (ya se había pasado antes): solo el supervisor, sin mover nada.
+  t.mock.method(repo, "transaccion", async (op) => op({}));
+  t.mock.method(repo, "cerrarLineaTraslado", async (id, por) => { lineas.find((l) => l.id === id).cerradaPor = por; });
+  assert.equal((await enviar("/inventario/traslados/900/lineas/3/cerrar", operador, "POST", {})).status, 403);
+  const cerrar = await enviar("/inventario/traslados/900/lineas/3/cerrar", conSesion(t, "supervisor"), "POST", {});
+  assert.equal(cerrar.status, 200);
+  assert.equal(lineas[1].cerradaPor, "operador:Luis Pérez");
+  assert.deepEqual(hecho.cambios.at(-1).detalle, { itemCode: "A1", docNum: 4695, lineNum: 3, pendientes: 12 });
+  assert.deepEqual((await (await pedir("/inventario/traslados", operador)).json()).data, []);
+  assert.equal((await enviar("/inventario/traslados/900/lineas/3/cerrar", conSesion(t, "supervisor"), "POST", {})).status, 409);
 });
 
 test("conteo de una bodega: lo que falta contar, el avance y \"no hay\"", async (t) => {

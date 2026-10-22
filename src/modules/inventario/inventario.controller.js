@@ -29,6 +29,8 @@ export const descuentos = manejar((req) => s.listarDescuentos(req.validatedQuery
 export const recibir = manejar((req) => s.recibir(req.body, quien(req)), 201);
 export const reponer = manejar((req) => s.reponer(req.body, quien(req)));
 export const descontar = manejar((req) => s.descontar(req.body, quien(req)), 201);
+export const trasladosEntrada = manejar(() => s.listarTrasladosEntrada());
+export const cerrarLineaTraslado = manejar((req) => s.cerrarLineaTraslado(req.params, quien(req)));
 export const traspasar = manejar((req) => s.traspasar(req.body, { ...quien(req), supervisor: req.operador?.rol === "supervisor" || !req.operador }), 201);
 export const registrarCodigo = manejar((req) => registrar(req.body, quien(req)));
 export const registrarCodigoCaja = manejar((req) => registrarCaja(req.body, quien(req)));

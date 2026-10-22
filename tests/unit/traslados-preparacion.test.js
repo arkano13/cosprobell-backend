@@ -61,7 +61,7 @@ test("preparación: con facturas el traslado se prepara completo; con pedidos, n
   assert.throws(() => comprobarPedidoElegible(p), { code: "FUENTE_PREPARACION_INCORRECTA" });
 });
 
-test("puente: los traslados se activan aparte, solo con facturas, y heredan la frecuencia de las facturas", () => {
+test("puente: los traslados se activan aparte, solo con facturas, y heredan la frecuencia de las facturas", async () => {
   const nombres = c => entidadesHabilitadas(c).map(e => e.nombre);
   assert.ok(!nombres(configurar(variables)).includes("trasladosPreparacion"));
   const c = configurar({ ...variables, BRIDGE_PICKING_TRANSFERS: "true", BRIDGE_FREQUENCIES_JSON: '{"facturasPreparacion":240}' });
@@ -69,6 +69,12 @@ test("puente: los traslados se activan aparte, solo con facturas, y heredan la f
   assert.equal(c.frecuencias.trasladosPreparacion, 240);
   const e = entidadesHabilitadas(c).find(x => x.nombre === "trasladosPreparacion");
   assert.equal(e.filtro, "FromWarehouse eq '02'");
+  // Los de la 01 a la 02 vienen con los mismos: misma frecuencia y ventana de días, otra entidad.
+  assert.ok(!nombres(configurar(variables)).includes("trasladosEntrada"));
+  const entrada = entidadesHabilitadas(c).find(x => x.nombre === "trasladosEntrada");
+  assert.deepEqual([entrada.filtro, entrada.recurso, entrada.ventanaFacturas, c.frecuencias.trasladosEntrada], ["FromWarehouse eq '01'", "StockTransfers", true, 240]);
+  const { construirLoteTrasladosEntrada } = await import("../../puente/trasladosPreparacion.js");
+  assert.equal(construirLoteTrasladosEntrada([{ ...trasladoSap(), FromWarehouse: "01", ToWarehouse: "02" }], "TEST", 1).trasladosEntrada[0].fromWarehouse, "01");
   assert.throws(() => configurar({ ...variables, BRIDGE_PICKING_SOURCE: "pedidos", BRIDGE_PICKING_TRANSFERS: "true" }));
   assert.throws(() => configurar({ ...variables, BRIDGE_PICKING_TRANSFERS: "si" }));
 });
