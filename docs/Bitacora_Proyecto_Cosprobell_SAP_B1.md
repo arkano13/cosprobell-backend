@@ -826,3 +826,10 @@ Verificado: 566 pruebas y contra PostgreSQL local (facturado sin preparar con cr
   inventario no las cuenta como por preparar. También se saltan las líneas `iSalesTree` (listas de materiales de venta).
 - Puente: copiar `puente/entidades.js`, `puente/productos.js` y `src/modules/sincronizacion/productos.schemas.js` después
   de desplegar el backend. Como cambia la huella de los productos, el puente los reenvía todos una vez.
+
+## Combos que no son de inventario (23/10/2026)
+
+- Un combo (Conjunto) como "Promo.01 Smooth" (ER10474) tampoco es "Artículo de inventario" en SAP. El cambio del 22/10
+  lo saltaba junto con sus productos (BS12, BS16, BS10): la factura 1018336 se preparó sin ellos y aparecieron en "Falta
+  marcar salida". Ahora un artículo que no es de inventario se salta solo si no es un combo; el combo sigue cambiándose
+  por sus productos, al preparar y en lo por preparar del inventario. Sin migración ni cambios en el puente ni en la app.

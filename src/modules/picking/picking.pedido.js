@@ -31,6 +31,7 @@ export function comprobarPedidoElegible(pedido) {
 // Lo que no es mercadería no se prepara: la línea de una lista de materiales de venta (el padre; sus productos vienen como
 // líneas propias, iIngredient) y los artículos que en SAP no son "de inventario" (pedido.noInventario, por ejemplo una
 // promoción 2+1 que solo lleva el precio: los tintes vienen en otras líneas). No se escanean ni salen de la bodega.
+// Un combo (Conjunto) tampoco es de inventario, pero sí se preparan sus productos.
 export const TIPO_LISTA_VENTA = "iSalesTree";
 
 export function lineasParaPreparar(pedido) {
@@ -38,7 +39,8 @@ export function lineasParaPreparar(pedido) {
   const abiertas = [];
   const conListaVenta = pedido.lineas.some((l) => l.treeType === TIPO_LISTA_VENTA);
   for (const linea of pedido.lineas) {
-    if (linea.treeType === TIPO_LISTA_VENTA || pedido.noInventario?.has(linea.itemCode)) continue;
+    if (linea.treeType === TIPO_LISTA_VENTA || (pedido.noInventario?.has(linea.itemCode) && !pedido.combos?.has(linea.itemCode)
+      && linea.treeType !== "iAssemblyTree")) continue;
     if (esSalidaSap(pedido.fuenteDocumento) && linea.warehouseCode !== "02") continue;
     if (!esSalidaSap(pedido.fuenteDocumento) && linea.lineStatus === "bost_Close") continue;
     if (!["bost_Open", ...(esSalidaSap(pedido.fuenteDocumento) ? ["bost_Close"] : [])].includes(linea.lineStatus)) throw error("ESTADO_LINEA_DESCONOCIDO", "No se puede confirmar el estado de una línea");
