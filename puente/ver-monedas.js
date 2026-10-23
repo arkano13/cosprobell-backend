@@ -18,5 +18,5 @@ try {
   if (registros.length !== 1) throw new Error("No se confirmó la configuración de la empresa");
   console.log(JSON.stringify({ evento: "monedas_sap", monedaLocal: registros[0].monedaLocal, monedaSistema: registros[0].monedaSistema }));
 } catch (error) {
-  console.error(JSON.stringify({ evento: "consulta_monedas_fallida", codigo: error.code ?? "REVISAR_CONFIGURACION" })); process.exitCode = 1;
+  console.error(JSON.stringify({ evento: "consulta_monedas_fallida", codigo: error.code ?? "REVISAR_CONFIGURACION", detalle: error.detalle })); process.exitCode = 1;
 } finally { if (sap) await sap.cerrar().catch(() => {}); }

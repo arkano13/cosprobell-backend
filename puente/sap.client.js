@@ -20,13 +20,23 @@ export function crearClienteSap(config, fetchImpl = fetch) {
     if (!cookies.some((v) => /^B1SESSION=.+/.test(v))) throw new ErrorPuente("SESION_SAP_INVALIDA");
     cookie = cookies.join("; ");
   }
+  // Mensaje de error de Service Layer sin credenciales ni sesión, para corregir el origen.
+  async function leerErrorSap(respuesta) {
+    const cuerpo = await respuesta.json();
+    let mensaje = cuerpo?.error?.message?.value ?? cuerpo?.error?.message;
+    if (typeof mensaje !== "string" || !mensaje) return undefined;
+    for (const secreto of [config.password, config.usuario, cookie]) if (secreto) mensaje = mensaje.split(secreto).join("[oculto]");
+    const codigo = cuerpo.error.code;
+    return { codigoSap: ["number", "string"].includes(typeof codigo) ? String(codigo).slice(0, 20) : undefined,
+      mensajeSap: mensaje.replace(/[\x00-\x1f]/g, " ").slice(0, 300) };
+  }
   // GET con la sesión vigente; ante 401 renueva la sesión una sola vez.
   async function obtener(ruta, cabeceras = {}, lector = leerJson) {
     if (!cookie) await login();
     for (let intento = 0; ; intento++) {
       try {
         await config.control?.antesDeConsultar();
-        return await lector(await solicitar(`${config.sapUrl}/${ruta}`, { headers: { Cookie: cookie, ...cabeceras } }, fetchImpl));
+        return await lector(await solicitar(`${config.sapUrl}/${ruta}`, { headers: { Cookie: cookie, ...cabeceras } }, fetchImpl, leerErrorSap));
       } catch (error) {
         if (error.code !== "HTTP_401" || intento === 1) throw error;
         cookie = null; await login();
@@ -64,7 +74,7 @@ export function crearClienteSap(config, fetchImpl = fetch) {
       } catch (error) { if (error.code !== "HTTP_404" || !crear) throw error; }
       await config.control?.antesDeConsultar();
       const respuesta = await solicitar(`${config.sapUrl}/SQLQueries`, { method: "POST",
-        headers: { Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify(definicion) }, fetchImpl);
+        headers: { Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify(definicion) }, fetchImpl, leerErrorSap);
       await respuesta.body?.cancel();
       validarConsultaExistencias((await obtener(ruta)).SqlText, definicion);
       return "creada";

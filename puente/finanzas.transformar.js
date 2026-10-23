@@ -41,6 +41,8 @@ export function transformarFinanzas(entidad, filas, cursor) {
   return filas.map(f => {
     const registro = { ...f };
     for (const [campo, tipo] of Object.entries(def.campos)) {
+      // Columna no pedida (UDF sin configurar) u omitida por SAP: solo se acepta null si el contrato lo permite.
+      if (!Object.hasOwn(registro, campo) && tipo.safeParse(null).success) registro[campo] = null;
       if (tipo === decimal && typeof registro[campo] === "string") {
         registro[campo] = expandirCientifico(registro[campo]);
       }

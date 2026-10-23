@@ -1,5 +1,5 @@
 export class ErrorPuente extends Error {
-  // detalle solo lleva datos no secretos que ayudan a corregir el origen (código de producto y campo).
+  // detalle solo lleva datos no secretos que ayudan a corregir el origen (código de producto y campo, o el mensaje de SAP sin credenciales).
   constructor(codigo, temporal = false, detalle = undefined) {
     super(codigo); this.code = codigo; this.temporal = temporal; this.detalle = detalle;
   }
