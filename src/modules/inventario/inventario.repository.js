@@ -47,7 +47,7 @@ const POR_PREPARAR = Prisma.sql`
     CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN lm."itemCode" IS NULL THEN '[null]'::jsonb ELSE lm.lineas END) c
     WHERE p."fuenteDocumento" IN ('factura', 'traslado') AND p.cancelled = false AND COALESCE(p."cancelStatus", 'csNo') = 'csNo'
       AND COALESCE(pl."treeType", '') <> 'iSalesTree'
-      AND NOT EXISTS (SELECT 1 FROM productos np WHERE np."itemCode" = pl."itemCode" AND NOT np."esInventario")
+      AND (lm."itemCode" IS NOT NULL OR NOT EXISTS (SELECT 1 FROM productos np WHERE np."itemCode" = pl."itemCode" AND NOT np."esInventario"))
       AND (lm."itemCode" IS NULL OR c->>'tipo' IS NULL OR c->>'tipo' = 'pit_Item')
       AND NOT EXISTS (SELECT 1 FROM picking_pedidos s WHERE s."pedidoDocEntry" = p."docEntry" AND s.estado IN ('completo', 'con_diferencias'))
   ) x GROUP BY x."itemCode" HAVING ROUND(SUM(x.unidades)) <> 0`;
