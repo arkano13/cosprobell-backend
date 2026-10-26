@@ -842,3 +842,6 @@ Verificado: 566 pruebas y contra PostgreSQL local (facturado sin preparar con cr
   quedan por pasar). Los que salen de la 02 siguen sin aceptarlas.
 - Puente: copiar `src/modules/sincronizacion/trasladosPreparacion.schemas.js` y `trasladosEntrada.schemas.js`. Sin migración.
 - Si el traslado cancelado todavía figura por pasar, el supervisor lo da por pasado ("Ya se pasó") sin mover nada.
+- Al recibir una cancelación, el backend cierra solo el traslado original: el anterior con exactamente los mismos productos
+  y unidades y sin nada pasado ni cerrado ("cancelado en SAP (número)", sin mover inventario). Si no hay uno así (por
+  ejemplo, ya se pasó una parte), queda para el supervisor. Sin migración ni cambios en el puente ni en la app.
