@@ -833,3 +833,12 @@ Verificado: 566 pruebas y contra PostgreSQL local (facturado sin preparar con cr
   lo saltaba junto con sus productos (BS12, BS16, BS10): la factura 1018336 se preparó sin ellos y aparecieron en "Falta
   marcar salida". Ahora un artículo que no es de inventario se salta solo si no es un combo; el combo sigue cambiándose
   por sus productos, al preparar y en lo por preparar del inventario. Sin migración ni cambios en el puente ni en la app.
+
+## Cancelación de traslados de la 01 a la 02 (26/10/2026)
+
+- Cancelar un traslado en SAP crea otro traslado de la 01 a la 02 con las mismas líneas en negativo (el 4727, DocEntry 5015,
+  con 24 líneas). El contrato no aceptaba cantidades negativas y el puente se trababa en ese traslado: no llegaban los
+  siguientes. Ahora los de la 01 a la 02 aceptan cantidades negativas y el receptor no guarda esas líneas (solo las positivas
+  quedan por pasar). Los que salen de la 02 siguen sin aceptarlas.
+- Puente: copiar `src/modules/sincronizacion/trasladosPreparacion.schemas.js` y `trasladosEntrada.schemas.js`. Sin migración.
+- Si el traslado cancelado todavía figura por pasar, el supervisor lo da por pasado ("Ya se pasó") sin mover nada.

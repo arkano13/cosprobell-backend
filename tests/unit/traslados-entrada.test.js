@@ -17,6 +17,16 @@ test("traslados de la 01 a la 02: solo las líneas de la grande a la pequeña, e
   assert.deepEqual(lineasDeEntrada(traslado, { grande: "04", pequena: "02" }), [{ lineNum: 3, itemCode: "X2", unidades: 5 }]);
 });
 
+test("traslados de la 01 a la 02: la cancelación (cantidades negativas) se recibe y no deja nada por pasar", async () => {
+  const { construirLoteTrasladosEntrada, construirLoteTrasladosPreparacion } = await import("../../puente/trasladosPreparacion.js");
+  const linea = { LineNum: 0, ItemCode: "ER10017", Quantity: -1, FromWarehouseCode: "01", WarehouseCode: "02", UoMEntry: -1, UoMCode: "Manual", InventoryQuantity: -1 };
+  const sap = { DocEntry: 5015, DocNum: 4727, DocDate: "2026-10-26", CardCode: null, FromWarehouse: "01", ToWarehouse: "02", StockTransferLines: [linea] };
+  const lote = construirLoteTrasladosEntrada([sap], "E", 1);
+  assert.deepEqual(lineasDeEntrada(lote.trasladosEntrada[0], { grande: "01", pequena: "02" }), []);
+  // Los que salen de la 02 siguen sin aceptar cantidades negativas.
+  assert.throws(() => construirLoteTrasladosPreparacion([{ ...sap, FromWarehouse: "02", ToWarehouse: "C64" }], "E", 1), { code: "TRASLADO_SAP_INVALIDO" });
+});
+
 test("traslados de la 01 a la 02: al volver a recibirlo no se pierde lo ya pasado", async () => {
   const guardadas = new Map([["900|0", { id: 1, aceptadas: 60 }]]);
   const hecho = { traslados: [], creadas: [], actualizadas: [] };
