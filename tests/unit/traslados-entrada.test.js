@@ -32,7 +32,7 @@ test("traslados de la 01 a la 02: al volver a recibirlo no se pierde lo ya pasad
   const hecho = { traslados: [], creadas: [], actualizadas: [] };
   const tx = {
     configuracion: { findUnique: async () => ({ valor: { grande: "01", pequena: "02" } }) },
-    trasladoEntrada: { upsert: async (a) => hecho.traslados.push(a.create.docNum) },
+    trasladoEntrada: { findUnique: async () => null, upsert: async (a) => hecho.traslados.push(a.create.docNum) },
     trasladoEntradaLinea: {
       findUnique: async ({ where }) => guardadas.get(`${where.docEntry_lineNum.docEntry}|${where.docEntry_lineNum.lineNum}`) ?? null,
       create: async ({ data }) => hecho.creadas.push([data.lineNum, data.unidades]),
@@ -43,19 +43,20 @@ test("traslados de la 01 a la 02: al volver a recibirlo no se pierde lo ya pasad
   assert.deepEqual(hecho, { traslados: [4695], creadas: [[1, 24]], actualizadas: [[1, 60]] });
 });
 
-test("traslados de la 01 a la 02: la cancelación cierra el original idéntico y sin pasar, y nada más", async () => {
+test("traslados de la 01 a la 02: la cancelación cierra solo un original único, una sola vez", async () => {
   const linea = (docEntry, lineNum, itemCode, unidades, extra = {}) => ({ id: docEntry * 100 + lineNum, docEntry, lineNum, itemCode, unidades,
     aceptadas: 0, cerradaPor: null, ...extra });
-  const tx = (lineas) => ({
+  const tx = (lineas, recibidos = new Map()) => ({
     configuracion: { findUnique: async () => null },
-    trasladoEntrada: { upsert: async () => {} },
+    trasladoEntrada: { findUnique: async ({ where }) => recibidos.get(where.docEntry) ?? null,
+      upsert: async ({ where, create }) => { if (!recibidos.has(where.docEntry)) recibidos.set(where.docEntry, create); } },
     trasladoEntradaLinea: {
       findUnique: async () => null, create: async () => {}, update: async () => {},
       findMany: async ({ where }) => {
         if (where.itemCode) {
           const vistos = lineas.filter((l) => l.docEntry < where.docEntry.lt && where.itemCode.in.includes(l.itemCode) && l.aceptadas === 0 && !l.cerradaPor)
             .map((l) => l.docEntry);
-          return [...new Set(vistos)].sort((a, b) => b - a).map((docEntry) => ({ docEntry }));
+          return [...new Set(vistos)].map((docEntry) => ({ docEntry }));
         }
         return lineas.filter((l) => l.docEntry === where.docEntry);
       },
@@ -67,17 +68,33 @@ test("traslados de la 01 a la 02: la cancelación cierra el original idéntico y
     { lineNum: 0, itemCode: "ER10017", quantity: -1, fromWarehouseCode: "01", warehouseCode: "02", uomEntry: -1, uomCode: "Manual", inventoryQuantity: -1 },
     { lineNum: 1, itemCode: "ER10020", quantity: -12, fromWarehouseCode: "01", warehouseCode: "02", uomEntry: -1, uomCode: "Manual", inventoryQuantity: -12 },
   ] };
-  // El original (4726) se cierra; el rehecho (4728, posterior) y uno distinto (4700) no.
-  const lineas = [linea(5014, 0, "ER10020", 12), linea(5014, 1, "ER10017", 1), linea(5016, 0, "ER10017", 1), linea(5016, 1, "ER10020", 12),
+  const cerrados = (lineas) => [...new Set(lineas.filter((l) => l.cerradaPor).map((l) => `${l.docEntry}:${l.cerradaPor}`))];
+  // Un solo original idéntico y anterior: se cierra (el rehecho 5016 es posterior y el 4990 es distinto).
+  const unico = [linea(5014, 0, "ER10020", 12), linea(5014, 1, "ER10017", 1), linea(5016, 0, "ER10017", 1), linea(5016, 1, "ER10020", 12),
     linea(4990, 0, "ER10017", 1), linea(4990, 1, "ER10020", 6)];
-  await guardarTrasladoEntrada(cancelacion, tx(lineas));
-  assert.deepEqual(lineas.filter((l) => l.cerradaPor).map((l) => [l.docEntry, l.cerradaPor]),
-    [[5014, "cancelado en SAP (4727)"], [5014, "cancelado en SAP (4727)"]]);
-  // Volver a recibir la cancelación no cierra otro.
-  await guardarTrasladoEntrada(cancelacion, tx(lineas));
-  assert.equal(lineas.filter((l) => l.cerradaPor).length, 2);
-  // Si el original ya tenía algo pasado, no se toca: queda para el supervisor.
+  const recibidos = new Map();
+  await guardarTrasladoEntrada(cancelacion, tx(unico, recibidos));
+  assert.deepEqual(cerrados(unico), ["5014:cancelado en SAP (4727)"]);
+  assert.deepEqual([recibidos.get(5015).cancelacion, recibidos.get(5015).cancelaDocEntry], ["vinculada", 5014]);
+  // Al volver a recibirla no se busca otra vez, aunque ahora haya otro idéntico anterior sin cerrar.
+  unico.push(linea(5000, 0, "ER10017", 1), linea(5000, 1, "ER10020", 12));
+  await guardarTrasladoEntrada(cancelacion, tx(unico, recibidos));
+  assert.deepEqual(cerrados(unico), ["5014:cancelado en SAP (4727)"]);
+  // Dos originales idénticos y la misma cancelación recibida dos veces: no se sabe cuál canceló SAP. Queda "ambigua" para
+  // el supervisor y la segunda vez no se decide otra cosa, aunque para entonces uno de los dos ya tenga algo pasado.
+  const dos = [linea(5014, 0, "ER10020", 12), linea(5014, 1, "ER10017", 1), linea(5010, 0, "ER10017", 1), linea(5010, 1, "ER10020", 12)];
+  const recibidosDos = new Map();
+  await guardarTrasladoEntrada(cancelacion, tx(dos, recibidosDos));
+  assert.deepEqual(cerrados(dos), []);
+  assert.deepEqual([recibidosDos.get(5015).cancelacion, recibidosDos.get(5015).cancelaDocEntry], ["ambigua", null]);
+  dos[2].aceptadas = 1;
+  await guardarTrasladoEntrada(cancelacion, tx(dos, recibidosDos));
+  assert.deepEqual(cerrados(dos), []);
+  assert.equal(recibidosDos.get(5015).cancelacion, "ambigua");
+  // Con algo ya pasado del original, tampoco se toca.
   const pasado = [linea(5014, 0, "ER10020", 12, { aceptadas: 6 }), linea(5014, 1, "ER10017", 1)];
-  await guardarTrasladoEntrada(cancelacion, tx(pasado));
-  assert.equal(pasado.filter((l) => l.cerradaPor).length, 0);
+  const recibidosPasado = new Map();
+  await guardarTrasladoEntrada(cancelacion, tx(pasado, recibidosPasado));
+  assert.deepEqual(cerrados(pasado), []);
+  assert.equal(recibidosPasado.get(5015).cancelacion, "sin_original");
 });

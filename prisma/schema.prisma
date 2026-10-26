@@ -867,6 +867,10 @@ model TrasladoEntrada {
   docDate        DateTime               @db.Date
   sincronizadoEn DateTime               @default(now())
   lineas         TrasladoEntradaLinea[]
+  // Solo en una cancelación (líneas en negativo): qué se decidió la primera vez que llegó y qué traslado canceló.
+  // vinculada: se cerró `cancelaDocEntry`; ambigua: varios originales posibles; sin_original: ninguno (o ya pasado).
+  cancelacion     String?
+  cancelaDocEntry Int?
 
   @@map("traslados_entrada")
 }
