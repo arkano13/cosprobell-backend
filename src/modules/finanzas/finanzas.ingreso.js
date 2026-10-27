@@ -27,6 +27,9 @@ export async function iniciarFinanzas(entidad, entrada, empresa) {
   exigirEntidad(entidad);
   const datos = validar(inicioSchema, entrada);
   if (datos.empresa !== empresa) throw falloFinanzas("EMPRESA_NO_AUTORIZADA", "Empresa SAP distinta", 403);
+  if (datos.lectura === "get_parcial" && ["partidas", "conciliaciones"].includes(entidad)) {
+    throw falloFinanzas("ENTIDAD_NO_DISPONIBLE_GET", "Entidad excluida de esta importación", 400);
+  }
   return repo.conBloqueo(async tx => {
     await comprobarEmpresa(empresa, tx);
     const c = await repo.control(entidad, tx);
@@ -38,6 +41,7 @@ export async function iniciarFinanzas(entidad, entrada, empresa) {
       return { recorridoId: c.recorridoId, completo: Boolean(c.finalizadoEn) };
     }
     if (c && !c.finalizadoEn) throw falloFinanzas("RECORRIDO_EN_CURSO", "Termine la carga financiera pendiente");
+    if (c?.activoId && c.configuracion.lectura !== datos.lectura) throw falloFinanzas("LECTOR_FINANCIERO_DISTINTO", "Revise la carga previa antes de cambiar su origen");
     if (c && ["desde", "monedaLocal", "monedaSistema"].some(k => c.configuracion[k] !== datos[k])) throw falloFinanzas("ALCANCE_FINANCIERO_DISTINTO", "Conserve la fecha histórica y las monedas durante esta instalación");
     await repo.iniciar(entidad, datos, tx);
     return { recorridoId: datos.recorridoId, completo: false };

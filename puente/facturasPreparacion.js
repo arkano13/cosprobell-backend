@@ -4,7 +4,11 @@ import { ErrorPuente } from "./http.js";
 
 export function construirLoteFacturasPreparacion(filas, empresa, secuencia) {
   if (filas.some(f => f.ReserveInvoice !== "tNO")) throw new ErrorPuente("FACTURA_RESERVA_NO_ADMITIDA");
-  const pedidos = construirLotePedidos(filas, empresa, secuencia).pedidos;
+  // En documentos de cancelación SAP puede omitir Cancelled. Conservar el
+  // estado específico y bloquear su preparación en nuestro contrato local.
+  const normalizadas = filas.map(f => f.Cancelled == null && f.CancelStatus === "csCancellation"
+    ? { ...f, Cancelled: "tYES" } : f);
+  const pedidos = construirLotePedidos(normalizadas, empresa, secuencia).pedidos;
   const resultado = loteFacturasPreparacionSchema.safeParse({ version: 1, empresa, secuencia,
     facturasPreparacion: pedidos.map((p, i) => ({ ...p, creditos: filas[i].CreditosPreparacion })) });
   if (!resultado.success) throw new ErrorPuente("FACTURA_PREPARACION_INVALIDA");

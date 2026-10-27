@@ -7,7 +7,8 @@ export function crearClienteSap(config, fetchImpl = fetch) {
   const { consulta, codigos } = consultaParaConfig(config);
   if (config.huellaSap) fetchImpl = crearTransporteSap(config.sapUrl, config.huellaSap);
   let cookie = null;
-  let almacenesSqlVerificados = false;
+  let alcanceVerificacion = null;
+  let almacenesSqlVerificados = new Set();
   async function login() {
     await config.control?.antesDeConsultar();
     const respuesta = await solicitar(`${config.sapUrl}/Login`, {
@@ -55,6 +56,13 @@ export function crearClienteSap(config, fetchImpl = fetch) {
     }
   }
   return {
+    // Importador puntual: solo recursos de lectura, sin registrar SQLQueries.
+    async leerRecursoFinanciero(ruta, lector) {
+      if (!/^(BusinessPartners|Invoices|CreditNotes|IncomingPayments|SalesPersons|PaymentTermsTypes|JournalEntries|Currencies)(\?|\('[A-Za-z0-9$€£]{1,3}'\)\?)/.test(ruta) || /[\r\n#]/.test(ruta)) {
+        throw new ErrorPuente("RECURSO_FINANCIERO_INVALIDO");
+      }
+      return obtener(ruta, { Prefer: "odata.maxpagesize=20" }, lector);
+    },
     async prepararConsultaFinanciera(definicion, crear = false) {
       if (!/^CP_FIN_[a-f0-9]{20}$/.test(definicion.SqlCode)) throw new ErrorPuente("CONSULTA_FINANCIERA_INVALIDA");
       const ruta = `SQLQueries('${definicion.SqlCode}')`;
@@ -108,12 +116,16 @@ export function crearClienteSap(config, fetchImpl = fetch) {
         ? !Number.isInteger(cursor) || cursor < 0 || cursor > 2147483647
         : typeof cursor !== "string")) throw new ErrorPuente("CURSOR_INVALIDO");
       if (entidad.consultaExistenciasSql) {
-        if (!almacenesSqlVerificados) {
-          for (const codigo of codigos) {
+        const alcance = entidad.verificacionAlmacenesId ?? "sesion";
+        if (alcanceVerificacion !== alcance) { alcanceVerificacion = alcance; almacenesSqlVerificados = new Set(); }
+        for (const codigo of entidad.almacenesVerificados ?? []) if (codigos.includes(codigo)) almacenesSqlVerificados.add(codigo);
+        for (const codigo of codigos) {
+          if (!almacenesSqlVerificados.has(codigo)) {
             const wh = await obtener(`Warehouses('${codigo}')?$select=WarehouseCode`);
             if (wh?.WarehouseCode !== codigo) throw new ErrorPuente("ALMACEN_SAP_INVALIDO", false, { solicitado: codigo, recibido: wh?.WarehouseCode });
+            await entidad.confirmarAlmacen?.(codigo);
+            almacenesSqlVerificados.add(codigo);
           }
-          almacenesSqlVerificados = true;
         }
         const tamano = entidad.tamanoPagina ?? 20;
         const parametro = encodeURIComponent(`'${(cursor ?? "").replaceAll("'", "''")}'`).replaceAll("'", "%27");

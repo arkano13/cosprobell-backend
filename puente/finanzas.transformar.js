@@ -2,7 +2,7 @@ import { FINANZAS, decimal, cursorRegistro, validarCursor } from "../src/shared/
 import { ErrorPuente } from "./http.js";
 
 // Desplazar el punto sobre texto: nunca convertir la mantisa a Number ni redondear.
-function expandirCientifico(valor) {
+export function expandirCientifico(valor) {
   const partes = /^(-?)(\d+)(?:\.(\d+))?[eE]([+-]?\d+)$/.exec(valor);
   if (!partes) return valor;
   const [, signo, entero, fraccion = "", exponente] = partes;
@@ -41,7 +41,7 @@ export function transformarFinanzas(entidad, filas, cursor) {
   return filas.map(f => {
     const registro = { ...f };
     for (const [campo, tipo] of Object.entries(def.campos)) {
-      if (tipo === decimal && typeof registro[campo] === "string") {
+      if ((tipo === decimal || tipo.unwrap?.() === decimal) && typeof registro[campo] === "string") {
         registro[campo] = expandirCientifico(registro[campo]);
       }
       if (["fecha", "vencimiento", "fechaDocumento"].includes(campo) && typeof registro[campo] === "string" &&

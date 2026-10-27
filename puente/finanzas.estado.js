@@ -13,6 +13,12 @@ export async function abrirFinanzas(config, entidad) {
   catch (e) { if (e.code !== "ENOENT") throw new ErrorPuente("ESTADO_FINANCIERO_INVALIDO"); }
   const nuevo = !estado;
   estado ??= { version: 1, origen: config.origen, recorrido: null, secuencia: 0, cursor: null, pendiente: null };
+  if (estado.cantidadConfirmada !== undefined && (!Number.isSafeInteger(estado.cantidadConfirmada) || estado.cantidadConfirmada < 0)) throw new ErrorPuente("ESTADO_FINANCIERO_INVALIDO");
+  const cursorSapValido = c => c === null || (c && typeof c === "object" && !Array.isArray(c) &&
+    (Number.isSafeInteger(c.id) || typeof c.id === "string" && c.id.length > 0 && c.id.length <= 100) &&
+    (c.linea === null || Number.isSafeInteger(c.linea) && c.linea >= 0));
+  if (estado.recorrido?.lectura === "get_parcial" && (!cursorSapValido(estado.cursorSap) ||
+    estado.pendiente && !cursorSapValido(estado.pendiente.cursorSap))) throw new ErrorPuente("ESTADO_FINANCIERO_INVALIDO");
   if (estado.version !== 1 || estado.origen !== config.origen || !Number.isInteger(estado.secuencia) || estado.secuencia < 0 ||
     (estado.cursor !== null && !validarCursor(entidad, estado.cursor)) ||
     (estado.recorrido !== null && !inicioSchema.safeParse(estado.recorrido).success) ||

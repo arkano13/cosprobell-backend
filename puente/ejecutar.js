@@ -6,7 +6,10 @@ import { sincronizar } from "./sincronizar.js";
 import { ErrorPuente } from "./http.js";
 import { entidadesHabilitadas } from "./entidades.js";
 import { crearControl, entidadPendiente, ordenarEntidades } from "./control.js";
-import { prepararSolicitud, confirmarSolicitudLocal, faltaSolicitud } from "./solicitud-manual.js";
+import { alcanceSolicitud, sincronizarSolicitud, confirmarSolicitudLocal, faltaSolicitud } from "./solicitud-manual.js";
+import { opcionesPuente, alcanceSeleccion } from "./opciones.js";
+import { estadoPublico } from "./estado-publico.js";
+import { VERSION_OPERATIVA } from "./version-operativa.js";
 
 let parar = false, despertar;
 for (const senal of ["SIGINT", "SIGTERM"]) process.on(senal, () => { parar = true; despertar?.(); });
@@ -16,10 +19,13 @@ const esperar = (ms) => new Promise((resolve) => {
 });
 let almacen, sap;
 try {
-  if (process.argv.slice(2).some((a) => !["--once", "--watch", "--sondeo", "--forzar", "--reconciliar"].includes(a)) ||
-      (process.argv.includes("--once") && process.argv.includes("--watch"))) throw new Error("Argumentos inválidos");
   const config = configurar(process.env);
   const ENTIDADES = entidadesHabilitadas(config);
+  const opciones = opcionesPuente(process.argv.slice(2), ENTIDADES, config.pausadas);
+  console.log(JSON.stringify({ evento: "configuracion_activa", versionOperativa: VERSION_OPERATIVA, maxConsultas: config.maxConsultas,
+    consultasPorTurno: config.maxConsultasEntidad, maxDuracionMs: config.maxDuracionMs, pausaMs: config.pausaMs,
+    pausadas: config.pausadas, seleccionadas: opciones.seleccion ? [...opciones.seleccion] : null,
+    frecuencias: config.frecuencias }));
   if (config.huellaSap) console.error(JSON.stringify({ evento: "advertencia", codigo: "TLS_SAP_CERTIFICADO_FIJADO", mensaje: "Vigencia, nombre y cadena de confianza omitidos; certificado verificado por huella SHA-256. Si cambia el certificado, la conexión se rechazará." }));
   config.forzar = process.argv.includes("--forzar") || process.argv.includes("--reconciliar");
   config.reconciliar = process.argv.includes("--reconciliar");
@@ -27,11 +33,15 @@ try {
   if (config.forzar && process.argv.includes("--watch")) throw new Error("Forzar requiere una ejecución manual");
   if (sondeo && (process.argv.includes("--watch") || config.forzar)) throw new Error("Argumentos incompatibles");
   if (process.argv.includes("--watch") && !Object.keys(config.frecuencias).length) throw new Error("Defina frecuencias antes de usar --watch");
+  if (opciones.estado) {
+    console.log(JSON.stringify(await estadoPublico(config, ENTIDADES.filter(e => !opciones.seleccion || opciones.seleccion.has(e.nombre)))));
+  } else {
   config.control = crearControl(config);
   sap = crearClienteSap(config);
   if (sondeo) {
     // No abre el estado, no contacta al backend y nunca retira registros.
     for (const entidad of ENTIDADES) {
+      if (config.pausadas.includes(entidad.nombre) || opciones.seleccion && !opciones.seleccion.has(entidad.nombre)) continue;
       const filas = await sap.pagina(null, { ...entidad, tamanoPagina: 1 });
       if (filas.length) entidad.construirLote(filas, config.empresa, 1);
       console.log(JSON.stringify({ evento: "sondeo", entidad: entidad.nombre, registros: filas.length }));
@@ -49,7 +59,9 @@ try {
     config.control = crearControl(config);
     let solicitud = null;
     try {
-      solicitud = await backend.solicitud(ENTIDADES);
+      // Una ejecución dirigida por consola no altera solicitudes del botón.
+      const disponibles = ENTIDADES.filter(e => !config.pausadas.includes(e.nombre));
+      if (!opciones.seleccion && disponibles.length) solicitud = await backend.solicitud(disponibles);
       if (solicitud) await confirmarSolicitudLocal(solicitud, ENTIDADES, almacenes, backend);
     } catch (error) {
       if (error.code !== "HTTP_404") throw error;
@@ -57,10 +69,24 @@ try {
     }
     // Un error de datos en una entidad no impide sincronizar las demás; sin conexión se corta el ciclo.
     let temporal = false, fallidas = 0;
+    const alcanceManual = alcanceSolicitud(solicitud, ENTIDADES, almacenes);
+    const alcanceDirigido = alcanceSeleccion(opciones.seleccion, ENTIDADES, almacenes);
+    const deseadas = new Set(ENTIDADES.filter((e,i) => !config.pausadas.includes(e.nombre) &&
+      (!alcanceManual || alcanceManual.has(e.nombre)) && (!alcanceDirigido || alcanceDirigido.has(e.nombre)) &&
+      (faltaSolicitud(solicitud,e.nombre) || entidadPendiente(almacenes[i].estado,e.nombre,config))).map(e=>e.nombre));
+    const completadas = new Set();
     const orden = ordenarEntidades(ENTIDADES, almacenes).sort((a, b) =>
       Number(faltaSolicitud(solicitud, b.entidad.nombre)) - Number(faltaSolicitud(solicitud, a.entidad.nombre)));
     for (const { i, entidad } of orden) {
       if (parar) break;
+      if (config.pausadas.includes(entidad.nombre)) {
+        console.log(JSON.stringify({ evento: "entidad_pausada", entidad: entidad.nombre })); continue;
+      }
+      if (alcanceDirigido && !alcanceDirigido.has(entidad.nombre)) continue;
+      if (alcanceManual && !alcanceManual.has(entidad.nombre)) {
+        console.log(JSON.stringify({ evento: "aplazada_por_solicitud_manual", entidad: entidad.nombre }));
+        continue;
+      }
       const manual = faltaSolicitud(solicitud, entidad.nombre);
       if (!manual && !entidadPendiente(almacenes[i].estado, entidad.nombre, config)) {
         console.log(JSON.stringify({ evento: "omitida_por_frecuencia", entidad: entidad.nombre }));
@@ -72,13 +98,25 @@ try {
       }
       const atendido = { ...almacenes[i].estado, ultimaAtencion: new Date().toISOString() };
       await almacenes[i].guardar(atendido); almacenes[i].estado = atendido;
+      const inicioEntidad = Date.now(), consultasAntes = config.control.resumen().consultasSap;
+      const medicion = () => ({ consultasSap: config.control.resumen().consultasSap - consultasAntes,
+        duracionMs: Date.now() - inicioEntidad, manual,
+        modo: manual ? "solicitud_app" : opciones.seleccion ? "seleccion_consola" : config.forzar ? "forzado" : "frecuencias" });
+      config.control.iniciarTurno(config.maxConsultasEntidad);
       try {
-        if (manual) await prepararSolicitud(almacenes[i], solicitud.id);
-        const resultado = await sincronizar({ config, almacen: almacenes[i], sap, backend, entidad, detenido: () => parar });
-        console.log(JSON.stringify({ evento: "ciclo", entidad: entidad.nombre, ...resultado }));
+        const ejecutar = () => sincronizar({ config, almacen: almacenes[i], sap, backend, entidad, detenido: () => parar });
+        const resultado = manual
+          ? await sincronizarSolicitud({ almacen: almacenes[i], solicitud, ejecutar, detenido: () => parar })
+          : await ejecutar();
+        console.log(JSON.stringify({ evento: "ciclo", entidad: entidad.nombre, ...resultado, ...medicion() }));
+        if (resultado.completo) completadas.add(entidad.nombre);
       } catch (error) {
+        if (error.code === "PRESUPUESTO_ENTIDAD_AGOTADO") {
+          console.log(JSON.stringify({ evento: "pausa_por_entidad", entidad: entidad.nombre, ...medicion() }));
+          orden.push({ i, entidad }); continue;
+        }
         if (error.code === "PRESUPUESTO_AGOTADO") {
-          console.log(JSON.stringify({ evento: "pausa_por_presupuesto", entidad: entidad.nombre }));
+          console.log(JSON.stringify({ evento: "pausa_por_presupuesto", entidad: entidad.nombre, ...medicion() }));
           break;
         }
         // No imprimir cuerpos HTTP, cookies, claves, URLs ni errores del driver.
@@ -89,14 +127,17 @@ try {
           await backend.progresoSolicitud(solicitud.id, [], codigo).catch(() => {});
           solicitud = null;
         }
-        console.error(JSON.stringify({ evento: "fallo", entidad: entidad.nombre, codigo: error.code ?? "ERROR_LOCAL", temporal: error.temporal === true, detalle }));
+        console.error(JSON.stringify({ evento: "fallo", entidad: entidad.nombre, codigo: error.code ?? "ERROR_LOCAL", temporal: error.temporal === true, detalle, ...medicion() }));
+        // No volver a probar las mismas credenciales/permisos en cada entidad.
+        if (["HTTP_401", "HTTP_403"].includes(error.code)) { fallidas++; break; }
         if (error.temporal) { temporal = true; break; }
         fallidas++;
-      }
+      } finally { config.control.finalizarTurno(); }
       // Si se pierde la confirmación, conservar el éxito local y reenviarlo al reiniciar.
       if (solicitud) await confirmarSolicitudLocal(solicitud, ENTIDADES, almacenes, backend);
     }
-    console.log(JSON.stringify({ evento: "resumen", ...config.control.resumen() }));
+    console.log(JSON.stringify({ evento: "resumen", ...config.control.resumen(),
+      completadas: [...completadas], pendientes: [...deseadas].filter(n=>!completadas.has(n)), pausadas: config.pausadas }));
     if (!continuo || parar) { if (temporal || fallidas) process.exitCode = 1; break; }
     if (temporal) { fallos++; await esperar(Math.min(60000, 1000 * 2 ** Math.min(fallos, 6))); continue; }
     // En --watch, un error que requiere corrección detiene el proceso, como antes.
@@ -104,6 +145,7 @@ try {
     fallos = 0;
     await esperar(config.intervaloMs);
   } while (!parar);
+  }
   }
 } catch (error) {
   console.error(JSON.stringify({ evento: "inicio_fallido", codigo: error.code ?? "REVISAR_CONFIGURACION",

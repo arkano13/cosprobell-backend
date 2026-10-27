@@ -39,6 +39,12 @@ export async function abrirAlmacen(config, entidad) {
       (estado.finalizando !== undefined && typeof estado.finalizando !== "boolean") ||
       (estado.reiniciarRecorrido !== undefined && typeof estado.reiniciarRecorrido !== "boolean") ||
       (estado.finalizando && (!estado.recorridoId || estado.pendiente))) throw new ErrorPuente("ESTADO_LOCAL_INCOMPATIBLE");
+  const verificacion = estado.verificacionAlmacenes;
+  if (verificacion != null && (typeof verificacion !== "object" || Array.isArray(verificacion) ||
+    typeof verificacion.recorridoId !== "string" || typeof verificacion.fuente !== "string" ||
+    !Array.isArray(verificacion.codigos) || verificacion.codigos.length > 10 ||
+    new Set(verificacion.codigos).size !== verificacion.codigos.length ||
+    verificacion.codigos.some(c => typeof c !== "string" || !/^[A-Za-z0-9_-]{1,8}$/.test(c)))) throw new ErrorPuente("ESTADO_LOCAL_INCOMPATIBLE");
   if (estado.version !== 1 || estado.origen !== config.origen || !Number.isSafeInteger(estado.secuencia) || estado.secuencia < 0 ||
       !(estado.cursor === null || (entidad.claveNumerica
         ? Number.isInteger(estado.cursor) && estado.cursor >= 0 && estado.cursor <= 2147483647
