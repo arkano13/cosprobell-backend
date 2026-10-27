@@ -20,6 +20,26 @@ export function expandirCientifico(valor) {
     : "0." + "0".repeat(-posicion) + significativas);
 }
 
+// Price del Service Layer puede incluir un residuo de binary64 sobre sus seis
+// decimales. Comparar como enteros exactos: tolerancia relativa 2^-52 y además
+// absoluta de 1e-10. Nunca convertir cantidades monetarias a Number para redondear.
+export function normalizarPrecioSap(valor) {
+  if (typeof valor !== "string") return valor;
+  const partes = /^(-?)(0|[1-9]\d{0,12})\.(\d{7,40})$/.exec(valor);
+  if (!partes) return valor;
+  const [, signo, entero, fraccion] = partes;
+  const original = BigInt(entero + fraccion);
+  const divisor = 10n ** BigInt(fraccion.length - 6);
+  const redondeado = (original + divisor / 2n) / divisor;
+  const residuo = original - redondeado * divisor;
+  const diferencia = residuo < 0n ? -residuo : residuo;
+  const escala = 10n ** BigInt(fraccion.length);
+  if (diferencia * 4503599627370496n > original || diferencia * 10000000000n > escala ||
+      (original !== 0n && redondeado === 0n)) return valor;
+  const decimalCorto = String(redondeado % 1000000n).padStart(6, "0").replace(/0+$/, "");
+  return (redondeado === 0n ? "" : signo) + String(redondeado / 1000000n) + (decimalCorto ? "." + decimalCorto : "");
+}
+
 // JSON.parse con source mantiene exactamente los decimales del texto HTTP.
 // No usar Response.json(): ya habría convertido los importes a coma flotante.
 export function lectorFinanciero(entidad) {
@@ -49,6 +69,7 @@ export function transformarFinanzas(entidad, filas, cursor) {
         registro[campo] = registro[campo].slice(0, 10);
       }
     }
+    if (["facturaLineas", "notaCreditoLineas"].includes(entidad)) registro.precio = normalizarPrecioSap(registro.precio);
     const validado = def.schema.safeParse(registro);
     if (!validado.success) throw new ErrorPuente("FINANZA_SAP_INVALIDA", false, { entidad, campo: String(validado.error.issues[0]?.path[0]) });
     const siguiente = cursorRegistro(entidad, validado.data);

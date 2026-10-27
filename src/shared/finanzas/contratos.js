@@ -25,7 +25,7 @@ export const FINANZAS = {
   condicionesPago: def(["codigo"], "codigo:i nombre:s dias:i meses:i cuotas:i?", { snapshot: true }),
   facturas: def(["docEntry"], documento),
   facturaLineas: def(["docEntry", "linea"], linea),
-  cuotas: def(["docEntry", "cuota"], `docEntry:i cuota:i cardCode:s fecha:f vencimiento:f total:d totalFC:d totalSC:d?
+  cuotas: def(["docEntry", "cuota"], `docEntry:i cuota:i cardCode:s fecha:f vencimiento:f total:d totalFC:d? totalSC:d?
     pagado:d? pagadoFC:d? pagadoSC:d? estado:s?`),
   notasCredito: def(["docEntry"], documento),
   notaCreditoLineas: def(["docEntry", "linea"], linea),
