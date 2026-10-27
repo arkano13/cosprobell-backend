@@ -69,7 +69,9 @@ export function definicionesGetFinanzas(config) {
       filtro: "DocType eq 'rCustomer'", historico: true, adicionales: ["Cancelled"], coleccion: "PaymentInvoices", claveLinea: "LineNum",
       mapaLinea: mapa("linea:LineNum documento:DocEntry tipo:InvoiceType cuota:InstallmentId lineaDocumento:DocLine aplicado:SumApplied aplicadoFC:AppliedFC aplicadoSC:AppliedSys"),
       completar: d => ({ cancelado: bandera(d.Cancelled) }) }),
-    base("movimientos", "JournalEntries", "JdtNum", mapa("transId:JdtNum fecha:ReferenceDate fechaDocumento:TaxDate tipo:DocumentType referencia:BaseReference"), {
+    // OriginalJournal es TransType: el documento que originó el asiento.
+    // DocumentType es otra propiedad y puede ser null aun con origen confirmado.
+    base("movimientos", "JournalEntries", "JdtNum", mapa("transId:JdtNum fecha:ReferenceDate fechaDocumento:TaxDate tipo:OriginalJournal referencia:BaseReference"), {
       coleccion: "JournalEntryLines", claveLinea: "Line_ID", completar: () => ({ documento: null }),
       mapaLinea: mapa("linea:Line_ID cardCode:ShortName vencimiento:DueDate monedaFC:FCCurrency debe:Debit haber:Credit debeFC:FCDebit haberFC:FCCredit debeSC:DebitSys haberSC:CreditSys") }),
   ];
@@ -113,7 +115,9 @@ export async function leerPaginaGet({ sap, def, config, recorrido, cursorSap = n
       for (const l of pendientes.slice(0, capacidad)) {
         const registro = { ...convertir(def.mapa, d), ...convertir(def.mapaLinea, l), ...def.completar?.(d) };
         if (def.nombre === "movimientos") {
-          if (registro.tipo === undefined || registro.tipo === null) throw new ErrorPuente("FINANZA_SAP_INVALIDA");
+          if (!(typeof registro.tipo === "string" && registro.tipo.trim().length > 0 || Number.isSafeInteger(registro.tipo))) {
+            throw new ErrorPuente("FINANZA_SAP_INVALIDA", false, { entidad: "movimientos", campo: "OriginalJournal", transId: id });
+          }
           registro.tipo = String(registro.tipo);
         }
         filas.push(registro);

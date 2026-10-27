@@ -20,10 +20,10 @@ export function expandirCientifico(valor) {
     : "0." + "0".repeat(-posicion) + significativas);
 }
 
-// Price del Service Layer puede incluir un residuo de binary64 sobre sus seis
+// Los decimales del Service Layer pueden incluir un residuo de binary64 sobre sus seis
 // decimales. Comparar como enteros exactos: tolerancia relativa 2^-52 y además
 // absoluta de 1e-10. Nunca convertir cantidades monetarias a Number para redondear.
-export function normalizarPrecioSap(valor) {
+export function normalizarDecimalSap(valor) {
   if (typeof valor !== "string") return valor;
   const partes = /^(-?)(0|[1-9]\d{0,12})\.(\d{7,40})$/.exec(valor);
   if (!partes) return valor;
@@ -39,6 +39,8 @@ export function normalizarPrecioSap(valor) {
   const decimalCorto = String(redondeado % 1000000n).padStart(6, "0").replace(/0+$/, "");
   return (redondeado === 0n ? "" : signo) + String(redondeado / 1000000n) + (decimalCorto ? "." + decimalCorto : "");
 }
+// Compatibilidad con las primeras pruebas y herramientas de precios.
+export const normalizarPrecioSap = normalizarDecimalSap;
 
 // JSON.parse con source mantiene exactamente los decimales del texto HTTP.
 // No usar Response.json(): ya habría convertido los importes a coma flotante.
@@ -62,14 +64,13 @@ export function transformarFinanzas(entidad, filas, cursor) {
     const registro = { ...f };
     for (const [campo, tipo] of Object.entries(def.campos)) {
       if ((tipo === decimal || tipo.unwrap?.() === decimal) && typeof registro[campo] === "string") {
-        registro[campo] = expandirCientifico(registro[campo]);
+        registro[campo] = normalizarDecimalSap(expandirCientifico(registro[campo]));
       }
       if (["fecha", "vencimiento", "fechaDocumento"].includes(campo) && typeof registro[campo] === "string" &&
         /^\d{4}-\d{2}-\d{2}T/.test(registro[campo]) && tipo.safeParse(registro[campo].slice(0, 10)).success) {
         registro[campo] = registro[campo].slice(0, 10);
       }
     }
-    if (["facturaLineas", "notaCreditoLineas"].includes(entidad)) registro.precio = normalizarPrecioSap(registro.precio);
     const validado = def.schema.safeParse(registro);
     if (!validado.success) throw new ErrorPuente("FINANZA_SAP_INVALIDA", false, { entidad, campo: String(validado.error.issues[0]?.path[0]) });
     const siguiente = cursorRegistro(entidad, validado.data);
