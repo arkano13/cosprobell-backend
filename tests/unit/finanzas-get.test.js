@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { definicionesGetFinanzas, leerPaginaGet, leerJsonFinancieroGet } from "../../puente/finanzas.get.js";
-import { transformarFinanzas } from "../../puente/finanzas.transformar.js";
+import { transformarFinanzas, normalizarPrecioSap } from "../../puente/finanzas.transformar.js";
 import { sincronizarPaginaFinanzas, fuenteFinanzas } from "../../puente/finanzas.sincronizar.js";
 import { importarTanda, informeImportacion } from "../../puente/finanzas.importar.js";
 import { crearClienteSap } from "../../puente/sap.client.js";
@@ -14,6 +14,24 @@ const factura = { DocEntry: 17065, DocNum: 5, Series: 1, CardCode: "C1", DocDate
   DocumentStatus: "bost_Open", SalesPersonCode: -1, PaymentGroupCode: -1, TransNum: 1, Cancelled: "tNO", CancelStatus: "csNo" };
 const fake = value => ({ leerRecursoFinanciero: async (_ruta, lector) => lector(Response.json({ value })) });
 const almacen = (estado = {}) => ({ nuevo: true, estado: { secuencia: 0, cursor: null, recorrido: null, pendiente: null, ...estado }, async guardar(s) { this.estado = structuredClone(s); } });
+
+test("precios: admite residuos mínimos sin redondear precisión real ni totales", async () => {
+  for (const [entrada, esperado] of [["583.6900000000001", "583.69"], ["-583.6900000000001", "-583.69"],
+    ["1.0000000000000002", "1"], ["583.6900000000000", "583.69"], ["0.000000000", "0"]]) {
+    assert.equal(normalizarPrecioSap(entrada), esperado);
+  }
+  for (const entrada of ["583.6900001", "583.6900012", "0.0000000000001", "9999999999999.1234567", "1e1000000", null]) {
+    assert.equal(normalizarPrecioSap(entrada), entrada);
+  }
+  const linea = { LineNum: 0, ItemCode: "P", ItemDescription: "Producto", Quantity: 1, Price: 583.6900000000001,
+    LineTotal: 583.69, WarehouseCode: "02", BaseType: -1, BaseEntry: null, BaseLine: null };
+  for (const entidad of ["notaCreditoLineas", "facturaLineas"]) {
+    const pagina = await leerPaginaGet({ sap: fake([{ ...factura, DocumentLines: [linea] }]), def: defs[entidad], config, recorrido });
+    assert.equal(transformarFinanzas(entidad, pagina.filas, null)[0].precio, "583.69");
+    assert.throws(() => transformarFinanzas(entidad, [{ ...pagina.filas[0], precio: "583.6900001" }], null), { code: "FINANZA_SAP_INVALIDA" });
+    assert.throws(() => transformarFinanzas(entidad, [{ ...pagina.filas[0], total: "583.6900000000001" }], null), { code: "FINANZA_SAP_INVALIDA" });
+  }
+});
 
 test("GET: transporta importes exactos, incluye cancelaciones y no incluye conciliaciones", async () => {
   const dato = await leerJsonFinancieroGet(new Response('{"DocEntry":1,"DocTotal":9999999999999.123456,"Quantity":1E-06}'));
@@ -34,6 +52,19 @@ test("GET: importes desconocidos permanecen null en pagos y cuotas", async () =>
   const c = await leerPaginaGet({ sap: fake([{ ...factura, DocumentInstallments: [{ InstallmentId: 1, DueDate: "2020-02-01", Total: "100", TotalFC: "0" }] }]), def: defs.cuotas, config, recorrido });
   assert.equal(transformarFinanzas("cuotas", c.filas, null)[0].pagado, null);
   for (const entidad of Object.keys(defs)) assert.equal(snapshotFinanciero(entidad, { lectura: "get_parcial" }), true);
+});
+
+test("GET: cuota con TotalFC null conserva el desconocido y mantiene el contrato del receptor", async () => {
+  for (const totalFC of [null, "0", "14.25"]) {
+    const pagina = await leerPaginaGet({ sap: fake([{ ...factura, DocumentInstallments: [{ InstallmentId: 1,
+      DueDate: "2020-02-01", Total: "390.0", TotalFC: totalFC }] }]), def: defs.cuotas, config, recorrido });
+    const registros = transformarFinanzas("cuotas", pagina.filas, null);
+    assert.equal(registros[0].totalFC, totalFC);
+    assert.equal(registros[0].total, "390.0");
+  }
+  const pagina = await leerPaginaGet({ sap: fake([{ ...factura, DocumentInstallments: [{ InstallmentId: 1,
+    DueDate: "2020-02-01", Total: "390.0" }] }]), def: defs.cuotas, config, recorrido });
+  assert.throws(() => transformarFinanzas("cuotas", pagina.filas, null), { code: "FINANZA_SAP_INVALIDA" });
 });
 test("GET: divide 73 líneas y rechaza una colección parcial o un cursor que retrocede", async () => {
   const f = { ...factura, DocumentLines: Array.from({ length: 73 }, (_, LineNum) => ({ LineNum, ItemCode: "P1", ItemDescription: "Producto", Quantity: "1", Price: "2", LineTotal: "2", WarehouseCode: "02", BaseType: -1, BaseEntry: null, BaseLine: null })) };
