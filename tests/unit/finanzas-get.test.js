@@ -5,7 +5,7 @@ import { transformarFinanzas, normalizarPrecioSap } from "../../puente/finanzas.
 import { sincronizarPaginaFinanzas, fuenteFinanzas } from "../../puente/finanzas.sincronizar.js";
 import { importarTanda, informeImportacion } from "../../puente/finanzas.importar.js";
 import { crearClienteSap } from "../../puente/sap.client.js";
-import { snapshotFinanciero } from "../../src/shared/finanzas/contratos.js";
+import { snapshotFinanciero, loteFinanzasSchema } from "../../src/shared/finanzas/contratos.js";
 
 const config = { empresa: "TEST", desde: "1900-01-01", monedaLocal: "LPS", monedaSistema: "USD", campoRuta: "U_ZONA", campoZona: null };
 const defs = definicionesGetFinanzas(config), recorrido = { ventana: config.desde };
@@ -15,7 +15,7 @@ const factura = { DocEntry: 17065, DocNum: 5, Series: 1, CardCode: "C1", DocDate
 const fake = value => ({ leerRecursoFinanciero: async (_ruta, lector) => lector(Response.json({ value })) });
 const almacen = (estado = {}) => ({ nuevo: true, estado: { secuencia: 0, cursor: null, recorrido: null, pendiente: null, ...estado }, async guardar(s) { this.estado = structuredClone(s); } });
 
-test("precios: admite residuos mínimos sin redondear precisión real ni totales", async () => {
+test("decimales: admite residuos mínimos sin redondear diferencias significativas", async () => {
   for (const [entrada, esperado] of [["583.6900000000001", "583.69"], ["-583.6900000000001", "-583.69"],
     ["1.0000000000000002", "1"], ["583.6900000000000", "583.69"], ["0.000000000", "0"]]) {
     assert.equal(normalizarPrecioSap(entrada), esperado);
@@ -29,8 +29,22 @@ test("precios: admite residuos mínimos sin redondear precisión real ni totales
     const pagina = await leerPaginaGet({ sap: fake([{ ...factura, DocumentLines: [linea] }]), def: defs[entidad], config, recorrido });
     assert.equal(transformarFinanzas(entidad, pagina.filas, null)[0].precio, "583.69");
     assert.throws(() => transformarFinanzas(entidad, [{ ...pagina.filas[0], precio: "583.6900001" }], null), { code: "FINANZA_SAP_INVALIDA" });
-    assert.throws(() => transformarFinanzas(entidad, [{ ...pagina.filas[0], total: "583.6900000000001" }], null), { code: "FINANZA_SAP_INVALIDA" });
+    assert.equal(transformarFinanzas(entidad, [{ ...pagina.filas[0], total: "583.6900000000001" }], null)[0].total, "583.69");
+    assert.throws(() => transformarFinanzas(entidad, [{ ...pagina.filas[0], total: "583.6900001" }], null), { code: "FINANZA_SAP_INVALIDA" });
   }
+});
+
+test("GET: totalSC del documento 16 se normaliza sin omitir la factura ni modificar otros campos", async () => {
+  const pagina = await leerPaginaGet({ sap: fake([{ ...factura, DocEntry: 16, TransNum: 17, DocTotalSys: "71.56999999999999" }]),
+    def: defs.facturas, config, recorrido });
+  assert.equal(pagina.filas[0].totalSC, "71.56999999999999");
+  const registro = transformarFinanzas("facturas", pagina.filas, null)[0];
+  assert.equal(registro.docEntry, 16);
+  assert.equal(registro.totalSC, "71.57");
+  assert.equal(registro.total, "100");
+  assert.equal(registro.pagado, "50");
+  assert.throws(() => transformarFinanzas("facturas", [{ ...pagina.filas[0], totalSC: "71.5700001" }], null),
+    { code: "FINANZA_SAP_INVALIDA" });
 });
 
 test("GET: transporta importes exactos, incluye cancelaciones y no incluye conciliaciones", async () => {
@@ -52,6 +66,18 @@ test("GET: importes desconocidos permanecen null en pagos y cuotas", async () =>
   const c = await leerPaginaGet({ sap: fake([{ ...factura, DocumentInstallments: [{ InstallmentId: 1, DueDate: "2020-02-01", Total: "100", TotalFC: "0" }] }]), def: defs.cuotas, config, recorrido });
   assert.equal(transformarFinanzas("cuotas", c.filas, null)[0].pagado, null);
   for (const entidad of Object.keys(defs)) assert.equal(snapshotFinanciero(entidad, { lectura: "get_parcial" }), true);
+});
+
+test("GET: límite de crédito null se conserva y el receptor distingue desconocido de cero", async () => {
+  for (const limite of [null, 0, 100]) {
+    const pagina = await leerPaginaGet({ sap: fake([{ CardCode: "C10134", CardName: "Prueba", Currency: "LPS",
+      CurrentAccountBalance: 0, CreditLimit: limite, SalesPersonCode: -1, PayTermsGrpCode: -1,
+      Valid: "tYES", Frozen: "tNO", U_ZONA: null }]), def: defs.clientes, config, recorrido });
+    const registros = transformarFinanzas("clientes", pagina.filas, null);
+    assert.equal(registros[0].limiteCredito, limite === null ? null : String(limite));
+    assert.equal(loteFinanzasSchema("clientes").safeParse({ recorridoId: "11111111-1111-4111-8111-111111111111",
+      secuencia: 7, registros }).success, true);
+  }
 });
 
 test("GET: cuota con TotalFC null conserva el desconocido y mantiene el contrato del receptor", async () => {
@@ -81,6 +107,30 @@ test("GET: documento sin aplicaciones no cierra el historial y asientos sin tipo
   const p = await leerPaginaGet({ sap: fake([{ DocEntry: 2, PaymentInvoices: [] }]), def: defs.aplicacionesPagos, config, recorrido });
   assert.deepEqual(p, { filas: [], cursorSap: { id: 2, linea: null }, completo: false });
   await assert.rejects(leerPaginaGet({ sap: fake([{ JdtNum: 1, JournalEntryLines: [{ Line_ID: 0 }] }]), def: defs.movimientos, config, recorrido }), { code: "FINANZA_SAP_INVALIDA" });
+});
+
+test("GET: el origen del asiento es OriginalJournal aunque DocumentType venga null", async () => {
+  const linea = { Line_ID: 0, ShortName: "C1", DueDate: "2020-01-01", FCCurrency: null,
+    Debit: 390, Credit: 0, FCDebit: 0, FCCredit: 0, DebitSys: 15, CreditSys: 0 };
+  for (const origen of ["ttARInvoice", "13", 13]) {
+    let consulta;
+    const sap = { leerRecursoFinanciero: async (ruta, lector) => {
+      consulta = ruta;
+      return lector(Response.json({ value: [{ JdtNum: 1, ReferenceDate: "2020-01-01", TaxDate: "2020-01-01",
+        BaseReference: "1", DocumentType: null, OriginalJournal: origen, JournalEntryLines: [linea] }] }));
+    } };
+    const p = await leerPaginaGet({ sap, def: defs.movimientos, config, recorrido });
+    const registro = transformarFinanzas("movimientos", p.filas, null)[0];
+    assert.equal(registro.tipo, String(origen));
+    assert.equal(registro.debe, "390");
+    assert.match(consulta, /OriginalJournal/);
+    assert.doesNotMatch(consulta, /DocumentType/);
+  }
+  for (const origen of [undefined, null, "", " ", {}, 1.5]) {
+    await assert.rejects(leerPaginaGet({ sap: fake([{ JdtNum: 1, DocumentType: "13", OriginalJournal: origen,
+      JournalEntryLines: [linea] }]), def: defs.movimientos, config, recorrido }),
+    e => e.code === "FINANZA_SAP_INVALIDA" && e.detalle.campo === "OriginalJournal");
+  }
 });
 test("GET: agrupa documentos pequeños y retoma exactamente dentro del último", async () => {
   const documentos = [1,2,3].map(DocEntry => ({ ...factura, DocEntry, DocumentLines: Array.from({ length: 23 }, (_, LineNum) => ({

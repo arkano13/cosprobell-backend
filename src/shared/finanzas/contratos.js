@@ -20,7 +20,7 @@ const def = (claves, especificacion, extra = {}) => ({ claves, campos: campos(es
 export const FINANZAS = {
   empresa: def(["codigo"], "codigo:s monedaLocal:s monedaSistema:s", { snapshot: true }),
   clientes: def(["cardCode"], `cardCode:s nombre:s? activo:b bloqueado:b moneda:s saldo:d saldoFC:d? saldoSC:d?
-    limiteCredito:d vendedor:i condicionPago:i zona:s? ruta:s?`, { snapshot: true }),
+    limiteCredito:d? vendedor:i condicionPago:i zona:s? ruta:s?`, { snapshot: true }),
   vendedores: def(["codigo"], "codigo:i nombre:s? activo:b", { snapshot: true }),
   condicionesPago: def(["codigo"], "codigo:i nombre:s dias:i meses:i cuotas:i?", { snapshot: true }),
   facturas: def(["docEntry"], documento),
