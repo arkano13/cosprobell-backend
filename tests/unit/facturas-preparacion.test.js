@@ -91,6 +91,16 @@ test("lista de materiales de venta (promo 2+1): se preparan sus productos y la l
   conCombo.combos = new Map([["COMBO", { cantidad: 1, lineas: [{ itemCode: "P9", cantidad: 3 }] }]]);
   assert.deepEqual(lineasParaPreparar(conCombo).map(l => [l.itemCode, l.cantidadPedida]), [["TINTE1", 2], ["TINTE2", 1], ["P9", 3]]);
 });
+test("artículos que no son de inventario: la promo se salta y un combo (tampoco de inventario) se prepara", () => {
+  const f = facturaSap(); f.CreditosPreparacion = [];
+  f.DocumentLines = [{ ...linea(0), ItemCode: "ER10492", Quantity: 1, InventoryQuantity: 1 },
+    { ...linea(1), ItemCode: "TINTE1", Quantity: 2, InventoryQuantity: 2 },
+    { ...linea(2), ItemCode: "ER10474", Quantity: 1, InventoryQuantity: 1 }];
+  const p = proyectarFactura(construirLoteFacturasPreparacion([f], "TEST", 1).facturasPreparacion[0]);
+  p.noInventario = new Set(["ER10492", "ER10474"]);
+  p.combos = new Map([["ER10474", { cantidad: 1, lineas: [{ itemCode: "BS12", cantidad: 1 }, { itemCode: "BS16", cantidad: 1 }, { itemCode: "BS10", cantidad: 1 }] }]]);
+  assert.deepEqual(lineasParaPreparar(p).map(l => [l.itemCode, l.cantidadPedida]), [["TINTE1", 2], ["BS12", 1], ["BS16", 1], ["BS10", 1]]);
+});
 test("recibir crédito nuevo exige revisión solo a sesiones activas y conserva las finalizadas", async () => {
   const f = construirLoteFacturasPreparacion([facturaSap()], "TEST", 1).facturasPreparacion[0];
   const anterior = proyectarFactura({ ...f, creditos: [] }); const cambios = []; const guardadas = [];
