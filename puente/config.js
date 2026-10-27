@@ -79,10 +79,13 @@ export function configurar(v) {
   if (traslados === "true" && frecuencias.trasladosEntrada == null && frecuencias.trasladosPreparacion != null) {
     frecuencias.trasladosEntrada = frecuencias.trasladosPreparacion;
   }
+  const pausadas = (v.BRIDGE_PAUSED_ENTITIES ?? "").split(",").map(n => n.trim()).filter(Boolean);
+  if (new Set(pausadas).size !== pausadas.length || pausadas.some(n => !ENTIDADES.some(e => e.nombre === n))) throw new Error("BRIDGE_PAUSED_ENTITIES inválido");
   return { sapUrl, backendUrl, empresa, usuario: v.SAP_USER, password: v.SAP_PASSWORD,
     fuentePreparacion, facturasDesde, facturasDias, trasladosHabilitados: traslados === "true",
     frecuencias, soloCambios: true, huellaSap, combosHabilitados: activarCombos === "true", inventarioHabilitado: activarInventario === "true", modoExistencias, almacenesSap,
     maxConsultas: numero("BRIDGE_MAX_REQUESTS", 25, 1, 10000),
+    maxConsultasEntidad: numero("BRIDGE_MAX_REQUESTS_PER_ENTITY", 8, 1, 100), pausadas,
     maxDuracionMs: numero("BRIDGE_MAX_SECONDS", 120, 10, 3600) * 1000,
     pausaMs: numero("BRIDGE_REQUEST_DELAY_MS", 500, 100, 60000),
     clave: v.BRIDGE_API_KEY, directorio: resolve(v.BRIDGE_STATE_DIR), intervaloMs: segundos * 1000,

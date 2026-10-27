@@ -1,18 +1,23 @@
-import { FINANZAS } from "../../shared/finanzas/contratos.js";
+import { snapshotFinanciero } from "../../shared/finanzas/contratos.js";
 import { importe, unidades } from "../../shared/finanzas/decimal.js";
 import { finanzasRepository as repo } from "./finanzas.repository.js";
 import { exigirEntidad, falloFinanzas } from "./finanzas.ingreso.js";
 
 export async function contextoFinanciero(entidad, version) {
   exigirEntidad(entidad);
+  if (["partidas", "conciliaciones"].includes(entidad) && (await repo.control("clientes"))?.configuracion?.lectura === "get_parcial") {
+    throw falloFinanzas("CARTERA_NO_DISPONIBLE_GET", "Esta importación no incluye conciliaciones ni partidas abiertas verificadas", 503);
+  }
   const control = await repo.control(entidad);
   if (!control?.publicadoEn || !control.activoId) throw falloFinanzas("FINANZAS_SIN_CARGA_COMPLETA", "Esta información aún no completó su primera carga", 503);
   if (version && version !== control.activoId) throw falloFinanzas("VERSION_FINANCIERA_CAMBIO", "La información cambió; reinicie la consulta");
-  return { control, where: { entidad, version: FINANZAS[entidad].snapshot ? control.activoId : "actual" },
+  return { control, where: { entidad, version: snapshotFinanciero(entidad, control.configuracion) ? control.activoId : "actual" },
     meta: { version: control.activoId, ultimaCargaCompleta: control.publicadoEn, enActualizacion: !control.finalizadoEn,
       inicioLectura: control.lecturaPublicadaDesde, desdeDocumentos: control.configuracion.desde,
       monedaLocal: control.configuracion.monedaLocal, monedaSistema: control.configuracion.monedaSistema,
-      validadoContraSap: false, criterio: "Lectura paginada de SAP; no es una instantánea transaccional de SAP" } };
+      validadoContraSap: false, criterio: "Lectura paginada de SAP; no es una instantánea transaccional de SAP",
+      ...(control.configuracion.lectura === "get_parcial" ? { lectura: "get_parcial", carteraCompleta: false,
+        advertencia: "Carga puntual sin conciliaciones ni partidas abiertas verificadas. Importes no disponibles: null. Monedas confirmadas manualmente." } : {}) } };
 }
 export async function listarFinanzas(entidad, query) {
   const { where, meta } = await contextoFinanciero(entidad, query.version);
@@ -23,9 +28,9 @@ export async function listarFinanzas(entidad, query) {
   const hayMas = filas.length > query.limit;
   if (hayMas) filas.pop();
   const data = filas.map(({ datos }) => ["facturas", "notasCredito", "cuotas"].includes(entidad) ? { ...datos,
-    pendienteDocumentoLocal: importe(unidades(datos.total) - unidades(datos.pagado)),
-    pendienteDocumentoFC: importe(unidades(datos.totalFC) - unidades(datos.pagadoFC)),
-    pendienteDocumentoSC: importe(unidades(datos.totalSC) - unidades(datos.pagadoSC)) } : datos);
+    pendienteDocumentoLocal: datos.total == null || datos.pagado == null ? null : importe(unidades(datos.total) - unidades(datos.pagado)),
+    pendienteDocumentoFC: datos.totalFC == null || datos.pagadoFC == null ? null : importe(unidades(datos.totalFC) - unidades(datos.pagadoFC)),
+    pendienteDocumentoSC: datos.totalSC == null || datos.pagadoSC == null ? null : importe(unidades(datos.totalSC) - unidades(datos.pagadoSC)) } : datos);
   return { data, meta: { ...meta, siguienteCursor: hayMas ? filas.at(-1).clave : null } };
 }
 export function resumirAntiguedad(grupos, corte) {

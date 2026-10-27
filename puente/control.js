@@ -5,7 +5,19 @@ import { fuenteExistencias } from "./existencias.sql.js";
 // Presupuesto compartido por todas las entidades de una ejecución.
 export function crearControl(config, { ahora = Date.now, dormir = esperar } = {}) {
   const inicio = ahora(); let consultas = 0, anterior = null;
+  let comienzoTurno = 0, limiteTurno = Infinity;
   return {
+    iniciarTurno(limite) {
+      if (!Number.isSafeInteger(limite) || limite < 1) throw new ErrorPuente("LIMITE_TURNO_INVALIDO");
+      comienzoTurno = consultas; limiteTurno = limite;
+    },
+    finalizarTurno() { limiteTurno = Infinity; },
+    // Se comprueba entre páginas, después de confirmar cualquier lote pendiente.
+    // Una página compuesta (factura + créditos) no se corta por este límite suave.
+    comprobarTurno() {
+      if (consultas >= config.maxConsultas || ahora() - inicio >= config.maxDuracionMs) throw new ErrorPuente("PRESUPUESTO_AGOTADO");
+      if (consultas - comienzoTurno >= limiteTurno) throw new ErrorPuente("PRESUPUESTO_ENTIDAD_AGOTADO");
+    },
     async antesDeConsultar() {
       if (consultas >= config.maxConsultas || ahora() - inicio >= config.maxDuracionMs) {
         throw new ErrorPuente("PRESUPUESTO_AGOTADO");

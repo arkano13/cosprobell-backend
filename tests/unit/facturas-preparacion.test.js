@@ -37,6 +37,16 @@ function sustituir(t, objeto, metodo, valor) {
   const previo = objeto[metodo]; objeto[metodo] = valor; t.after(() => { objeto[metodo] = previo; });
 }
 
+test("documento de cancelación sin Cancelled no falla ni permite preparar", t => {
+  fuenteFacturas(t);
+  for (const Cancelled of [undefined, null]) {
+    const f = construirLoteFacturasPreparacion([{ ...facturaSap(), DocEntry: 17065, Cancelled, CancelStatus: "csCancellation" }], "TEST", 1).facturasPreparacion[0];
+    assert.equal(f.cancelStatus, "csCancellation");
+    assert.throws(() => comprobarPedidoElegible(proyectarFactura(f)), e => e.code === "PEDIDO_CANCELADO");
+  }
+  assert.throws(() => construirLoteFacturasPreparacion([{ ...facturaSap(), Cancelled: undefined }], "TEST", 1), { code: "PEDIDO_SAP_INVALIDO" });
+});
+
 test("factura pagada: prepara el saldo de artículos de 02 tras el crédito, con identidad separada", t => {
   fuenteFacturas(t);
   const f = construirLoteFacturasPreparacion([facturaSap()], "TEST", 1).facturasPreparacion[0];

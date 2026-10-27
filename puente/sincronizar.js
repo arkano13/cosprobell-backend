@@ -52,8 +52,20 @@ export async function sincronizar({ config, almacen, sap, backend, entidad = PRO
     await guardar({ ...estado, desdeRecorrido: desdeFacturas(config, estado) });
   }
   // Las facturas del recorrido: la fecha queda fija hasta terminarlo.
-  const consulta = entidad.ventanaFacturas
+  let consulta = entidad.ventanaFacturas
     ? { ...entidad, filtro: `${entidad.filtro} and DocDate ge '${estado.desdeRecorrido ?? config.facturasDesde}'` } : entidad;
+  if (entidad.consultaExistenciasSql && estado.recorridoId && entidad.fuente) {
+    const previa = estado.verificacionAlmacenes;
+    if (!previa || previa.recorridoId !== estado.recorridoId || previa.fuente !== entidad.fuente) {
+      await guardar({ ...estado, verificacionAlmacenes: { recorridoId: estado.recorridoId, fuente: entidad.fuente, codigos: [] } });
+    }
+    consulta = { ...consulta, verificacionAlmacenesId: `${estado.recorridoId}:${entidad.fuente}`,
+      almacenesVerificados: estado.verificacionAlmacenes.codigos,
+      confirmarAlmacen: async codigo => {
+        const codigos = [...new Set([...estado.verificacionAlmacenes.codigos, codigo])];
+        await guardar({ ...estado, verificacionAlmacenes: { ...estado.verificacionAlmacenes, codigos } });
+      } };
+  }
   while (!detenido() && !terminado) {
     if (estado.pendiente) {
       await backend.enviar(estado.pendiente.lote, entidad);
@@ -64,6 +76,7 @@ export async function sincronizar({ config, almacen, sap, backend, entidad = PRO
         ...(estado.reiniciarRecorrido ? { reiniciarRecorrido: false } : {}), pendiente: null }); lotes++;
       continue;
     }
+    config.control?.comprobarTurno?.();
     if (estado.porRevisar) {
       if (!estado.porRevisar.length) { terminado = true; break; }
       const [clave, ...resto] = estado.porRevisar;
@@ -118,7 +131,7 @@ export async function sincronizar({ config, almacen, sap, backend, entidad = PRO
   }
   await guardar({ ...estado, cursor: null, ultimoCompleto: new Date().toISOString(),
     ...(estado.solicitudManualId ? { solicitudManualCompletaId: estado.solicitudManualId, solicitudManualId: null } : {}),
-    ...(entidad.confirmarRecorrido ? { recorridoId: null, finalizando: false } : {}),
+    ...(entidad.confirmarRecorrido ? { recorridoId: null, finalizando: false, verificacionAlmacenes: null } : {}),
     ...(conInicio ? { porRevisar: null, inicioRecorrido: null, desdeRecorrido: null } : {}),
     ...(entidad.ventanaFacturas ? { desdeRecorrido: null } : {}) });
   return { completo: true, lotes, ultimaSecuencia: estado.secuencia };

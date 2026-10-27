@@ -4,11 +4,34 @@ import { randomUUID } from "node:crypto";
 process.env.DATABASE_URL = "postgresql://test:test@127.0.0.1:1/test";
 const { finanzasRepository: repo } = await import("../../src/modules/finanzas/finanzas.repository.js");
 const { iniciarFinanzas, recibirFinanzas, finalizarFinanzas } = await import("../../src/modules/finanzas/finanzas.ingreso.js");
-const { resumirAntiguedad, consultarEstadoCuenta, consultarCartera } = await import("../../src/modules/finanzas/finanzas.consultas.js");
+const { resumirAntiguedad, consultarEstadoCuenta, consultarCartera, listarFinanzas } = await import("../../src/modules/finanzas/finanzas.consultas.js");
 const { prisma } = await import("../../src/infrastructure/database/prisma.js");
 after(() => prisma.$disconnect());
 const inicio = () => ({ recorridoId: randomUUID(), empresa: "TEST", desde: "2026-01-01", fuente: "a".repeat(64),
   modo: "completo", ventana: "1900-01-01", monedaLocal: "HNL", monedaSistema: "USD" });
+
+test("GET parcial: cuotas desconocidas no son cero y la cartera no se presenta como completa", async t => {
+  const c = { activoId: randomUUID(), publicadoEn: new Date(), configuracion: { ...inicio(), lectura: "get_parcial" } };
+  t.mock.method(repo, "control", async () => c);
+  t.mock.method(repo, "listar", async where => {
+    assert.equal(where.version, c.activoId);
+    return [{ datos: { total: "100", pagado: null, totalFC: "0", pagadoFC: null, totalSC: null, pagadoSC: null } }];
+  });
+  const r = await listarFinanzas("cuotas", { limit: 1 });
+  assert.equal(r.data[0].pendienteDocumentoLocal, null);
+  assert.equal(r.meta.carteraCompleta, false);
+  await assert.rejects(consultarCartera("C1"), { code: "CARTERA_NO_DISPONIBLE_GET" });
+  await assert.rejects(listarFinanzas("conciliaciones", { limit: 1 }), { code: "CARTERA_NO_DISPONIBLE_GET" });
+});
+
+test("GET parcial: rechaza entidades excluidas y cambiar de lector sobre una carga publicada", async t => {
+  preparar(t);
+  const a = { ...inicio(), lectura: "get_parcial" };
+  await assert.rejects(iniciarFinanzas("conciliaciones", a, "TEST"), { code: "ENTIDAD_NO_DISPONIBLE_GET" });
+  await iniciarFinanzas("facturas", a, "TEST");
+  await finalizarFinanzas("facturas", { recorridoId: a.recorridoId, secuencia: 0 }, "TEST");
+  await assert.rejects(iniciarFinanzas("facturas", inicio(), "TEST"), { code: "LECTOR_FINANCIERO_DISTINTO" });
+});
 function preparar(t) {
   let control = null, guardados = 0, publicaciones = 0;
   t.mock.method(repo, "conBloqueo", fn => fn({}));

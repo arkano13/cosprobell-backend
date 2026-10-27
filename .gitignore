@@ -11,3 +11,6 @@ node_modules
 # Paquete del puente para Windows (npm run empaquetar:puente)
 /dist/
 output/
+
+# Copia privada usada para revisar la instalación recibida del servidor
+/tmp/

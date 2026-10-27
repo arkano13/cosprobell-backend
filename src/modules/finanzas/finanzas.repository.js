@@ -1,6 +1,6 @@
 import { prisma } from "../../infrastructure/database/prisma.js";
 import { sincronizacionRepository } from "../sincronizacion/sincronizacion.repository.js";
-import { FINANZAS, claveRegistro } from "../../shared/finanzas/contratos.js";
+import { claveRegistro, snapshotFinanciero } from "../../shared/finanzas/contratos.js";
 import { unidades, importe } from "../../shared/finanzas/decimal.js";
 
 export const finanzasRepository = {
@@ -18,7 +18,7 @@ export const finanzasRepository = {
     return tx.finanzaControl.upsert({ where: { entidad }, create: { entidad, ...datos }, update: datos });
   },
   async guardar(entidad, control, registros, tx) {
-    const version = FINANZAS[entidad].snapshot ? control.recorridoId : "actual";
+    const version = snapshotFinanciero(entidad, control.configuracion) ? control.recorridoId : "actual";
     for (const datos of registros) {
       const clave = claveRegistro(entidad, datos);
       const fila = { datos, cardCode: datos.cardCode ?? null, fecha: datos.fecha ? new Date(datos.fecha) : null,
@@ -36,7 +36,7 @@ export const finanzasRepository = {
     const ahora = new Date();
     await tx.finanzaControl.update({ where: { entidad }, data: { finalizadoEn: ahora, publicadoEn: ahora,
       lecturaPublicadaDesde: control.iniciadoEn, activoId: control.recorridoId } });
-    if (FINANZAS[entidad].snapshot) await tx.finanzaRegistro.deleteMany({ where: { entidad,
+    if (snapshotFinanciero(entidad, control.configuracion)) await tx.finanzaRegistro.deleteMany({ where: { entidad,
       version: { notIn: [control.recorridoId, ...(control.activoId ? [control.activoId] : [])] } } });
   },
   listar: (where, take) => prisma.finanzaRegistro.findMany({ where, orderBy: { clave: "asc" }, take }),
