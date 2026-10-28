@@ -845,3 +845,10 @@ Verificado: 566 pruebas y contra PostgreSQL local (facturado sin preparar con cr
 - Al recibir una cancelación, el backend cierra solo el traslado original: el anterior con exactamente los mismos productos
   y unidades y sin nada pasado ni cerrado ("cancelado en SAP (número)", sin mover inventario). Si no hay uno así (por
   ejemplo, ya se pasó una parte), queda para el supervisor. Sin migración ni cambios en el puente ni en la app.
+
+## Traspaso sin código de caja (28/10/2026)
+
+- Las cajas de tintes traen varios colores y se guardan en la 01 como sueltas: no tienen código de caja y el operador no
+  podía pasarlas (el traspaso pedía escanear cada caja; sin escanear, solo el supervisor). Ahora, si el producto no tiene
+  código de caja registrado, el operador elige los lotes sin escanear y la app muestra la advertencia "no cuenta con
+  código de caja". Con código de caja registrado se sigue pidiendo escanear. App 1.19.1. Sin migración.

@@ -461,6 +461,10 @@ export const inventarioRepository = {
     const [caja] = await tx.$queryRaw`SELECT * FROM inventario_cajas WHERE id = ${id} FOR UPDATE`;
     return caja ?? null;
   },
+  // Si el producto tiene registrado el código de barras de su caja (el del proveedor).
+  async tieneCodigoCaja(itemCode, db = prisma) {
+    return (await db.inventarioCodigoCaja.count({ where: { itemCode } })) > 0;
+  },
   cajasDeProductoBloqueadas(itemCode, tx) {
     return tx.$queryRaw`SELECT * FROM inventario_cajas WHERE "itemCode" = ${itemCode} AND unidades > 0 ORDER BY id FOR UPDATE`;
   },
