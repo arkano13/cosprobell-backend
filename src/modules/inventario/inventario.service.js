@@ -448,7 +448,11 @@ export async function descontar(entrada, { aplicacion }) {
 export async function traspasar(entrada, { aplicacion, supervisor = true }) {
   const { itemCode, unidades, lotes, cajas: escaneadas, traslado, linea: refLinea } = entrada;
   if (traslado && !supervisor) throw falla("TRASPASO_MANUAL_SOLO_SUPERVISOR", 403, "Pasar con hoja de traslado (sin esperar a SAP) lo hace solo el supervisor");
-  if (!escaneadas && !supervisor) throw falla("TRASPASO_SIN_ESCANEAR", 403, "Escaneá las cajas que pasás: sin escanear lo acepta solo el supervisor");
+  // Sin escanear lo acepta el supervisor, o el operador si el producto no tiene código de caja (por ejemplo, cajas de
+  // tintes con varios colores, guardadas como sueltas): ahí elige los lotes.
+  if (!escaneadas && !supervisor && await repo.tieneCodigoCaja(itemCode)) {
+    throw falla("TRASPASO_SIN_ESCANEAR", 403, "Escaneá las cajas que pasás: sin escanear lo acepta solo el supervisor");
+  }
   if (lotes && sumar(lotes) !== unidades) throw falla("ASIGNACION_INCOMPLETA", 400, `Hay que elegir lotes por ${numero(unidades)} unidades en total`);
   return repo.conProducto(itemCode, async (tx) => {
     await exigirSaldoConciliado(itemCode, tx);

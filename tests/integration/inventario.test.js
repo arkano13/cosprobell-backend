@@ -638,6 +638,7 @@ test("traslados de SAP de la 01 a la 02: por documento, pasar una línea y darla
   const linea = { docEntry: 900, lineNum: 2 };
   const otra = await enviar("/inventario/traspasos", operador, "POST", { itemCode: "P1", unidades: 48, linea, cajas: [{ lote: "L1", vencimiento: "2027-01-31" }] });
   assert.equal((await otra.json()).error.code, "CANTIDAD_CAMBIO");
+  t.mock.method(repo, "tieneCodigoCaja", async () => true);
   const sinEscanear = await enviar("/inventario/traspasos", operador, "POST", { itemCode: "P1", unidades: 24, linea });
   assert.equal((await sinEscanear.json()).error.code, "TRASPASO_SIN_ESCANEAR");
   const r = await enviar("/inventario/traspasos", operador, "POST", { itemCode: "P1", unidades: 24, linea,
@@ -724,10 +725,12 @@ test("traspaso escaneando cajas: el operador escanea, cada caja es una entera de
   t.mock.method(repo, "pases", async () => [{ itemCode: "P1", itemName: "Shampoo", sapGrande: 34, sapPequena: 96, grande: 82, cajas: 4, pequena: 48, sinEntrega: 0 }]);
   t.mock.method(repo, "cajasDeProductoBloqueadas", async () => cajas.map((c) => ({ ...c })));
   const pasar = (cuerpo) => enviar("/inventario/traspasos", operador, "POST", { itemCode: "P1", unidades: 48, ...cuerpo });
-  // Sin escanear, el operador no puede.
+  // Sin escanear, el operador no puede si el producto tiene código de caja.
+  const codigoCaja = t.mock.method(repo, "tieneCodigoCaja", async () => true);
   const sinEscanear = await pasar({ lotes: [{ lote: "L1", unidades: 48 }] });
   assert.deepEqual([sinEscanear.status, (await sinEscanear.json()).error.code], [403, "TRASPASO_SIN_ESCANEAR"]);
   assert.equal((await pasar({})).status, 403);
+  assert.equal(codigoCaja.mock.calls.at(-1).arguments[0], "P1");
   // Una sola caja (24) no es lo que pasó SAP (48): solo cajas enteras.
   const corta = await pasar({ cajas: [{ lote: "L1", vencimiento: "2027-01-31" }] });
   assert.equal((await corta.json()).error.code, "NO_CUADRA_CON_CAJAS");
@@ -742,6 +745,24 @@ test("traspaso escaneando cajas: el operador escanea, cada caja es una entera de
   assert.deepEqual(data.cajas.map((c) => [c.codigo, c.unidades, c.entera]), [["CJ-000002", 24, true], ["CJ-000001", 24, true]]);
   assert.deepEqual(hecho.cajaCambios, [[2, -24], [1, -24]]);
   assert.deepEqual(hecho.pequena, [48]);
+});
+
+test("traspaso sin código de caja: el operador elige los lotes, sin escanear", async (t) => {
+  // Cajas de tintes con varios colores, guardadas en la 01 como sueltas: no hay código de caja que escanear.
+  const cajas = [{ id: 1, codigo: "CJ-000001", lote: "14227", vencimiento: new Date("2027-07-31"), unidades: 6, unidadesIniciales: 6, suelto: true },
+    { id: 2, codigo: "CJ-000002", lote: "14411", vencimiento: new Date("2027-09-30"), unidades: 15, unidadesIniciales: 15, suelto: true }];
+  const hecho = inventario(t, { sap: 50, grande: 21, pequena: 29 });
+  const operador = conSesion(t, "operador");
+  t.mock.method(repo, "almacenesDeEstaBodega", async () => ["01", "02"]);
+  t.mock.method(repo, "opcion", async () => ({ grande: "01", pequena: "02" }));
+  t.mock.method(repo, "pases", async () => [{ itemCode: "P1", itemName: "Tinte", sapGrande: 0, sapPequena: 50, grande: 21, cajas: 2, pequena: 29, sinEntrega: 0 }]);
+  t.mock.method(repo, "cajasDeProductoBloqueadas", async () => cajas.map((c) => ({ ...c })));
+  t.mock.method(repo, "tieneCodigoCaja", async () => false);
+  const r = await enviar("/inventario/traspasos", operador, "POST", { itemCode: "P1", unidades: 21,
+    lotes: [{ lote: "14227", unidades: 6 }, { lote: "14411", unidades: 15 }] });
+  assert.equal(r.status, 201);
+  assert.deepEqual(hecho.cajaCambios, [[1, -6], [2, -15]]);
+  assert.deepEqual(hecho.pequena, [21]);
 });
 
 test("código de barras de la caja: se registra al contar (operador) y aparece en la ficha", async (t) => {
