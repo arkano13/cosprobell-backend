@@ -348,6 +348,10 @@ export const inventarioRepository = {
       WHERE "itemCode" = ${itemCode} AND tipo IN ('recepcion', 'conteo')`;
     return new Set(filas.map((f) => f.bodega));
   },
+  // Facturado sin preparar y preparado sin entregar, por producto (lo que separa a SAP de la bodega por documentos).
+  diferido(db = prisma) {
+    return db.$queryRaw`SELECT "itemCode", "sinEntrega", "porPreparar" FROM (${DIFERIDO}) d`;
+  },
   async nombresDeAlmacenes(codigos, db = prisma) {
     if (!codigos.length) return new Map();
     const filas = await db.bodega.findMany({ where: { warehouseCode: { in: codigos } }, select: { warehouseCode: true, warehouseName: true } });

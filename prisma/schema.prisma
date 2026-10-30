@@ -1083,3 +1083,35 @@ model ListaMateriales {
 
   @@map("listas_materiales")
 }
+
+// Auditoría de una bodega: se escanea todo lo que hay, unidad por unidad, y al terminar se compara con la app y con
+// SAP. Solo informa: no mueve inventario. resultado = la comparación congelada al terminar (ver auditorias.calculo.js).
+model AuditoriaBodega {
+  id           Int                @id @default(autoincrement())
+  almacen      String
+  estado       String             @default("en_curso") // en_curso | terminada | anulada
+  iniciadaPor  String?
+  iniciadaEn   DateTime           @default(now())
+  terminadaPor String?
+  terminadaEn  DateTime?
+  resultado    Json?
+  lecturas     AuditoriaLectura[]
+
+  @@index([almacen, iniciadaEn])
+  @@map("auditorias")
+}
+
+model AuditoriaLectura {
+  id          Int       @id @default(autoincrement())
+  auditoriaId Int
+  auditoria   AuditoriaBodega @relation(fields: [auditoriaId], references: [id], onDelete: Cascade)
+  operacionId String
+  codigo      String
+  itemCode    String
+  hechoPor    String?
+  creadoEn    DateTime  @default(now())
+
+  @@unique([auditoriaId, operacionId], map: "auditoria_lecturas_operacion_key")
+  @@index([auditoriaId, itemCode], map: "auditoria_lecturas_item_idx")
+  @@map("auditoria_lecturas")
+}
