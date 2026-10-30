@@ -26,9 +26,11 @@ const ORDEN = { grande: 0, pequena: 1, conteo: 2, otro: 3 };
 
 export async function listarAlmacenes() {
   const [almacenes, porTipo, { enCurso, terminadas }] = await Promise.all([repo.almacenes(), tipos(), repo.estadoPorAlmacen()]);
+  // Con INVENTARIO_SAP_WAREHOUSES, solo esos almacenes (los que manda el puente) y los que la app lleva.
+  const alcance = env.inventarioSapWarehouses ?? [];
   const curso = new Map(enCurso.map((a) => [a.almacen, a]));
   const ultima = new Map(terminadas.map((a) => [a.almacen, a]));
-  const data = almacenes.map((a) => {
+  const data = almacenes.filter((a) => !alcance.length || alcance.includes(a.warehouseCode) || porTipo.has(a.warehouseCode)).map((a) => {
     const tipo = porTipo.get(a.warehouseCode) ?? "otro";
     const c = curso.get(a.warehouseCode), u = ultima.get(a.warehouseCode);
     return { almacen: a.warehouseCode, nombre: a.warehouseName, tipo, comparaApp: tipo !== "otro",
@@ -61,12 +63,30 @@ async function exigirEnCurso(id) {
   return a;
 }
 
-// Lo escaneado hasta ahora, sin lo que dice el sistema.
+// Lo que se espera encontrar, como las líneas de un pedido: en los almacenes que la app lleva, lo que dice la app; en los
+// demás, lo que dice SAP (null si el puente no manda sus existencias).
+async function esperado(almacen) {
+  const tipo = (await tipos()).get(almacen) ?? "otro";
+  if (tipo === "grande") return { fuente: "app", mapa: await repo.appGrande() };
+  if (tipo === "pequena") return { fuente: "app", mapa: await repo.appPequena() };
+  if (tipo === "conteo") return { fuente: "app", mapa: await repo.appConteo(almacen) };
+  const sap = await repo.sap(almacen, env.inventarioSapWarehouses ?? []);
+  return { fuente: sap ? "sap" : null, mapa: sap ?? new Map() };
+}
+
+// Lo escaneado hasta ahora y lo que se espera de cada producto (esperadas), como las líneas de un pedido. Entran los
+// productos esperados y los escaneados que no se esperaban (esperadas 0).
 export async function consultar(id) {
   const a = await exigir(id);
-  const { productos, personas } = await repo.escaneado(id);
-  return { data: { ...vistaAuditoria(a), personas: personas.map(persona),
-    unidades: productos.reduce((t, p) => t + p.unidades, 0), productos } };
+  const [{ productos, personas }, { fuente, mapa }] = await Promise.all([repo.escaneado(id), esperado(a.almacen)]);
+  const escaneado = new Map(productos.map((p) => [p.itemCode, p]));
+  const faltan = [...mapa.keys()].filter((c) => !escaneado.has(c) && mapa.get(c) > 0);
+  const nombres = await repo.nombres(faltan);
+  const lineas = [...productos.map((p) => ({ ...p, esperadas: Math.max(0, Math.round(mapa.get(p.itemCode) ?? 0)) })),
+    ...faltan.map((c) => ({ itemCode: c, itemName: nombres.get(c) ?? c, unidades: 0, esperadas: Math.round(mapa.get(c)) }))];
+  return { data: { ...vistaAuditoria(a), personas: personas.map(persona), fuente,
+    unidades: productos.reduce((t, p) => t + p.unidades, 0), esperadas: lineas.reduce((t, l) => t + l.esperadas, 0),
+    productos: lineas } };
 }
 
 export async function escanear(id, { codigo, operacionId }, { aplicacion }) {
