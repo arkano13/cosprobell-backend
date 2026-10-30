@@ -171,3 +171,27 @@ Lo contado antes de que existiera la tabla no tiene foto. Las existencias de SAP
 - **Ficha del artículo**: el código de `Items.BarCode` se guarda como código con unidad Manual (`origen: "ficha"`). Si cambia en SAP, el anterior se retira.
 - **Confirmación al llegar**: un código con unidad Manual (de la ficha o de `BarCodes`) se vende de a una unidad, así que queda confirmado como unidad cuando llega de SAP (`confirmadaPor: "la sincronización con SAP"`). Solo se confirma si no tenía confirmación: un "no es una unidad" del supervisor no se pisa, y un código ya confirmado que cambió en SAP sigue apareciendo como desactualizado para revisarlo. Los de otras unidades (por ejemplo, una caja) siguen esperando al supervisor. Los que ya estaban sin confirmar antes de este cambio se confirman con "Confirmar todos como unidad" o cuando SAP los vuelva a enviar.
 - **Desde la app**: el supervisor escanea el envase y elige el producto. Queda con unidad Manual y ya confirmado como unidad (`origen: "app"`); la sincronización no lo retira. Un código que ya es de otro producto (o está en la ficha de otro) se rechaza con `409 CODIGO_EN_USO`.
+
+## Auditoría de bodegas
+
+Se escanea todo lo que hay en un almacén, unidad por unidad (con el código de barras de la unidad, como al preparar), y al
+terminar se compara con la app y con SAP. Solo informa: no mueve inventario.
+
+- `GET /inventario/auditorias`: los almacenes de SAP con su tipo (`grande`, `pequena`, `conteo` para los "solo conteo",
+  `otro` para los que la app no lleva), si se comparan con la app, la auditoría en curso (quién la inició, unidades,
+  personas) y la última terminada.
+- `POST /inventario/auditorias` `{ almacen }` (supervisor): inicia una. Una sola en curso por almacén
+  (`409 AUDITORIA_EN_CURSO`); un almacén que no existe, `404 ALMACEN_NO_ENCONTRADO`.
+- `GET /inventario/auditorias/:id`: lo escaneado hasta ahora (productos y unidades, personas), sin lo que dice el sistema.
+- `POST /inventario/auditorias/:id/lecturas` `{ codigo, operacionId }`: una unidad. El código se resuelve como en la
+  preparación (etiqueta confirmada como unidad). La misma `operacionId` otra vez no suma (`repetida: true`). Con la
+  auditoría cerrada, `409 AUDITORIA_CERRADA`.
+- `POST /inventario/auditorias/:id/quitar-ultima`: borra la última lectura de quien la pide (`409 SIN_LECTURAS` si no tiene).
+- `POST /inventario/auditorias/:id/terminar` y `/anular` (supervisor). Terminar congela el resultado:
+  `filas` (`escaneado`, `app`, `sap`, `diferenciaApp`, `diferenciaSap`; null cuando no hay contra qué comparar) y
+  `resumen` (`contraApp` y `contraSap`: cumplen, faltan y sobran en productos y unidades). Entran los productos
+  escaneados y los que la app o SAP dicen que hay: lo no escaneado cuenta como 0. App: cajas de la grande, la pequeña o
+  el conteo del almacén "solo conteo". SAP: existencias de ese almacén (la 02 ajustada con lo facturado sin preparar y lo
+  preparado sin entregar); sin existencias de ese almacén (no está en `INVENTARIO_SAP_WAREHOUSES` o el puente no lo
+  manda), `sap` es null.
+- `GET /inventario/auditorias/:id/resultado` (supervisor) y `GET /inventario/auditorias/historial?almacen=&limit=`.

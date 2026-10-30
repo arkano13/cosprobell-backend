@@ -852,3 +852,17 @@ Verificado: 566 pruebas y contra PostgreSQL local (facturado sin preparar con cr
   podía pasarlas (el traspaso pedía escanear cada caja; sin escanear, solo el supervisor). Ahora, si el producto no tiene
   código de caja registrado, el operador elige los lotes sin escanear y la app muestra la advertencia "no cuenta con
   código de caja". Con código de caja registrado se sigue pidiendo escanear. App 1.19.1. Sin migración.
+
+## Auditoría de bodegas (30/10/2026)
+
+- Pedido: un botón "Auditar" para elegir una bodega y escanear todo lo que hay, unidad por unidad (sin lotes, vencimientos
+  ni códigos de caja), para ver si cumple. Decisiones del usuario: comparar con la app y con SAP; solo informa (no corrige
+  el inventario); lo que no se escaneó cuenta como 0; el supervisor inicia, termina y ve el resultado, los operadores
+  escanean; además de la 01 a la 04, se pueden auditar otros almacenes (99, V01, V03, V05, V07), que se comparan solo
+  con SAP.
+- Backend: módulo `src/modules/auditorias/`, rutas en `/inventario/auditorias` (ver [INVENTARIO.md](INVENTARIO.md)).
+  Tablas `auditorias` y `auditoria_lecturas` (migración `20261030090000_auditorias`; una sola auditoría en curso por
+  almacén; una lectura repetida con la misma operación no suma). Al terminar se congela el resultado: por producto,
+  escaneado, app, SAP y la diferencia con cada uno. La 02 de SAP se ajusta con lo facturado sin preparar y lo preparado
+  sin entregar, como el cuadre. Un almacén del que el puente no manda existencias se audita igual, sin comparar con SAP:
+  para compararlo hay que agregarlo a `BRIDGE_WAREHOUSES` (puente) e `INVENTARIO_SAP_WAREHOUSES` (Railway), hasta 10.
