@@ -177,12 +177,12 @@ Lo contado antes de que existiera la tabla no tiene foto. Las existencias de SAP
 Se escanea todo lo que hay en un almacén, unidad por unidad (con el código de barras de la unidad, como al preparar), y al
 terminar se compara con la app y con SAP. Solo informa: no mueve inventario.
 
-- `GET /inventario/auditorias`: los almacenes de SAP con su tipo (`grande`, `pequena`, `conteo` para los "solo conteo",
+- `GET /inventario/auditorias`: los almacenes de SAP (con `INVENTARIO_SAP_WAREHOUSES`, solo esos y los que la app lleva) con su tipo (`grande`, `pequena`, `conteo` para los "solo conteo",
   `otro` para los que la app no lleva), si se comparan con la app, la auditoría en curso (quién la inició, unidades,
   personas) y la última terminada.
 - `POST /inventario/auditorias` `{ almacen }` (supervisor): inicia una. Una sola en curso por almacén
   (`409 AUDITORIA_EN_CURSO`); un almacén que no existe, `404 ALMACEN_NO_ENCONTRADO`.
-- `GET /inventario/auditorias/:id`: lo escaneado hasta ahora (productos y unidades, personas), sin lo que dice el sistema.
+- `GET /inventario/auditorias/:id`: como las líneas de un pedido: cada producto con `unidades` (escaneadas) y `esperadas`. Lo esperado sale de la app en la 01, la 02 y los "solo conteo", y de SAP en los demás (`fuente`: `app`, `sap`, o null si el puente no manda ese almacén). Entran los esperados y los escaneados que no se esperaban (`esperadas: 0`).
 - `POST /inventario/auditorias/:id/lecturas` `{ codigo, operacionId }`: una unidad. El código se resuelve como en la
   preparación (etiqueta confirmada como unidad). La misma `operacionId` otra vez no suma (`repetida: true`). Con la
   auditoría cerrada, `409 AUDITORIA_CERRADA`.

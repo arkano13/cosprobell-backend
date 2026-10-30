@@ -109,7 +109,9 @@ test("auditoría: el supervisor inicia, los operadores escanean sin ver el siste
   assert.deepEqual([quitada.data.itemCode, quitada.data.unidadesProducto], ["P1", 3]);
   // Lo escaneado se ve; lo que dice el sistema, no.
   const { data: vista } = await (await pedir(`/inventario/auditorias/${auditoria.id}`, operador)).json();
-  assert.deepEqual([vista.unidades, vista.productos.map((p) => [p.itemCode, p.unidades])], [4, [["P1", 3], ["P2", 1]]]);
+  // Como un pedido: cada producto con lo escaneado y lo que se espera (en la 02, lo que dice la app).
+  assert.deepEqual([vista.fuente, vista.unidades, vista.esperadas, vista.productos.map((p) => [p.itemCode, p.unidades, p.esperadas])],
+    ["app", 4, 8, [["P1", 3, 5], ["P2", 1, 3]]]);
   assert.equal(vista.filas, undefined);
   assert.equal((await pedir(`/inventario/auditorias/${auditoria.id}/terminar`, operador, "POST", {})).status, 403);
   assert.equal((await pedir(`/inventario/auditorias/${auditoria.id}/resultado`, operador)).status, 403);
@@ -133,6 +135,8 @@ test("auditoría: un almacén que la app no lleva y sin existencias de SAP muest
   const supervisor = conSesion(t, "supervisor", "Admin");
   const { data: a } = await (await pedir("/inventario/auditorias", supervisor, "POST", { almacen: "V07" })).json();
   await pedir(`/inventario/auditorias/${a.id}/lecturas`, supervisor, "POST", { codigo: "222", operacionId: randomUUID() });
+  const { data: vista } = await (await pedir(`/inventario/auditorias/${a.id}`, supervisor)).json();
+  assert.deepEqual([vista.fuente, vista.productos.map((p) => [p.itemCode, p.unidades, p.esperadas])], [null, [["P2", 1, 0]]]);
   const { data } = await (await pedir(`/inventario/auditorias/${a.id}/terminar`, supervisor, "POST", {})).json();
   assert.deepEqual([data.tipo, data.resumen.contraApp, data.resumen.contraSap, data.filas.map((f) => [f.itemCode, f.escaneado])],
     ["otro", null, null, [["P2", 1]]]);

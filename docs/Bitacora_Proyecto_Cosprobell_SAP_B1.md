@@ -866,3 +866,6 @@ Verificado: 566 pruebas y contra PostgreSQL local (facturado sin preparar con cr
   escaneado, app, SAP y la diferencia con cada uno. La 02 de SAP se ajusta con lo facturado sin preparar y lo preparado
   sin entregar, como el cuadre. Un almacén del que el puente no manda existencias se audita igual, sin comparar con SAP:
   para compararlo hay que agregarlo a `BRIDGE_WAREHOUSES` (puente) e `INVENTARIO_SAP_WAREHOUSES` (Railway), hasta 10.
+- Ajuste pedido por el usuario (30/10): en la lista de almacenes solo salen los de `INVENTARIO_SAP_WAREHOUSES` y los que la
+  app lleva (no todos los de SAP), y la auditoría se ve como un pedido: cada producto que hay según el sistema con
+  "escaneadas / esperadas" (la app en sus bodegas, SAP en las demás), para confirmarlo escaneando. App 1.20.1.
