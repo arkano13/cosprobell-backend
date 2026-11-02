@@ -69,6 +69,7 @@ function base(t) {
     return { count: a ? 1 : 0 };
   });
   t.mock.method(repo, "nombres", async (codigos) => new Map(codigos.map((c) => [c, `Producto ${c}`])));
+  t.mock.method(repo, "correcciones", async () => []);
   t.mock.method(repo, "appPequena", async () => new Map([["P1", 5], ["P2", 3]]));
   t.mock.method(repo, "sap", async (almacen) => (almacen === "02" ? new Map([["P1", 3], ["P2", 3]]) : null));
   t.mock.method(pickingEtiquetasRepository, "buscarProductos", async (codigo) => {
@@ -142,4 +143,47 @@ test("auditoría: un almacén que la app no lleva y sin existencias de SAP muest
     ["otro", null, null, [["P2", 1]]]);
   const sinAlmacen = await pedir("/inventario/auditorias", supervisor, "POST", { almacen: "ZZ" });
   assert.deepEqual([sinAlmacen.status, (await sinAlmacen.json()).error.code], [404, "ALMACEN_NO_ENCONTRADO"]);
+});
+
+test("auditoría: el supervisor corrige lo escaneado después de terminar y queda registrado", async (t) => {
+  const db = base(t);
+  const correcciones = [];
+  t.mock.method(repo, "nombres", async (codigos) => new Map(codigos.filter((c) => ["P1", "P2", "P3"].includes(c)).map((c) => [c, `Producto ${c}`])));
+  t.mock.method(repo, "corregir", async (id, aplicar) => {
+    const a = db.auditorias.find((x) => x.id === id) ?? null;
+    const cambio = await aplicar(a ? structuredClone(a) : null);
+    if (!cambio) return a;
+    a.resultado = cambio.resultado; correcciones.push({ auditoriaId: id, ...cambio.correccion, creadoEn: new Date() });
+    return a;
+  });
+  t.mock.method(repo, "correcciones", async (id) => correcciones.filter((c) => c.auditoriaId === id).map(({ auditoriaId, ...c }) => c));
+  const supervisor = conSesion(t, "supervisor", "Admin");
+  const { data: a } = await (await pedir("/inventario/auditorias", supervisor, "POST", { almacen: "02" })).json();
+  const corregir = (cuerpo) => pedir(`/inventario/auditorias/${a.id}/correcciones`, supervisor, "POST", cuerpo);
+  // En curso no se corrige: se escanea.
+  const enCurso = await corregir({ itemCode: "P1", escaneado: 1 });
+  assert.deepEqual([enCurso.status, (await enCurso.json()).error.code], [409, "AUDITORIA_SIN_RESULTADO"]);
+  for (const codigo of ["111", "111", "222"]) await pedir(`/inventario/auditorias/${a.id}/lecturas`, supervisor, "POST", { codigo, operacionId: randomUUID() });
+  await pedir(`/inventario/auditorias/${a.id}/terminar`, supervisor, "POST", {});
+
+  // P1: se escanearon 2 y había 5 (la app dice 5). P2: el código de barras de la unidad agrega uno.
+  const r1 = await (await corregir({ itemCode: "P1", escaneado: 5, motivo: "Faltó un estante" })).json();
+  assert.deepEqual(r1.data.filas.map((f) => [f.itemCode, f.escaneado, f.original, f.diferenciaApp]), [["P2", 1, undefined, -2], ["P1", 5, 2, 0]]);
+  const r2 = await (await corregir({ codigo: "222", escaneado: 3 })).json();
+  assert.deepEqual(r2.data.resumen.contraApp, { cumplen: 2, faltan: { productos: 0, unidades: 0 }, sobran: { productos: 0, unidades: 0 } });
+  // Un producto que no estaba, por su código; el mismo número otra vez no registra nada.
+  const r3 = await (await corregir({ codigo: "P3", escaneado: 1 })).json();
+  assert.deepEqual(r3.data.filas.find((f) => f.itemCode === "P3"), { itemCode: "P3", itemName: "Producto P3", escaneado: 1, app: 0, sap: 0,
+    diferenciaApp: 1, diferenciaSap: 1, original: 0 });
+  await corregir({ codigo: "P3", escaneado: 1 });
+  const { data: resultado } = await (await pedir(`/inventario/auditorias/${a.id}/resultado`, supervisor)).json();
+  assert.deepEqual(resultado.correcciones.map((c) => [c.itemCode, c.itemName, c.antes, c.despues, c.motivo, c.hechoPor]), [
+    ["P1", "Producto P1", 2, 5, "Faltó un estante", "Admin"], ["P2", "Producto P2", 1, 3, null, "Admin"], ["P3", "Producto P3", 0, 1, null, "Admin"]]);
+
+  const noExiste = await corregir({ codigo: "ZZZ", escaneado: 1 });
+  assert.deepEqual([noExiste.status, (await noExiste.json()).error.code], [404, "ETIQUETA_NO_ENCONTRADA"]);
+  assert.equal((await corregir({ itemCode: "P1", codigo: "111", escaneado: 1 })).status, 400, "uno solo");
+  assert.equal((await corregir({ itemCode: "P1", escaneado: -1 })).status, 400);
+  const operador = conSesion(t, "operador", "Isidro Hernandez");
+  assert.equal((await pedir(`/inventario/auditorias/${a.id}/correcciones`, operador, "POST", { itemCode: "P1", escaneado: 1 })).status, 403);
 });

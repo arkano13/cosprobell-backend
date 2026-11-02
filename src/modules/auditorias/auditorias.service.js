@@ -8,7 +8,7 @@ import { resolverEtiquetaParaPicking } from "../picking/picking.etiquetas.servic
 import { almacenesPorBodega, guardadosSoloConteo } from "../inventario/inventario.service.js";
 import { inventarioRepository } from "../inventario/inventario.repository.js";
 import { auditoriasRepository as repo } from "./auditorias.repository.js";
-import { armarResultado } from "./auditorias.calculo.js";
+import { armarResultado, corregirResultado } from "./auditorias.calculo.js";
 
 const falla = (code, statusCode, message) => new AppError({ code, statusCode, message });
 const persona = (quien) => quien?.replace(/^operador:/, "") ?? null;
@@ -152,11 +152,45 @@ export async function anular(id, { aplicacion }) {
   return { data: { id, estado: "anulada" } };
 }
 
+const sinResultado = (a) => falla("AUDITORIA_SIN_RESULTADO", 409, a.estado === "en_curso"
+  ? "La auditoría sigue en curso: terminala para ver el resultado" : "Esa auditoría se anuló");
+
+// El resultado con las correcciones que hizo el supervisor (la más vieja primero).
+async function conCorrecciones(a) {
+  const correcciones = await repo.correcciones(a.id);
+  const nombres = new Map(a.resultado.filas.map((f) => [f.itemCode, f.itemName]));
+  const faltan = correcciones.map((c) => c.itemCode).filter((c) => !nombres.has(c));
+  for (const [c, n] of await repo.nombres([...new Set(faltan)])) nombres.set(c, n);
+  return { data: { ...vistaAuditoria(a), ...a.resultado, correcciones: correcciones.map((c) => ({ ...c,
+    itemName: nombres.get(c.itemCode) ?? c.itemCode, hechoPor: persona(c.hechoPor) })) } };
+}
+
 export async function resultado(id) {
   const a = await exigir(id);
-  if (a.estado !== "terminada") throw falla("AUDITORIA_SIN_RESULTADO", 409, a.estado === "en_curso"
-    ? "La auditoría sigue en curso: terminala para ver el resultado" : "Esa auditoría se anuló");
-  return { data: { ...vistaAuditoria(a), ...a.resultado } };
+  if (a.estado !== "terminada") throw sinResultado(a);
+  return conCorrecciones(a);
+}
+
+// El supervisor corrige cuántas unidades se escanearon de un producto (si se equivocaron al escanear) en una auditoría
+// terminada. Se elige el producto por su itemCode, o con codigo (código del producto o código de barras de la unidad)
+// para agregar uno que no se escaneó. Volver a mandar el mismo número no registra nada nuevo.
+export async function corregir(id, { itemCode, codigo, escaneado, motivo }, { aplicacion }) {
+  let item = itemCode;
+  if (codigo) {
+    const nombre = await repo.nombres([codigo]);
+    item = nombre.has(codigo) ? codigo : (await resolverEtiquetaParaPicking(codigo, prisma)).itemCode;
+  }
+  const nombres = await repo.nombres([item]);
+  const a = await repo.corregir(id, async (a) => {
+    if (!a) throw falla("AUDITORIA_NO_ENCONTRADA", 404, "No existe esa auditoría");
+    if (a.estado !== "terminada") throw sinResultado(a);
+    const fila = a.resultado.filas.find((f) => f.itemCode === item);
+    if (!fila && !nombres.has(item)) throw falla("PRODUCTO_NO_ENCONTRADO", 404, `No existe el producto ${item}`);
+    const { resultado, antes } = corregirResultado(a.resultado, { itemCode: item, itemName: fila?.itemName ?? nombres.get(item), escaneado });
+    if (antes === escaneado) return null;
+    return { resultado, correccion: { itemCode: item, antes, despues: escaneado, motivo: motivo || null, hechoPor: aplicacion } };
+  });
+  return conCorrecciones(a);
 }
 
 export async function historial(query) {

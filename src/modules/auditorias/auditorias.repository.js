@@ -77,6 +77,24 @@ export const auditoriasRepository = {
   cerrar(id, datos, db = prisma) {
     return db.auditoriaBodega.updateMany({ where: { id, estado: "en_curso" }, data: datos });
   },
+  // Corrige una auditoría terminada con la fila bloqueada: aplicar(auditoria) devuelve { resultado, correccion }, o null
+  // si no cambia nada (puede lanzar un error: no se guarda nada).
+  corregir(id, aplicar, db = prisma) {
+    return db.$transaction(async (tx) => {
+      const [a] = await tx.$queryRaw`
+        SELECT id, almacen, estado, "iniciadaPor", "iniciadaEn", "terminadaPor", "terminadaEn", resultado
+        FROM auditorias WHERE id = ${id} FOR UPDATE`;
+      const cambio = await aplicar(a ?? null);
+      if (!cambio) return a;
+      await tx.auditoriaBodega.update({ where: { id }, data: { resultado: cambio.resultado } });
+      await tx.auditoriaCorreccion.create({ data: { auditoriaId: id, ...cambio.correccion } });
+      return { ...a, resultado: cambio.resultado };
+    });
+  },
+  correcciones(auditoriaId, db = prisma) {
+    return db.auditoriaCorreccion.findMany({ where: { auditoriaId }, orderBy: { id: "asc" },
+      select: { itemCode: true, antes: true, despues: true, motivo: true, hechoPor: true, creadoEn: true } });
+  },
   async nombres(itemCodes, db = prisma) {
     if (!itemCodes.length) return new Map();
     const filas = await db.producto.findMany({ where: { itemCode: { in: itemCodes } }, select: { itemCode: true, itemName: true } });

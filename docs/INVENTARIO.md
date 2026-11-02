@@ -195,3 +195,11 @@ terminar se compara con la app y con SAP. Solo informa: no mueve inventario.
   preparado sin entregar); sin existencias de ese almacén (no está en `INVENTARIO_SAP_WAREHOUSES` o el puente no lo
   manda), `sap` es null.
 - `GET /inventario/auditorias/:id/resultado` (supervisor) y `GET /inventario/auditorias/historial?almacen=&limit=`.
+  El resultado trae `correcciones` (la más vieja primero: `itemCode`, `itemName`, `antes`, `despues`, `motivo`, `hechoPor`, `creadoEn`).
+- `POST /inventario/auditorias/:id/correcciones` (supervisor) `{ itemCode | codigo, escaneado, motivo? }`: corrige
+  cuántas unidades se escanearon de un producto en una auditoría terminada (si se equivocaron al escanear). `itemCode`
+  para una fila del resultado; `codigo` (código del producto o código de barras de la unidad) para agregar uno que no se
+  escaneó. El resultado se recalcula con los mismos números de la app y de SAP que había al terminar (un producto que no
+  figuraba tenía 0) y la fila corregida lleva `original` (lo que se escaneó de verdad). Cada corrección queda en
+  `auditoria_correcciones`; el mismo número otra vez no registra nada. En curso o anulada, `409 AUDITORIA_SIN_RESULTADO`;
+  producto inexistente, `404 PRODUCTO_NO_ENCONTRADO` o `ETIQUETA_NO_ENCONTRADA`. Las lecturas no se tocan.
