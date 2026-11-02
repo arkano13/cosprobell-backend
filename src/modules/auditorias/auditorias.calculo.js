@@ -29,3 +29,27 @@ export function armarResultado({ escaneado, app = null, sap = null, nombres = ne
     filas,
   };
 }
+
+// Corrige lo escaneado de un producto en un resultado ya terminado y lo recalcula con los mismos números de la app y de
+// SAP que había al terminar (un producto que no figuraba tenía 0 en los dos). En cada fila corregida queda original: lo
+// que se escaneó de verdad. Devuelve el resultado nuevo y cuánto tenía el producto antes de esta corrección.
+export function corregirResultado(resultado, { itemCode, itemName = itemCode, escaneado }) {
+  const conApp = resultado.resumen.contraApp !== null, conSap = resultado.resumen.contraSap !== null;
+  const unidades = new Map(), app = conApp ? new Map() : null, sap = conSap ? new Map() : null;
+  const nombres = new Map(), originales = new Map();
+  for (const f of resultado.filas) {
+    unidades.set(f.itemCode, f.escaneado); app?.set(f.itemCode, f.app ?? 0); sap?.set(f.itemCode, f.sap ?? 0);
+    nombres.set(f.itemCode, f.itemName);
+    if (f.original !== undefined) originales.set(f.itemCode, f.original);
+  }
+  const antes = unidades.get(itemCode) ?? 0;
+  if (!originales.has(itemCode)) originales.set(itemCode, antes);
+  if (!nombres.has(itemCode)) nombres.set(itemCode, itemName);
+  unidades.set(itemCode, escaneado);
+  const nuevo = armarResultado({ escaneado: unidades, app, sap, nombres });
+  for (const f of nuevo.filas) {
+    const original = originales.get(f.itemCode);
+    if (original !== undefined && original !== f.escaneado) f.original = original;
+  }
+  return { resultado: { ...resultado, ...nuevo }, antes };
+}

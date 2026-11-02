@@ -1096,6 +1096,7 @@ model AuditoriaBodega {
   terminadaEn  DateTime?
   resultado    Json?
   lecturas     AuditoriaLectura[]
+  correcciones AuditoriaCorreccion[]
 
   @@index([almacen, iniciadaEn])
   @@map("auditorias")
@@ -1114,4 +1115,19 @@ model AuditoriaLectura {
   @@unique([auditoriaId, operacionId], map: "auditoria_lecturas_operacion_key")
   @@index([auditoriaId, itemCode], map: "auditoria_lecturas_item_idx")
   @@map("auditoria_lecturas")
+}
+
+model AuditoriaCorreccion {
+  id          Int             @id @default(autoincrement())
+  auditoriaId Int
+  auditoria   AuditoriaBodega @relation(fields: [auditoriaId], references: [id], onDelete: Cascade)
+  itemCode    String
+  antes       Int
+  despues     Int
+  motivo      String?
+  hechoPor    String?
+  creadoEn    DateTime        @default(now())
+
+  @@index([auditoriaId], map: "auditoria_correcciones_auditoria_idx")
+  @@map("auditoria_correcciones")
 }
