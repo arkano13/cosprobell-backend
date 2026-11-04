@@ -2,6 +2,7 @@ import { prisma } from "../../infrastructure/database/prisma.js";
 import { sincronizacionRepository } from "../sincronizacion/sincronizacion.repository.js";
 import { claveRegistro, snapshotFinanciero } from "../../shared/finanzas/contratos.js";
 import { unidades, importe } from "../../shared/finanzas/decimal.js";
+import { leerFinanzas } from "./finanzas.lectura-tablas.js";
 
 export const finanzasRepository = {
   conBloqueo: fn => sincronizacionRepository.conBloqueo(fn),
@@ -39,7 +40,7 @@ export const finanzasRepository = {
     if (snapshotFinanciero(entidad, control.configuracion)) await tx.finanzaRegistro.deleteMany({ where: { entidad,
       version: { notIn: [control.recorridoId, ...(control.activoId ? [control.activoId] : [])] } } });
   },
-  listar: (where, take) => prisma.finanzaRegistro.findMany({ where, orderBy: { clave: "asc" }, take }),
+  listar: (where, take) => leerFinanzas(prisma, where, "listar", take),
   agruparVencimientos: where => prisma.finanzaRegistro.groupBy({ by: ["vencimiento"], where, _sum: { saldo: true } }),
-  sumar: where => prisma.finanzaRegistro.aggregate({ where, _sum: { debe: true, haber: true } }),
+  sumar: where => leerFinanzas(prisma, where, "sumar"),
 };

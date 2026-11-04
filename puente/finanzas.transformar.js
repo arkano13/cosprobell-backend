@@ -22,7 +22,8 @@ export function expandirCientifico(valor) {
 
 // Los decimales del Service Layer pueden incluir un residuo de binary64 sobre sus seis
 // decimales. Comparar como enteros exactos: tolerancia relativa 2^-52 y además
-// absoluta de 1e-10. Nunca convertir cantidades monetarias a Number para redondear.
+// absoluta de 1e-8 (1/100 del paso de seis decimales). Nunca convertir importes
+// a Number para redondear. Las dos condiciones deben cumplirse simultáneamente.
 export function normalizarDecimalSap(valor) {
   if (typeof valor !== "string") return valor;
   const partes = /^(-?)(0|[1-9]\d{0,12})\.(\d{7,40})$/.exec(valor);
@@ -34,7 +35,7 @@ export function normalizarDecimalSap(valor) {
   const residuo = original - redondeado * divisor;
   const diferencia = residuo < 0n ? -residuo : residuo;
   const escala = 10n ** BigInt(fraccion.length);
-  if (diferencia * 4503599627370496n > original || diferencia * 10000000000n > escala ||
+  if (diferencia * 4503599627370496n > original || diferencia * 100000000n > escala ||
       (original !== 0n && redondeado === 0n)) return valor;
   const decimalCorto = String(redondeado % 1000000n).padStart(6, "0").replace(/0+$/, "");
   return (redondeado === 0n ? "" : signo) + String(redondeado / 1000000n) + (decimalCorto ? "." + decimalCorto : "");

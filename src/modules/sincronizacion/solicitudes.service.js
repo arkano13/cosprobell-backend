@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "../../infrastructure/database/prisma.js";
 import { AppError } from "../../shared/errors/AppError.js";
 
-// listasMateriales (combos): el puente la manda entre sus entidades; el botón no la pide.
+// El selector solo ofrece entidades operativas anunciadas por el puente.
 const entidades = ["clientes", "productos", "unidades", "codigosBarras", "listasMateriales", "pedidos", "facturasPreparacion",
   "trasladosPreparacion", "trasladosEntrada", "almacenes", "existencias"];
 // El botón trae solo los documentos para preparar: productos y existencias siguen en la programación del puente.
@@ -11,6 +11,8 @@ const entidadesManuales = habilitadas => [habilitadas?.includes("facturasPrepara
   "trasladosPreparacion", "trasladosEntrada"].filter(e => habilitadas?.includes(e));
 const nombres = z.array(z.enum(entidades)).min(1).max(entidades.length).refine(v => new Set(v).size === v.length);
 const consultaSchema = z.object({ entidades: nombres }).strict();
+const solicitudSchema = z.object({ entidades: nombres.optional() }).strict();
+const mismas = (a, b) => a.length === b.length && a.every(e => b.includes(e));
 const progresoSchema = z.object({
   id: z.string().uuid(), completas: z.array(z.enum(entidades)).max(entidades.length),
   error: z.string().regex(/^[A-Z0-9_]{1,60}$/).optional(),
@@ -44,13 +46,25 @@ export function crearServicioSolicitudes({ repo = solicitudesRepository, ahora =
     async estado(empresa) {
       validarEmpresa(empresa);
       const d = await repo.leer(empresa);
-      return { solicitud: d.solicitud ?? null, ultimaConexion: d.ultimaConexion ?? null, entidades: entidadesManuales(d.entidades) };
+      const porDefecto = entidadesManuales(d.entidades);
+      return { solicitud: d.solicitud ?? null, ultimaConexion: d.ultimaConexion ?? null, entidades: porDefecto,
+        disponibles: entidades.filter(e => d.entidades?.includes(e)), porDefecto, seleccionable: true };
     },
-    async solicitar(empresa, operadorId) {
+    async solicitar(empresa, operadorId, entrada = {}) {
       validarEmpresa(empresa);
+      const v = solicitudSchema.safeParse(entrada);
+      if (!v.success) throw fallo("SOLICITUD_INVALIDA", "Seleccione al menos una entidad válida, sin repetirla");
       return repo.cambiar(empresa, d => {
-        if (activo(d.solicitud)) return { siguiente: d, resultado: d.solicitud };
-        const seleccionadas = entidadesManuales(d.entidades);
+        const seleccionadas = v.data.entidades ?? entidadesManuales(d.entidades);
+        if (v.data.entidades?.some(e => !d.entidades?.includes(e))) {
+          throw fallo("ENTIDAD_NO_DISPONIBLE", "El puente no tiene habilitada alguna de las entidades seleccionadas", 409);
+        }
+        if (activo(d.solicitud)) {
+          if (v.data.entidades && !mismas(seleccionadas, d.solicitud.entidades)) {
+            throw fallo("SOLICITUD_EN_CURSO", "Ya hay una actualización en curso; espere a que termine", 409);
+          }
+          return { siguiente: d, resultado: d.solicitud };
+        }
         if (!seleccionadas.length) throw fallo("PUENTE_PENDIENTE_ACTUALIZACION", "Actualice el puente y ejecute una vez para habilitar el botón", 409);
         const fecha = ahora();
         if (d.solicitud && fecha - new Date(d.solicitud.creadaEn) < 60000) {

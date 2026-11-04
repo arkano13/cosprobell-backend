@@ -3,8 +3,11 @@ import { z } from "zod";
 import { prisma } from "../../infrastructure/database/prisma.js";
 import { validate } from "../../middleware/validate.js";
 import { safeString } from "../../shared/validation/safeString.js";
+import { exigirConsultaFinanciera } from "../finanzas/finanzas.permisos.js";
+import { leerLegadoFinanciero } from "../finanzas/finanzas.lectura-tablas.js";
 
 const router = Router();
+router.use("/facturas", exigirConsultaFinanciera);
 
 const listarQuerySchema = z.object({
   cardCode: safeString(1).optional(),
@@ -16,11 +19,11 @@ router.get("/facturas", validate({ query: listarQuerySchema }), async (req, res,
     const { cardCode, limit } = req.validatedQuery;
     const take = limit || 20;
 
-    const facturas = await prisma.factura.findMany({
-      where: cardCode ? { cardCode } : undefined,
+    const facturas = await leerLegadoFinanciero(prisma, ["facturas"], (tx, versiones) => tx.factura.findMany({
+      where: { finVersion: versiones.facturas, ...(cardCode ? { cardCode } : {}) },
       take,
       orderBy: { docDate: "desc" },
-    });
+    }));
 
     res.json({ data: facturas });
   } catch (err) {
@@ -36,14 +39,14 @@ router.get("/facturas/:docEntry", validate({ params: docEntryParamsSchema }), as
   try {
     const { docEntry } = req.params;
 
-    const factura = await prisma.factura.findUnique({
-      where: { docEntry },
+    const factura = await leerLegadoFinanciero(prisma, ["facturas", "facturaLineas", "aplicacionesPagos", "pagos"], (tx, versiones) => tx.factura.findFirst({
+      where: { docEntry, finVersion: versiones.facturas },
       include: {
-        lineas: true,
-        aplicaciones: { include: { pago: true } },
+        lineas: { where: { finVersion: versiones.facturaLineas } },
+        aplicaciones: { where: { finVersion: versiones.aplicacionesPagos, pago: { finVersion: versiones.pagos } }, include: { pago: true } },
         cliente: { select: { cardCode: true, cardName: true } },
       },
-    });
+    }));
 
     if (!factura) {
       return res.status(404).json({ error: "Factura no encontrada" });

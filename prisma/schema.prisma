@@ -64,7 +64,12 @@ model Vendedor {
   salesEmployeeCode Int     @id
   salesEmployeeName String
   active            Boolean @default(true)
+  finNombre         String?
+  finActivo         String?
+  finVersion        String? @db.Uuid
+  finClave          String? @unique
 
+  @@index([finVersion, finClave])
   @@map("vendedores")
 }
 
@@ -100,13 +105,13 @@ model Producto {
   sapUpdateDate              DateTime?
   sincronizadoEn             DateTime       @default(now())
 
-  precios       ProductoPrecio[]
-  existencias   ProductoExistencia[]
-  codigosBarras ProductoCodigoBarras[]
-  inventario    InventarioProducto?
-  lotesPequena  InventarioPequenaLote[]
-  cajas         InventarioCaja[]
-  codigosCaja   InventarioCodigoCaja[]
+  precios        ProductoPrecio[]
+  existencias    ProductoExistencia[]
+  codigosBarras  ProductoCodigoBarras[]
+  inventario     InventarioProducto?
+  lotesPequena   InventarioPequenaLote[]
+  cajas          InventarioCaja[]
+  codigosCaja    InventarioCodigoCaja[]
   conteosAlmacen InventarioConteoAlmacen[]
 
   @@map("productos")
@@ -203,8 +208,8 @@ model Cliente {
   cardName                 String
   cardType                 String?
   groupCode                Int?
-  creditLimit              Float?
-  currentAccountBalance    Float?
+  creditLimit              Decimal? @db.Decimal(24, 6)
+  currentAccountBalance    Decimal? @db.Decimal(24, 6)
   openDeliveryNotesBalance Float?
   openOrdersBalance        Float?
   openChecksBalance        Float?
@@ -225,12 +230,21 @@ model Cliente {
   uMuniList                String?
   sincronizadoEn           DateTime @default(now())
 
-  facturas     Factura[]
-  pedidos      Pedido[]
-  entregas     Entrega[]
-  notasCredito NotaCredito[]
-  pagos        Pago[]
+  facturas       Factura[]
+  pedidos        Pedido[]
+  entregas       Entrega[]
+  notasCredito   NotaCredito[]
+  pagos          Pago[]
+  finNombre      String?
+  finActivo      String?
+  finBloqueado   String?
+  saldoFC        Decimal?      @db.Decimal(24, 6)
+  saldoSC        Decimal?      @db.Decimal(24, 6)
+  zonaFinanciera String?
+  finVersion     String?       @db.Uuid
+  finClave       String?       @unique
 
+  @@index([finVersion, finClave])
   @@map("clientes")
 }
 
@@ -250,7 +264,7 @@ model Factura {
   docDate         DateTime
   docDueDate      DateTime?
   taxDate         DateTime?
-  docTotal        Float
+  docTotal        Decimal   @db.Decimal(24, 6)
   docCurrency     String?
   docRate         Float?
   vatSum          Float?
@@ -261,7 +275,7 @@ model Factura {
   salesPersonCode Int?
   comments        String?
   reference1      String?
-  paidToDate      Float?
+  paidToDate      Decimal?  @db.Decimal(24, 6)
   uTipo           String?
   uTipoFactura    String?
   uZona           String?
@@ -274,39 +288,57 @@ model Factura {
   sapUpdateDate   DateTime?
   sincronizadoEn  DateTime  @default(now())
 
-  lineas       FacturaLinea[]
-  aplicaciones PagoFactura[]
-  notasCredito NotaCredito[]
+  lineas          FacturaLinea[]
+  aplicaciones    PagoFactura[]
+  notasCredito    NotaCredito[]
+  serie           Int?
+  totalFC         Decimal?       @db.Decimal(24, 6)
+  totalSC         Decimal?       @db.Decimal(24, 6)
+  pagadoFC        Decimal?       @db.Decimal(24, 6)
+  pagadoSC        Decimal?       @db.Decimal(24, 6)
+  canceladoSap    String?
+  payTermsGrpCode Int?
+  transId         Int?
+  finVersion      String?        @db.Uuid
+  finClave        String?        @unique
 
+  @@index([finVersion, finClave])
+  @@index([finVersion, cardCode, docDate])
   @@map("facturas")
 }
 
 model FacturaLinea {
-  id              Int     @id @default(autoincrement())
-  factura         Factura @relation(fields: [facturaDocEntry], references: [docEntry])
+  id              Int       @id @default(autoincrement())
+  factura         Factura   @relation(fields: [facturaDocEntry], references: [docEntry])
   facturaDocEntry Int
   lineNum         Int
-  itemCode        String
+  itemCode        String?
   itemDescription String?
-  quantity        Float
-  price           Float?
+  quantity        Decimal   @db.Decimal(24, 6)
+  price           Decimal?  @db.Decimal(24, 6)
   currency        String?
   discountPercent Float?
   warehouseCode   String?
-  lineTotal       Float?
+  lineTotal       Decimal?  @db.Decimal(24, 6)
   taxTotal        Float?
   totalInclTax    Float?
   baseType        Int?
   baseEntry       Int?
   baseLine        Int?
   lineStatus      String?
+  cardCode        String?
+  fecha           DateTime? @db.Date
+  finVersion      String?   @db.Uuid
+  finClave        String?   @unique
 
   @@unique([facturaDocEntry, lineNum])
+  @@index([finVersion, finClave])
+  @@index([finVersion, cardCode, fecha])
   @@map("facturas_lineas")
 }
 
 model Pedido {
-  fuenteDocumento String @default("pedido")
+  fuenteDocumento String    @default("pedido")
   sapDocEntry     Int?
   docEntry        Int       @id
   docNum          Int
@@ -337,12 +369,12 @@ model Pedido {
 
   lineas PedidoLinea[]
 
-  @@map("pedidos")
   @@unique([fuenteDocumento, sapDocEntry])
+  @@map("pedidos")
 }
 
 model PedidoLinea {
-  cantidadCredito Float @default(0)
+  cantidadCredito Float   @default(0)
   treeType        String?
   id              Int     @id @default(autoincrement())
   pedido          Pedido  @relation(fields: [pedidoDocEntry], references: [docEntry])
@@ -423,7 +455,7 @@ model NotaCredito {
   cardCode         String
   cliente          Cliente   @relation(fields: [cardCode], references: [cardCode])
   docDate          DateTime
-  docTotal         Float
+  docTotal         Decimal   @db.Decimal(24, 6)
   docCurrency      String?
   documentStatus   String?
   cancelled        Boolean   @default(false)
@@ -438,8 +470,23 @@ model NotaCredito {
   sapUpdateDate    DateTime?
   sincronizadoEn   DateTime  @default(now())
 
-  lineas NotaCreditoLinea[]
+  lineas          NotaCreditoLinea[]
+  serie           Int?
+  docDueDate      DateTime?          @db.Date
+  taxDate         DateTime?          @db.Date
+  totalFC         Decimal?           @db.Decimal(24, 6)
+  totalSC         Decimal?           @db.Decimal(24, 6)
+  paidToDate      Decimal?           @db.Decimal(24, 6)
+  pagadoFC        Decimal?           @db.Decimal(24, 6)
+  pagadoSC        Decimal?           @db.Decimal(24, 6)
+  canceladoSap    String?
+  payTermsGrpCode Int?
+  transId         Int?
+  finVersion      String?            @db.Uuid
+  finClave        String?            @unique
 
+  @@index([finVersion, finClave])
+  @@index([finVersion, cardCode, docDate])
   @@map("notas_credito")
 }
 
@@ -448,16 +495,23 @@ model NotaCreditoLinea {
   notaCredito         NotaCredito @relation(fields: [notaCreditoDocEntry], references: [docEntry])
   notaCreditoDocEntry Int
   lineNum             Int
-  itemCode            String
+  itemCode            String?
   itemDescription     String?
-  quantity            Float
+  quantity            Decimal     @db.Decimal(24, 6)
   warehouseCode       String?
-  lineTotal           Float?
+  lineTotal           Decimal?    @db.Decimal(24, 6)
   baseType            Int?
   baseEntry           Int?
   baseLine            Int?
+  cardCode            String?
+  fecha               DateTime?   @db.Date
+  price               Decimal?    @db.Decimal(24, 6)
+  finVersion          String?     @db.Uuid
+  finClave            String?     @unique
 
   @@unique([notaCreditoDocEntry, lineNum])
+  @@index([finVersion, finClave])
+  @@index([finVersion, cardCode, fecha])
   @@map("notas_credito_lineas")
 }
 
@@ -472,34 +526,56 @@ model Pago {
   cliente        Cliente? @relation(fields: [cardCode], references: [cardCode])
   docDate        DateTime
   docCurrency    String?
-  cashSum        Float?
-  transferSum    Float?
+  cashSum        Decimal? @db.Decimal(24, 6)
+  transferSum    Decimal? @db.Decimal(24, 6)
   reference1     String?
   remarks        String?
   cancelled      Boolean  @default(false)
   uVendedor      String?
   sincronizadoEn DateTime @default(now())
 
-  aplicaciones PagoFactura[]
+  aplicaciones       PagoFactura[]
+  serie              Int?
+  canceladoSap       String?
+  transId            Int?
+  total              Decimal?      @db.Decimal(24, 6)
+  totalFC            Decimal?      @db.Decimal(24, 6)
+  totalSC            Decimal?      @db.Decimal(24, 6)
+  cheques            Decimal?      @db.Decimal(24, 6)
+  tarjetas           Decimal?      @db.Decimal(24, 6)
+  sinAplicarOriginal Decimal?      @db.Decimal(24, 6)
+  finVersion         String?       @db.Uuid
+  finClave           String?       @unique
 
+  @@index([finVersion, finClave])
+  @@index([finVersion, cardCode, docDate])
   @@map("pagos")
 }
 
 // Confirmado con datos reales: un pago puede tener 0 aplicaciones.
 // No forzar relacion obligatoria.
 model PagoFactura {
-  id              Int     @id @default(autoincrement())
-  pago            Pago    @relation(fields: [pagoDocEntry], references: [docEntry])
+  id              Int       @id @default(autoincrement())
+  pago            Pago      @relation(fields: [pagoDocEntry], references: [docEntry])
   pagoDocEntry    Int
   lineNum         Int
-  facturaDocEntry Int
-  factura         Factura @relation(fields: [facturaDocEntry], references: [docEntry])
-  sumApplied      Float
+  facturaDocEntry Int?
+  factura         Factura?  @relation(fields: [facturaDocEntry], references: [docEntry])
+  sumApplied      Decimal   @db.Decimal(24, 6)
   invoiceType     String?
   docLine         Int?
   installmentId   Int?
+  cardCode        String?
+  fecha           DateTime? @db.Date
+  cancelado       String?
+  documentoSap    Int?
+  aplicadoFC      Decimal?  @db.Decimal(24, 6)
+  aplicadoSC      Decimal?  @db.Decimal(24, 6)
+  finVersion      String?   @db.Uuid
+  finClave        String?   @unique
 
   @@unique([pagoDocEntry, lineNum])
+  @@index([finVersion, finClave])
   @@map("pagos_facturas")
 }
 
@@ -829,13 +905,13 @@ model InventarioCodigoCaja {
 model InventarioConteoAlmacen {
   almacen        String
   itemCode       String
-  producto       Producto @relation(fields: [itemCode], references: [itemCode])
+  producto       Producto                       @relation(fields: [itemCode], references: [itemCode])
   unidades       Int // total contado (0 = no hay)
-  cajas          Int      @default(0) // cajas enteras contadas (almacenes por cajas)
+  cajas          Int                            @default(0) // cajas enteras contadas (almacenes por cajas)
   contadoPor     String?
-  contadoEn      DateTime @default(now())
+  contadoEn      DateTime                       @default(now())
   actualizadoPor String?
-  actualizadoEn  DateTime @default(now())
+  actualizadoEn  DateTime                       @default(now())
   lineas         InventarioConteoAlmacenLinea[]
 
   @@id([almacen, itemCode])
@@ -845,12 +921,12 @@ model InventarioConteoAlmacen {
 // Lo contado por lote: cajas × unidadesPorCaja (por cajas), o unidades sueltas (por lote y el bulto de un almacén por
 // cajas, con cajas en null).
 model InventarioConteoAlmacenLinea {
-  id              Int       @id @default(autoincrement())
+  id              Int                     @id @default(autoincrement())
   almacen         String
   itemCode        String
   conteo          InventarioConteoAlmacen @relation(fields: [almacen, itemCode], references: [almacen, itemCode], onDelete: Cascade)
   lote            String?
-  vencimiento     DateTime? @db.Date
+  vencimiento     DateTime?               @db.Date
   cajas           Int?
   unidadesPorCaja Int?
   unidades        Int
@@ -889,23 +965,23 @@ model TrasladoEntradaLinea {
 }
 
 model InventarioMovimiento {
-  id          Int                  @id @default(autoincrement())
-  grupo       String // los movimientos de una misma operación (una recepción de 10 cajas, una reposición) lo comparten
-  tipo        String // recepcion | reposicion | traspaso | picking | descuento | conteo | correccion | reasignacion
-  itemCode    String
-  bodega      String // grande | pequena
-  cantidad    Int
-  cajaId      Int?
-  caja        InventarioCaja?      @relation(fields: [cajaId], references: [id])
-  lote        String?
+  id            Int                    @id @default(autoincrement())
+  grupo         String // los movimientos de una misma operación (una recepción de 10 cajas, una reposición) lo comparten
+  tipo          String // recepcion | reposicion | traspaso | picking | descuento | conteo | correccion | reasignacion
+  itemCode      String
+  bodega        String // grande | pequena
+  cantidad      Int
+  cajaId        Int?
+  caja          InventarioCaja?        @relation(fields: [cajaId], references: [id])
+  lote          String?
   pequenaLoteId Int?
-  pequenaLote InventarioPequenaLote? @relation(fields: [pequenaLoteId], references: [id])
-  pickingId   Int?
-  descuentoId Int?
-  descuento   InventarioDescuento? @relation(fields: [descuentoId], references: [id])
-  observacion String?
-  hechoPor    String?
-  creadoEn    DateTime             @default(now())
+  pequenaLote   InventarioPequenaLote? @relation(fields: [pequenaLoteId], references: [id])
+  pickingId     Int?
+  descuentoId   Int?
+  descuento     InventarioDescuento?   @relation(fields: [descuentoId], references: [id])
+  observacion   String?
+  hechoPor      String?
+  creadoEn      DateTime               @default(now())
 
   @@index([itemCode, creadoEn])
   @@index([creadoEn])
@@ -941,24 +1017,25 @@ model InventarioCuadre {
 }
 
 model SincronizacionRecorrido {
-  entidad String @id
-  empresa String
-  recorridoId String @db.Uuid
-  iniciadoEn DateTime @default(now())
+  entidad      String    @id
+  empresa      String
+  recorridoId  String    @db.Uuid
+  iniciadoEn   DateTime  @default(now())
   finalizadoEn DateTime?
-  secuencia Int?
+  secuencia    Int?
+
   @@map("sincronizacion_recorridos")
 }
 
 model InventarioPequenaLote {
-  id Int @id @default(autoincrement())
-  clave String @unique
-  itemCode String
-  producto Producto @relation(fields: [itemCode], references: [itemCode])
-  lote String?
-  vencimiento DateTime? @db.Date
-  unidades Int
-  creadoEn DateTime @default(now())
+  id          Int                    @id @default(autoincrement())
+  clave       String                 @unique
+  itemCode    String
+  producto    Producto               @relation(fields: [itemCode], references: [itemCode])
+  lote        String?
+  vencimiento DateTime?              @db.Date
+  unidades    Int
+  creadoEn    DateTime               @default(now())
   movimientos InventarioMovimiento[]
 
   @@index([itemCode], map: "inventario_pequena_lotes_producto_idx")
@@ -1003,10 +1080,10 @@ model DocumentoStock {
 }
 
 model DocumentoStockLinea {
-  id        Int            @id @default(autoincrement())
-  tipo      String
-  docEntry  Int
-  documento DocumentoStock @relation(fields: [tipo, docEntry], references: [tipo, docEntry], onDelete: Cascade)
+  id            Int            @id @default(autoincrement())
+  tipo          String
+  docEntry      Int
+  documento     DocumentoStock @relation(fields: [tipo, docEntry], references: [tipo, docEntry], onDelete: Cascade)
   lineNum       Int
   itemCode      String
   warehouseCode String?
@@ -1028,10 +1105,10 @@ model Configuracion {
 }
 
 model InventarioOperacion {
-  id String @id @db.Uuid
-  hash String
+  id        String   @id @db.Uuid
+  hash      String
   respuesta Json
-  creadoEn DateTime @default(now())
+  creadoEn  DateTime @default(now())
 
   @@map("inventario_operaciones")
 }
@@ -1039,33 +1116,35 @@ model InventarioOperacion {
 // Espejo financiero v1: contratos estrictos por entidad, separado del borrador
 // Float y del scanner. JSON conserva referencias SAP e importes como strings.
 model FinanzaControl {
-  entidad String @id
-  empresa String
-  recorridoId String @db.Uuid
-  configuracion Json
-  iniciadoEn DateTime @default(now())
-  finalizadoEn DateTime?
-  secuencia Int @default(0)
-  ultimoHash String?
-  cantidad Int @default(0)
-  activoId String? @db.Uuid
-  publicadoEn DateTime?
+  entidad               String    @id
+  empresa               String
+  recorridoId           String    @db.Uuid
+  configuracion         Json
+  iniciadoEn            DateTime  @default(now())
+  finalizadoEn          DateTime?
+  secuencia             Int       @default(0)
+  ultimoHash            String?
+  cantidad              Int       @default(0)
+  activoId              String?   @db.Uuid
+  publicadoEn           DateTime?
   lecturaPublicadaDesde DateTime?
+
   @@map("finanzas_control")
 }
 
 model FinanzaRegistro {
-  entidad String
-  version String
-  clave String
-  cardCode String?
-  fecha DateTime? @db.Date
-  vencimiento DateTime? @db.Date
-  datos Json
-  debe Decimal? @db.Decimal(24, 6)
-  haber Decimal? @db.Decimal(24, 6)
-  saldo Decimal? @db.Decimal(24, 6)
-  actualizadoEn DateTime @default(now())
+  entidad       String
+  version       String
+  clave         String
+  cardCode      String?
+  fecha         DateTime? @db.Date
+  vencimiento   DateTime? @db.Date
+  datos         Json
+  debe          Decimal?  @db.Decimal(24, 6)
+  haber         Decimal?  @db.Decimal(24, 6)
+  saldo         Decimal?  @db.Decimal(24, 6)
+  actualizadoEn DateTime  @default(now())
+
   @@id([entidad, version, clave])
   @@index([entidad, version, cardCode, fecha])
   @@map("finanzas_registros")
@@ -1074,7 +1153,7 @@ model FinanzaRegistro {
 // Listas de materiales de SAP (ProductTrees), por artículo padre. tipo es el TreeType de SAP; los de tipo Conjunto
 // (iAssemblyTree) son los combos que la bodega prepara producto por producto. lineas: [{ itemCode, cantidad, tipo }].
 model ListaMateriales {
-  retiradoEnSap Boolean @default(false)
+  retiradoEnSap  Boolean  @default(false)
   itemCode       String   @id
   tipo           String
   cantidad       Float
@@ -1087,11 +1166,11 @@ model ListaMateriales {
 // Auditoría de una bodega: se escanea todo lo que hay, unidad por unidad, y al terminar se compara con la app y con
 // SAP. Solo informa: no mueve inventario. resultado = la comparación congelada al terminar (ver auditorias.calculo.js).
 model AuditoriaBodega {
-  id           Int                @id @default(autoincrement())
+  id           Int                   @id @default(autoincrement())
   almacen      String
-  estado       String             @default("en_curso") // en_curso | terminada | anulada
+  estado       String                @default("en_curso") // en_curso | terminada | anulada
   iniciadaPor  String?
-  iniciadaEn   DateTime           @default(now())
+  iniciadaEn   DateTime              @default(now())
   terminadaPor String?
   terminadaEn  DateTime?
   resultado    Json?
@@ -1103,14 +1182,14 @@ model AuditoriaBodega {
 }
 
 model AuditoriaLectura {
-  id          Int       @id @default(autoincrement())
+  id          Int             @id @default(autoincrement())
   auditoriaId Int
   auditoria   AuditoriaBodega @relation(fields: [auditoriaId], references: [id], onDelete: Cascade)
   operacionId String
   codigo      String
   itemCode    String
   hechoPor    String?
-  creadoEn    DateTime  @default(now())
+  creadoEn    DateTime        @default(now())
 
   @@unique([auditoriaId, operacionId], map: "auditoria_lecturas_operacion_key")
   @@index([auditoriaId, itemCode], map: "auditoria_lecturas_item_idx")
@@ -1160,4 +1239,90 @@ model ConteoLectura {
   @@unique([conteoId, operacionId], map: "conteo_lecturas_operacion_key")
   @@index([conteoId, itemCode], map: "conteo_lecturas_item_idx")
   @@map("conteo_lecturas")
+}
+
+model EmpresaFinanciera {
+  codigo        String
+  monedaLocal   String
+  monedaSistema String
+  finVersion    String? @db.Uuid
+  finClave      String? @unique
+
+  @@id([codigo])
+  @@index([finVersion, finClave])
+  @@map("empresa_financiera")
+}
+
+model CondicionPago {
+  codigo     Int
+  nombre     String
+  dias       Int
+  meses      Int
+  cuotas     Int?
+  finVersion String? @db.Uuid
+  finClave   String? @unique
+
+  @@id([codigo])
+  @@index([finVersion, finClave])
+  @@map("condiciones_pago")
+}
+
+model FacturaCuota {
+  docEntry    Int
+  cuota       Int
+  cardCode    String
+  fecha       DateTime @db.Date
+  vencimiento DateTime @db.Date
+  total       Decimal  @db.Decimal(24, 6)
+  totalFC     Decimal? @db.Decimal(24, 6)
+  totalSC     Decimal? @db.Decimal(24, 6)
+  pagado      Decimal? @db.Decimal(24, 6)
+  pagadoFC    Decimal? @db.Decimal(24, 6)
+  pagadoSC    Decimal? @db.Decimal(24, 6)
+  estado      String?
+  finVersion  String?  @db.Uuid
+  finClave    String?  @unique
+
+  @@id([docEntry, cuota])
+  @@index([finVersion, finClave])
+  @@index([finVersion, cardCode, fecha])
+  @@map("facturas_cuotas")
+}
+
+model MovimientoContable {
+  transId        Int
+  linea          Int
+  cardCode       String
+  fecha          DateTime  @db.Date
+  vencimiento    DateTime? @db.Date
+  fechaDocumento DateTime? @db.Date
+  tipo           String
+  documento      Int?
+  referencia     String?
+  monedaFC       String?
+  debe           Decimal   @db.Decimal(24, 6)
+  haber          Decimal   @db.Decimal(24, 6)
+  debeFC         Decimal   @db.Decimal(24, 6)
+  haberFC        Decimal   @db.Decimal(24, 6)
+  debeSC         Decimal   @db.Decimal(24, 6)
+  haberSC        Decimal   @db.Decimal(24, 6)
+  finVersion     String?   @db.Uuid
+  finClave       String?   @unique
+
+  @@id([transId, linea])
+  @@index([finVersion, finClave])
+  @@index([finVersion, cardCode, fecha])
+  @@map("movimientos_contables")
+}
+
+// Avance de la conversión local, independiente del cursor que conserva el puente.
+model FinanzaNormalizacion {
+  entidad       String    @id
+  version       String    @db.Uuid
+  cursor        String?
+  cantidad      Int       @default(0)
+  finalizadoEn  DateTime?
+  actualizadoEn DateTime  @updatedAt
+
+  @@map("finanzas_normalizacion")
 }
