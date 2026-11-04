@@ -47,6 +47,25 @@ test("GET: totalSC del documento 16 se normaliza sin omitir la factura ni modifi
     { code: "FINANZA_SAP_INVALIDA" });
 });
 
+test("GET: débito y crédito de varios millones admiten un residuo de representación, conservando importes significativos", async () => {
+  const linea = { Line_ID: 3, ShortName: "_SYS00000000347", DueDate: "2020-01-01", FCCurrency: null,
+    Debit: "8682903.859999999", Credit: "0", FCDebit: "0", FCCredit: "0", DebitSys: "0", CreditSys: "0" };
+  const asientos = [74761, 74762].map((JdtNum, i) => ({ JdtNum, ReferenceDate: "2020-01-01", TaxDate: "2020-01-01",
+    OriginalJournal: "ttJournalEntry", BaseReference: String(JdtNum), JournalEntryLines: [{ ...linea,
+      Debit: i === 0 ? "8682903.859999999" : "0", Credit: i === 1 ? "8682903.859999999" : "0" }] }));
+  const pagina = await leerPaginaGet({ sap: fake(asientos), def: defs.movimientos, config, recorrido });
+  const filas = transformarFinanzas("movimientos", pagina.filas, [74760, 0]);
+  assert.equal(filas[0].debe, "8682903.86");
+  assert.equal(filas[1].haber, "8682903.86");
+  assert.deepEqual(filas.map(f => [f.transId, f.linea]), [[74761, 3], [74762, 3]]);
+  assert.equal(normalizarPrecioSap("-8682903.859999999"), "-8682903.86");
+  for (const valor of ["8682903.8599999", "8682903.86000001", "9999999999999.1234567", "0.0000000000001"]) {
+    assert.equal(normalizarPrecioSap(valor), valor);
+    assert.throws(() => transformarFinanzas("movimientos", [{ ...filas[0], debe: valor }], null), { code: "FINANZA_SAP_INVALIDA" });
+  }
+  assert.equal(normalizarPrecioSap("8682903.860001"), "8682903.860001");
+});
+
 test("GET: transporta importes exactos, incluye cancelaciones y no incluye conciliaciones", async () => {
   const dato = await leerJsonFinancieroGet(new Response('{"DocEntry":1,"DocTotal":9999999999999.123456,"Quantity":1E-06}'));
   assert.deepEqual(dato, { DocEntry: 1, DocTotal: "9999999999999.123456", Quantity: "0.000001" });
