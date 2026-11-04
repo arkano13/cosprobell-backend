@@ -7,11 +7,11 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
-    "postinstall": "prisma generate",
+    "postinstall": "prisma generate --config=prisma7.config.js",
     "seed": "node prisma/seed.js",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate:dev": "prisma migrate dev",
-    "prisma:studio": "prisma studio",
+    "prisma:generate": "prisma generate --config=prisma7.config.js",
+    "prisma:migrate:dev": "prisma migrate dev --config=prisma7.config.js",
+    "prisma:studio": "prisma studio --config=prisma7.config.js",
     "test": "node --test",
     "empaquetar:puente": "node scripts/empaquetar-puente.js"
   },
@@ -30,5 +30,9 @@
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.4.3",
+    "@electric-sql/pglite-socket": "0.1.3"
   }
 }

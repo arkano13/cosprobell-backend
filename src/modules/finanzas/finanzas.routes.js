@@ -5,7 +5,7 @@ import { inicioSchema, fecha, nombresFinanzas } from "../../shared/finanzas/cont
 import { estadoFinanzas, iniciarFinanzas, recibirFinanzas, finalizarFinanzas, falloFinanzas } from "./finanzas.ingreso.js";
 import { listarFinanzas, consultarCartera, consultarEstadoCuenta } from "./finanzas.consultas.js";
 import { finanzasRepository } from "./finanzas.repository.js";
-import env from "../../config/env.js";
+import { exigirConsultaFinanciera } from "./finanzas.permisos.js";
 const envolver = fn => async (req, res, next) => { try { res.json(await fn(req)); } catch (e) { next(e); } };
 export const ingresoFinanzas = Router();
 ingresoFinanzas.use(requireBridgeAuth);
@@ -24,10 +24,7 @@ const validar = (schema, valor) => {
   return r.data;
 };
 export const consultasFinanzas = Router();
-consultasFinanzas.use((req, res, next) => {
-  if (!env.finanzasAppsAutorizadas.includes(req.appNombre)) return res.status(403).json({ error: "Aplicación sin permiso de consulta financiera" });
-  next();
-});
+consultasFinanzas.use(exigirConsultaFinanciera);
 consultasFinanzas.get("/estado", envolver(async () => ({ data: await finanzasRepository.controles(), validadoContraSap: false })));
 consultasFinanzas.get("/cartera", envolver(req => consultarCartera(validar(z.object({ cardCode: z.string().min(1).max(50) }).strict(), req.query).cardCode)));
 consultasFinanzas.get("/estado-cuenta", envolver(req => {

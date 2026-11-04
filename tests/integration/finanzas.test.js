@@ -38,6 +38,23 @@ test("HTTP consultas: clave de scanner no obtiene finanzas; aplicación autoriza
   prisma.apiKey.findUnique = async () => ({ id: 1, activa: true, nombre: "scanner", alcance: "completo" });
   prisma.apiKey.update = async () => ({});
   assert.equal((await fetch(`${url}/finanzas/estado`, { headers: { "X-API-Key": "ficticia" } })).status, 403);
+  for (const ruta of ["/facturas", "/facturas/1", "/pagos"]) {
+    assert.equal((await fetch(`${url}${ruta}`, { headers: { "X-API-Key": "ficticia" } })).status, 403, ruta);
+  }
+  const findManyCliente = prisma.cliente.findMany, findFirstCliente = prisma.cliente.findFirst;
+  t.after(() => { prisma.cliente.findMany = findManyCliente; prisma.cliente.findFirst = findFirstCliente; });
+  prisma.cliente.findMany = async entrada => {
+    assert.equal(entrada.select.creditLimit, undefined);
+    assert.equal(entrada.select.currentAccountBalance, undefined);
+    return [{ cardCode: "C1", cardName: "Cliente", valid: true }];
+  };
+  prisma.cliente.findFirst = async entrada => {
+    assert.equal(entrada.select.cardName, true);
+    assert.equal(entrada.include, undefined);
+    return { cardCode: "C1", cardName: "Cliente" };
+  };
+  assert.equal((await fetch(`${url}/clientes`, { headers: { "X-API-Key": "ficticia" } })).status, 200);
+  assert.equal((await fetch(`${url}/clientes/C1`, { headers: { "X-API-Key": "ficticia" } })).status, 200);
   prisma.apiKey.findUnique = async () => ({ id: 1, activa: true, nombre: "app-cartera", alcance: "completo" });
   t.mock.method(repo, "controles", async () => []);
   const r = await fetch(`${url}/finanzas/estado`, { headers: { "X-API-Key": "ficticia" } });

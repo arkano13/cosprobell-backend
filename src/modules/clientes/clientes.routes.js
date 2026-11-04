@@ -3,6 +3,8 @@ import { z } from "zod";
 import { prisma } from "../../infrastructure/database/prisma.js";
 import { validate } from "../../middleware/validate.js";
 import { safeString } from "../../shared/validation/safeString.js";
+import { puedeConsultarFinanzas } from "../finanzas/finanzas.permisos.js";
+import { leerLegadoFinanciero } from "../finanzas/finanzas.lectura-tablas.js";
 
 const router = Router();
 
@@ -16,25 +18,26 @@ router.get("/clientes", validate({ query: listarQuerySchema }), async (req, res,
     const { q, limit } = req.validatedQuery;
     const take = limit || 20;
 
-    const clientes = await prisma.cliente.findMany({
-      where: q
+    const consultar = (db, versiones = {}) => db.cliente.findMany({
+      where: { ...(versiones.clientes ? { finVersion: versiones.clientes } : {}), ...(q
         ? {
             OR: [
               { cardName: { contains: q, mode: "insensitive" } },
               { cardCode: { contains: q, mode: "insensitive" } },
             ],
           }
-        : undefined,
+        : {}) },
       take,
       orderBy: { cardName: "asc" },
       select: {
         cardCode: true,
         cardName: true,
         valid: true,
-        creditLimit: true,
-        currentAccountBalance: true,
+        ...(puedeConsultarFinanzas(req) ? { creditLimit: true, currentAccountBalance: true } : {}),
       },
     });
+    const clientes = puedeConsultarFinanzas(req)
+      ? await leerLegadoFinanciero(prisma, ["clientes"], consultar) : await consultar(prisma);
 
     res.json({ data: clientes });
   } catch (err) {
@@ -50,13 +53,15 @@ router.get("/clientes/:cardCode", validate({ params: cardCodeParamsSchema }), as
   try {
     const { cardCode } = req.params;
 
-    const cliente = await prisma.cliente.findUnique({
-      where: { cardCode },
-      include: {
-        facturas: { orderBy: { docDate: "desc" }, take: 10 },
+    const consultar = (db, versiones = {}) => db.cliente.findFirst({
+      where: { cardCode, ...(versiones.clientes ? { finVersion: versiones.clientes } : {}) },
+      ...(puedeConsultarFinanzas(req) ? { include: {
+        facturas: { where: { finVersion: versiones.facturas }, orderBy: { docDate: "desc" }, take: 10 },
         pedidos: { orderBy: { docDate: "desc" }, take: 10 },
-      },
+      } } : { select: { cardCode: true, cardName: true, valid: true, frozen: true, sincronizadoEn: true } }),
     });
+    const cliente = puedeConsultarFinanzas(req)
+      ? await leerLegadoFinanciero(prisma, ["clientes", "facturas"], consultar) : await consultar(prisma);
 
     if (!cliente) {
       return res.status(404).json({ error: "Cliente no encontrado" });
@@ -68,4 +73,4 @@ router.get("/clientes/:cardCode", validate({ params: cardCodeParamsSchema }), as
   }
 });
 
-export default router;  
+export default router;

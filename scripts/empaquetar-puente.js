@@ -63,7 +63,7 @@ await writeFile(join(destino, "VERSION.txt"), `puente-cosprobell ${version}\ncom
 // y zod se resuelve dentro del paquete (no desde node_modules del proyecto).
 const verificacion = `
 import { pathToFileURL } from "node:url";
-for (const m of ["entidades", "estado", "sap.client", "backend.client", "sincronizar", "config", "finanzas.sql", "finanzas.config", "finanzas.sincronizar", "finanzas.estado"]) await import("./puente/" + m + ".js");
+for (const m of ["entidades", "estado", "sap.client", "backend.client", "sincronizar", "config", "finanzas.sql", "finanzas.config", "finanzas.sincronizar", "finanzas.estado", "finanzas.get", "finanzas.importar", "actualizar-finanzas-get"]) await import("./puente/" + m + ".js");
 if (!import.meta.resolve("zod").startsWith(pathToFileURL(process.cwd() + "/node_modules/zod/").href)) throw new Error("zod se resolvió fuera del paquete");
 `;
 const prueba = spawnSync(process.execPath, ["--input-type=module", "-e", verificacion], { cwd: destino, encoding: "utf8" });

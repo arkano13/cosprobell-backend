@@ -17,7 +17,7 @@ router.get("/sincronizacion/solicitud", async (_req, res, next) => {
   try { res.json({ data: await solicitudesService.estado(env.sapCompanyDb) }); } catch (error) { next(error); }
 });
 router.post("/sincronizacion/solicitud", async (req, res, next) => {
-  try { res.json({ data: await solicitudesService.solicitar(env.sapCompanyDb, req.operador.id) }); } catch (error) { next(error); }
+  try { res.json({ data: await solicitudesService.solicitar(env.sapCompanyDb, req.operador.id, req.body) }); } catch (error) { next(error); }
 });
 router.get("/resumen", c.resumen);
 router.get("/etiquetas", validate({ query: etiquetasQuerySchema }), c.etiquetas);

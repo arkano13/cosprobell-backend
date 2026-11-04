@@ -96,3 +96,39 @@ test("el puente con listas de materiales (combos) se acepta y el botón no las p
   assert.deepEqual((await s.estado("SAP")).entidades, ["pedidos"]);
   assert.deepEqual((await s.solicitar("SAP", 1)).entidades, ["pedidos"]);
 });
+
+test("selector: listas de materiales se pueden pedir solas sin forzar otras entidades", async () => {
+  const { s, repo } = preparar();
+  const entidades = ["productos", "listasMateriales", "facturasPreparacion", "existencias"];
+  await s.consultar("SAP", { entidades });
+  const estado = await s.estado("SAP");
+  assert.equal(estado.seleccionable, true);
+  assert.deepEqual(new Set(estado.disponibles), new Set(entidades));
+  assert.deepEqual(estado.porDefecto, ["facturasPreparacion"]);
+  const solicitud = await s.solicitar("SAP", 1, { entidades: ["listasMateriales"] });
+  assert.deepEqual(solicitud.entidades, ["listasMateriales"]);
+  assert.deepEqual((await repo.leer("SAP")).entidades, entidades);
+  assert.deepEqual((await s.consultar("SAP", { entidades })).entidades, ["listasMateriales"]);
+  await s.progreso("SAP", { id: solicitud.id, completas: ["listasMateriales"] });
+  assert.equal((await s.estado("SAP")).solicitud.estado, "completado");
+});
+
+test("selector: rechaza vacíos, duplicados, finanzas y entidades no anunciadas sin guardar solicitudes", async () => {
+  const { s } = preparar(); await s.consultar("SAP", capacidades);
+  for (const entrada of [{ entidades: [] }, { entidades: ["productos", "productos"] },
+    { entidades: ["pagos"] }, { entidades: ["productos"], extra: true }, null]) {
+    await assert.rejects(s.solicitar("SAP", 1, entrada), { code: "SOLICITUD_INVALIDA" });
+  }
+  await assert.rejects(s.solicitar("SAP", 1, { entidades: ["listasMateriales"] }), { code: "ENTIDAD_NO_DISPONIBLE" });
+  assert.equal((await s.estado("SAP")).solicitud, null);
+});
+
+test("selector: clics iguales comparten solicitud, otra selección no reemplaza el trabajo activo", async () => {
+  const { s } = preparar(); await s.consultar("SAP", capacidades);
+  const entrada = { entidades: ["productos", "existencias"] };
+  const solicitudes = await Promise.all(Array.from({ length: 10 }, () => s.solicitar("SAP", 1, entrada)));
+  assert.equal(new Set(solicitudes.map(s => s.id)).size, 1);
+  assert.equal((await s.solicitar("SAP", 2, { entidades: ["existencias", "productos"] })).id, solicitudes[0].id);
+  await assert.rejects(s.solicitar("SAP", 2, { entidades: ["facturasPreparacion"] }), { code: "SOLICITUD_EN_CURSO" });
+  assert.deepEqual((await s.estado("SAP")).solicitud.entidades, entrada.entidades);
+});
