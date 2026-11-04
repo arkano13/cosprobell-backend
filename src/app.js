@@ -20,6 +20,7 @@ import operadoresRoutes from "./modules/operadores/operadores.routes.js";
 import supervisorRoutes from "./modules/supervisor/supervisor.routes.js";
 import inventarioRoutes from "./modules/inventario/inventario.routes.js";
 import auditoriasRoutes from "./modules/auditorias/auditorias.routes.js";
+import conteosRoutes from "./modules/conteos/conteos.routes.js";
 import actualizacionesRoutes from "./modules/actualizaciones/actualizaciones.routes.js";
 
 const app = express();
@@ -46,7 +47,9 @@ app.use("/supervisor", supervisorRoutes);
 // Auditorías de bodega: escanear todo lo que hay y compararlo con la app y con SAP.
 app.use("/inventario/auditorias", auditoriasRoutes);
 app.use("/inventario", inventarioRoutes);
-// Un operador solo llega hasta pedidos, picking, el panel y el inventario.
+// Conteos con nombre: escanear unidad por unidad y obtener la lista de productos con sus cantidades.
+app.use("/conteos", conteosRoutes);
+// Un operador solo llega hasta pedidos, picking, el panel, el inventario y los conteos.
 app.use(soloAplicaciones);
 app.use("/finanzas", consultasFinanzas);
 app.use(productosRoutes);

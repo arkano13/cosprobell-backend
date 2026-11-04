@@ -1131,3 +1131,33 @@ model AuditoriaCorreccion {
   @@index([auditoriaId], map: "auditoria_correcciones_auditoria_idx")
   @@map("auditoria_correcciones")
 }
+
+model Conteo {
+  id          Int             @id @default(autoincrement())
+  nombre      String
+  estado      String          @default("en_curso") // en_curso | terminado | anulado
+  operadorId  Int?
+  iniciadoPor String?
+  iniciadoEn  DateTime        @default(now())
+  terminadoEn DateTime?
+  lecturas    ConteoLectura[]
+
+  @@index([estado, iniciadoEn], map: "conteos_estado_idx")
+  @@index([operadorId, iniciadoEn], map: "conteos_operador_idx")
+  @@map("conteos")
+}
+
+model ConteoLectura {
+  id          Int      @id @default(autoincrement())
+  conteoId    Int
+  conteo      Conteo   @relation(fields: [conteoId], references: [id], onDelete: Cascade)
+  operacionId String
+  codigo      String
+  itemCode    String
+  hechoPor    String?
+  creadoEn    DateTime @default(now())
+
+  @@unique([conteoId, operacionId], map: "conteo_lecturas_operacion_key")
+  @@index([conteoId, itemCode], map: "conteo_lecturas_item_idx")
+  @@map("conteo_lecturas")
+}
