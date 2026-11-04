@@ -203,3 +203,22 @@ terminar se compara con la app y con SAP. Solo informa: no mueve inventario.
   figuraba tenía 0) y la fila corregida lleva `original` (lo que se escaneó de verdad). Cada corrección queda en
   `auditoria_correcciones`; el mismo número otra vez no registra nada. En curso o anulada, `409 AUDITORIA_SIN_RESULTADO`;
   producto inexistente, `404 PRODUCTO_NO_ENCONTRADO` o `ETIQUETA_NO_ENCONTRADA`. Las lecturas no se tocan.
+
+## Conteos con nombre
+
+Para contar algo puntual (una devolución, un estante, lo que llegó de un proveedor) sin comparar con existencias ni mover
+inventario. Cualquier operador le pone un nombre, escanea unidad por unidad y al finalizar queda la lista de productos con
+sus cantidades; la app la guarda en PDF y en Excel. Cada operador ve y usa sus conteos; el supervisor (y las aplicaciones),
+todos. Un conteo de otro operador responde `404 CONTEO_NO_ENCONTRADO`.
+
+- `GET /conteos?limit=`: `{ enCurso, terminados }` (los finalizados más recientes), cada uno con `unidades` y `productos`.
+- `POST /conteos` `{ nombre }` (1 a 80 caracteres): empieza uno.
+- `GET /conteos/:id`: lo escaneado por producto (`itemCode`, `itemName`, `unidades`), lo último arriba mientras está en
+  curso y por nombre cuando se finalizó, con el total en `unidades`.
+- `POST /conteos/:id/lecturas` `{ codigo, operacionId }`: una unidad. El código se resuelve como en el picking (código de
+  la unidad confirmado: un código de caja o uno que no es de un producto nuestro no se cuenta); la misma operación otra vez
+  no suma.
+- `POST /conteos/:id/quitar-ultima`: borra la última lectura (`409 SIN_LECTURAS` si no hay).
+- `POST /conteos/:id/terminar` (devuelve la lista final) y `/anular` (se descarta). Cerrado: `409 CONTEO_CERRADO`.
+
+Tablas `conteos` y `conteo_lecturas` (migración `20261104090000_conteos`).
