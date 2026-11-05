@@ -1326,3 +1326,14 @@ model FinanzaNormalizacion {
 
   @@map("finanzas_normalizacion")
 }
+
+// Acuse durable de documentos periódicos. No comparte IDs con movimientos físicos.
+model FinanzaActualizacion {
+  operacionId String   @id @db.Uuid
+  empresa     String
+  hash        String
+  respuesta   Json
+  creadaEn    DateTime @default(now())
+
+  @@map("finanzas_actualizaciones")
+}

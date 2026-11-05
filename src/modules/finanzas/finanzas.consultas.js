@@ -2,6 +2,7 @@ import { snapshotFinanciero } from "../../shared/finanzas/contratos.js";
 import { importe, unidades } from "../../shared/finanzas/decimal.js";
 import { finanzasRepository as repo } from "./finanzas.repository.js";
 import { exigirEntidad, falloFinanzas } from "./finanzas.ingreso.js";
+import { revisionFinanciera } from "../../shared/finanzas/periodicas.js";
 
 export async function contextoFinanciero(entidad, version) {
   exigirEntidad(entidad);
@@ -10,9 +11,11 @@ export async function contextoFinanciero(entidad, version) {
   }
   const control = await repo.control(entidad);
   if (!control?.publicadoEn || !control.activoId) throw falloFinanzas("FINANZAS_SIN_CARGA_COMPLETA", "Esta información aún no completó su primera carga", 503);
-  if (version && version !== control.activoId) throw falloFinanzas("VERSION_FINANCIERA_CAMBIO", "La información cambió; reinicie la consulta");
+  if (version && version !== revisionFinanciera(control)) throw falloFinanzas("VERSION_FINANCIERA_CAMBIO", "La información cambió; reinicie la consulta");
   return { control, where: { entidad, version: snapshotFinanciero(entidad, control.configuracion) ? control.activoId : "actual" },
-    meta: { version: control.activoId, ultimaCargaCompleta: control.publicadoEn, enActualizacion: !control.finalizadoEn,
+    meta: { version: revisionFinanciera(control), ultimaCargaCompleta: control.publicadoEn, enActualizacion: !control.finalizadoEn,
+      ultimaActualizacionParcial: control.configuracion.periodica?.actualizadaEn ?? null,
+      actualizacionPeriodicaParcial: Boolean(control.configuracion.periodica),
       inicioLectura: control.lecturaPublicadaDesde, desdeDocumentos: control.configuracion.desde,
       monedaLocal: control.configuracion.monedaLocal, monedaSistema: control.configuracion.monedaSistema,
       validadoContraSap: false, criterio: "Lectura paginada de SAP; no es una instantánea transaccional de SAP",
@@ -20,11 +23,12 @@ export async function contextoFinanciero(entidad, version) {
         advertencia: "Carga puntual sin conciliaciones ni partidas abiertas verificadas. Importes no disponibles: null. Monedas confirmadas manualmente." } : {}) } };
 }
 export async function listarFinanzas(entidad, query) {
-  const { where, meta } = await contextoFinanciero(entidad, query.version);
+  const { control, where, meta } = await contextoFinanciero(entidad, query.version);
   if (query.cardCode) where.cardCode = query.cardCode;
   if (query.cursor) where.clave = { gt: query.cursor };
   if (query.desde || query.hasta) where.fecha = { ...(query.desde ? { gte: new Date(query.desde) } : {}), ...(query.hasta ? { lte: new Date(query.hasta) } : {}) };
   const filas = await repo.listar(where, query.limit + 1);
+  if (revisionFinanciera(await repo.control(entidad)) !== revisionFinanciera(control)) throw falloFinanzas("VERSION_FINANCIERA_CAMBIO", "Reinicie la consulta; cambiaron los datos");
   const hayMas = filas.length > query.limit;
   if (hayMas) filas.pop();
   const data = filas.map(({ datos }) => ["facturas", "notasCredito", "cuotas"].includes(entidad) ? { ...datos,
@@ -66,7 +70,7 @@ export async function consultarCartera(cardCode) {
 export async function consultarEstadoCuenta(cardCode, query) {
   const { control, where, meta } = await contextoFinanciero("movimientos", query.version);
   if (!control.finalizadoEn) throw falloFinanzas("FINANZAS_EN_ACTUALIZACION", "Espere a que termine la actualización del estado de cuenta", 503);
-  const hastaDisponible = new Date(control.publicadoEn).toISOString().slice(0, 10);
+  const hastaDisponible = new Date(control.configuracion.periodica?.actualizadaEn ?? control.publicadoEn).toISOString().slice(0, 10);
   if (query.hasta > hastaDisponible || query.desde < control.configuracion.desde) throw falloFinanzas("PERIODO_NO_DISPONIBLE", "Período fuera del alcance confirmado", 400);
   const inicial = await repo.sumar({ ...where, cardCode, fecha: { lt: new Date(query.desde) } });
   const periodoWhere = { ...where, cardCode, fecha: { gte: new Date(query.desde), lte: new Date(query.hasta) } };
@@ -77,7 +81,7 @@ export async function consultarEstadoCuenta(cardCode, query) {
   if (hayMas) filas.pop();
   // Una actualización concurrente invalida el resultado, en lugar de mezclar cortes.
   const despues = await repo.control("movimientos");
-  if (despues.recorridoId !== control.recorridoId || !despues.finalizadoEn) throw falloFinanzas("VERSION_FINANCIERA_CAMBIO", "Reinicie la consulta después de la actualización");
+  if (despues.recorridoId !== control.recorridoId || revisionFinanciera(despues) !== revisionFinanciera(control) || !despues.finalizadoEn) throw falloFinanzas("VERSION_FINANCIERA_CAMBIO", "Reinicie la consulta después de la actualización");
   return { data: { cardCode, moneda: meta.monedaLocal, desde: query.desde, hasta: query.hasta,
     saldoInicial: importe(neto(inicial)), cargos: String(periodo._sum.debe ?? "0"), abonos: String(periodo._sum.haber ?? "0"),
     saldoFinal: importe(neto(inicial) + neto(periodo)), movimientos: filas.map(r => r.datos) },

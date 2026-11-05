@@ -6,9 +6,12 @@ import { estadoFinanzas, iniciarFinanzas, recibirFinanzas, finalizarFinanzas, fa
 import { listarFinanzas, consultarCartera, consultarEstadoCuenta } from "./finanzas.consultas.js";
 import { finanzasRepository } from "./finanzas.repository.js";
 import { exigirConsultaFinanciera } from "./finanzas.permisos.js";
+import { estadoPeriodico, recibirActualizacion } from "./finanzas.periodicas.js";
 const envolver = fn => async (req, res, next) => { try { res.json(await fn(req)); } catch (e) { next(e); } };
 export const ingresoFinanzas = Router();
 ingresoFinanzas.use(requireBridgeAuth);
+ingresoFinanzas.get("/actualizacion/estado", envolver(async req => ({ data: await estadoPeriodico(req.empresaSap) })));
+ingresoFinanzas.post("/actualizacion/documento", envolver(async req => ({ data: await recibirActualizacion(req.body, req.empresaSap) })));
 for (const entidad of nombresFinanzas) {
   ingresoFinanzas.get(`/${entidad}/estado`, envolver(async req => ({ data: await estadoFinanzas(entidad, req.empresaSap) })));
   for (const [accion, fn] of Object.entries({ iniciar: iniciarFinanzas, lote: recibirFinanzas, finalizar: finalizarFinanzas })) {

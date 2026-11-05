@@ -5,7 +5,7 @@ import { unidades, importe } from "../../shared/finanzas/decimal.js";
 import { leerFinanzas } from "./finanzas.lectura-tablas.js";
 
 export const finanzasRepository = {
-  conBloqueo: fn => sincronizacionRepository.conBloqueo(fn),
+  conBloqueo: (fn, db) => sincronizacionRepository.conBloqueo(fn, db),
   async otraEmpresa(empresa, tx) {
     return await sincronizacionRepository.existeOtraEmpresa(empresa, tx) ||
       Boolean(await tx.finanzaControl.findFirst({ where: { empresa: { not: empresa } }, select: { entidad: true } }));
