@@ -1,5 +1,5 @@
 import { TABLAS_FINANZAS, ENTIDADES_NORMALIZABLES, datosParaTabla, datosDesdeTabla, columna, tipoCampo } from "./finanzas.tablas.js";
-import { FINANZAS, snapshotFinanciero } from "../../shared/finanzas/contratos.js";
+import { FINANZAS, snapshotFinanciero, claveRegistro as claveRegistroNormalizado } from "../../shared/finanzas/contratos.js";
 import { unidades } from "../../shared/finanzas/decimal.js";
 import { Prisma } from "../../../generated/prisma/client.js";
 
@@ -79,6 +79,19 @@ async function guardarTanda(entidad, registros, version, control, tx, facturas) 
   await tx.$executeRaw(Prisma.sql`INSERT INTO ${identificador(tabla.nombre)} AS destino
     (${Prisma.join(columnas.map(identificador))}) VALUES ${Prisma.join(valores)}
     ON CONFLICT (${Prisma.join(claves.map(identificador))}) DO UPDATE SET ${Prisma.join(cambios)}`);
+}
+
+// Reutilizado por el receptor periódico dentro de SU transacción (JSON + tablas + acuse).
+export async function guardarNormalizados(entidad, registros, version, control, tx) {
+  const facturas = await prepararRelaciones(entidad, registros, tx);
+  await guardarTanda(entidad, registros, version, control, tx, facturas);
+  const claves = registros.map(r => claveRegistroNormalizado(entidad, r));
+  const filas = await tx[TABLAS_FINANZAS[entidad].modelo].findMany({ where: { finVersion: version, finClave: { in: claves } } });
+  const porClave = new Map(filas.map(r => [r.finClave, r]));
+  for (const r of registros) {
+    const fila = porClave.get(claveRegistroNormalizado(entidad, r));
+    if (!fila || !equivalentes(entidad, r, datosDesdeTabla(entidad, fila))) throw fallo("VERIFICACION_FINANCIERA_FALLIDA", entidad);
+  }
 }
 
 // Una tanda es una transacción: tablas, comprobación y cursor avanzan juntos.

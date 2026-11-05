@@ -12,7 +12,7 @@ for /f %%f in ('powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd"') d
 set "REGISTRO=logs\puente-%HOY%.log"
 
 echo {"evento":"inicio","hora":"%DATE% %TIME%"} >> "%REGISTRO%"
-node --env-file=.env.puente puente\ejecutar.js --once %* >> "%REGISTRO%" 2>&1
+node --env-file=.env.puente puente\ejecutar-produccion.js %* >> "%REGISTRO%" 2>&1
 set "CODIGO=%ERRORLEVEL%"
 echo {"evento":"fin","codigo":%CODIGO%,"hora":"%DATE% %TIME%"} >> "%REGISTRO%"
 
