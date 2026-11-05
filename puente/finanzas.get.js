@@ -24,6 +24,23 @@ export async function leerJsonFinancieroGet(respuesta) {
   } catch { throw new ErrorPuente("JSON_FINANCIERO_INVALIDO"); }
 }
 function convertir(m, dato) { return Object.fromEntries(Object.entries(m).map(([destino, origen]) => [destino, dato[origen]])); }
+
+// Un documento completo para actualización atómica; no trunca sus colecciones a 50 filas.
+export function convertirDocumentoGet(def, dato) {
+  if (!def.coleccion) return [{ ...convertir(def.mapa, dato), ...def.completar?.(dato) }];
+  const lineas = dato[def.coleccion];
+  if (!Array.isArray(lineas) || lineas.length > 2000 || Object.keys(dato).some(k => /nextLink$/i.test(k)) ||
+      lineas.some(l => !Number.isSafeInteger(l[def.claveLinea]) || l[def.claveLinea] < 0) ||
+      new Set(lineas.map(l => l[def.claveLinea])).size !== lineas.length) throw new ErrorPuente("COLECCION_FINANCIERA_INCOMPLETA");
+  return [...lineas].sort((a, b) => a[def.claveLinea] - b[def.claveLinea]).map(l => {
+    const r = { ...convertir(def.mapa, dato), ...convertir(def.mapaLinea, l), ...def.completar?.(dato) };
+    if (def.nombre === "movimientos") {
+      if (!(typeof r.tipo === "string" && r.tipo.trim() || Number.isSafeInteger(r.tipo))) throw new ErrorPuente("FINANZA_SAP_INVALIDA");
+      r.tipo = String(r.tipo);
+    }
+    return r;
+  });
+}
 function bandera(v) {
   if (["tYES", "Y"].includes(v)) return "Y";
   if (["tNO", "N"].includes(v)) return "N";
